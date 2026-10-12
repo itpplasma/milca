@@ -943,8 +943,8 @@ add_test(NAME gs_mini_case_regression COMMAND ${CMAKE_COMMAND}
     -DFIXTURES=${CMAKE_SOURCE_DIR}/test/fixtures/mini_case
     -DWORK=${CMAKE_BINARY_DIR}/gs_mini_case
     -P ${CMAKE_SOURCE_DIR}/test/gs_mini_case.cmake)
-set_tests_properties(gs_mini_case_regression PROPERTIES TIMEOUT 300 PROCESSORS 4
-    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;MKL_NUM_THREADS=1")
+set_tests_properties(gs_mini_case_regression PROPERTIES TIMEOUT 300
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;MKL_NUM_THREADS=1")
 
 # K-C1/L3: 3D polyline coils, per-n Fourier projection, vacuum b_mn (L3).
 target_sources(kin6d PRIVATE src/coils_3d.f90 src/vacuum_surfaces.f90)
