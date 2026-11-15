@@ -92,8 +92,12 @@ couples to radiation transport instead of closing locally.
 bremsstrahlung, synchrotron emission with wall reflection (Trubnikov 1979) and
 Compton scattering. The emission side runs: cyclotron and synchrotron emission
 harmonic by harmonic (Schott) and the thermal emissivity j(ω, θ) of a Juttner
-plasma (`milca_cyclotron_emission`), both reproducing the Larmor power; the
-absorption by Kirchhoff's law and the transport with reflecting walls follow.
+plasma (`milca_cyclotron_emission`), both reproducing the Larmor power. The
+absorption follows by Kirchhoff's law, and a slab with reflecting walls
+weights the emission with the escape factor (1 - R)(1 - e^-τ)/(τ(1 - R e^-τ))
+(`milca_synchrotron_transport`), which reaches the thin emission and the
+blackbody flux of the walls in its limits; the opacity parameter is
+Trubnikov's Λ = ω_pe² L/(ω_c c).
 
 **Q6. Losses in fluid and transport models.** Emissivities and loss rates for
 relativistic Maxwellian and non-Maxwellian electrons, reduced from Q2, Q4 and
