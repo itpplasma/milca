@@ -15,8 +15,14 @@
 !! row is then zero), then with hp adaptation the largest final mesh error
 !! estimate |eta|/|R + eta| and the number of seed and check energies whose
 !! refinement stopped before the tolerance, and the largest number of unknowns
-!! of their meshes (all 0 without it). The program
-!! ends with an error when any status is not 0.
+!! of their meshes (all 0 without it), then dV/ds up to a constant factor
+!! and, with finite orbit width on more than one surface and no deposit
+!! line, the torque density in real space [N m/m^3] on the bin of the surface
+!! (orbits deposit their torque where they are, in proportion to the time
+!! spent there). With a deposit line, each row ends with the torque density
+!! of its psi* surface split over the N + 1 bins (below the first edge,
+!! between edges, above the last), summing to the torque density. The
+!! program ends with an error when any status is not 0.
 program ntv_profile
     use, intrinsic :: iso_fortran_env, only: dp => real64, error_unit
     use milca_boozer_file, only: boozer_file_t, load_boozer_file, BOOZER_OK
@@ -51,13 +57,18 @@ program ntv_profile
     end if
     do i = 1, ns
         do a = 1, nsp
-            print '(f12.8,i3,5es18.9,2i8,5es18.9,i3,es12.3,i4,i9)', prof%s(i), a, &
+            write (*, '(f12.8,i3,5es18.9,2i8,5es18.9,i3,es12.3,i4,i9,2es18.9)', &
+                advance='no') prof%s(i), a, &
                 result(i, a)%k11, &
                 result(i, a)%k12, result(i, a)%dpsi_dr, result(i, a)%gamma_psi, &
                 result(i, a)%torque, result(i, a)%factorisations, result(i, a)%iterations, &
                 result(i, a)%k21, result(i, a)%k22, result(i, a)%heat_flux, &
                 result(i, a)%offset_rotation, result(i, a)%lost_weight, result(i, a)%status, &
-                result(i, a)%mesh_error, result(i, a)%unsettled, result(i, a)%mesh_unknowns
+                result(i, a)%mesh_error, result(i, a)%unsettled, result(i, a)%mesh_unknowns, &
+                result(i, a)%vprime, result(i, a)%torque_real
+            if (allocated(res%deposit_edges) .and. allocated(result(i, a)%deposit)) &
+                write (*, '(*(es18.9))', advance='no') result(i, a)%deposit
+            write (*, '(a)') ''
         end do
     end do
     write (error_unit, '(a,f10.2)') 'wall s ', real(c1 - c0, dp)/rate

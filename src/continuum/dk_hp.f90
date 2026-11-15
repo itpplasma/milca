@@ -80,6 +80,9 @@ module milca_dk_hp
         ! perturbation and point at one (theta, xi), for geometries that
         ! share work between them.
         procedure :: point_source => field_point_source
+        ! The flux label s of the orbit point at (theta, xi), or -1 where the
+        ! point lies on the surface itself (thin orbits).
+        procedure :: position => field_position
     end type
 
     abstract interface
@@ -328,9 +331,13 @@ contains
         !$omp end parallel do
         allocate (sys%drive(sys%n, 4), sys%density(sys%n))
         sys%drive = 0; sys%density = 0
+        ! Node by node: at the X point several nodes of one element share an
+        ! unknown, and a vector-subscript update would keep only one of them.
         do e = 1, n_el
-            sys%drive(sys%loc(:, e), :) = sys%drive(sys%loc(:, e), :) + sys%load(:, :, e)
-            sys%density(sys%loc(:, e)) = sys%density(sys%loc(:, e)) + sys%dens(:, e)
+            do i = 1, n_loc
+                sys%drive(sys%loc(i, e), :) = sys%drive(sys%loc(i, e), :) + sys%load(i, :, e)
+                sys%density(sys%loc(i, e)) = sys%density(sys%loc(i, e)) + sys%dens(i, e)
+            end do
         end do
         sys%norm = sum(sys%density)
         status = HP_OK
@@ -678,14 +685,18 @@ contains
     !> Flux kernel R = int dtheta dxi (2/b)(1 + wsign xi^2)/b Re(S^* F) of one
     !! toroidal harmonic (the kernel of milca_dk_ntv), op%k the constant
     !! b.grad theta (k_power = 0) or k b (k_power = 1). Without a null space
-    !! the complex system is solved directly.
-    subroutine hp_ntv_kernel(f, mesh, op, r, status, n_dof)
+    !! the complex system is solved directly. With edges (increasing flux
+    !! labels), dep(b) is the part of R whose quadrature points lie at f%position
+    !! in bin b (below edges(1), between edges, above the last); sum(dep) = R.
+    subroutine hp_ntv_kernel(f, mesh, op, r, status, n_dof, edges, dep)
         class(hp_geometry_t), intent(in) :: f
         type(hp_mesh_t), intent(in) :: mesh
         type(hp_operator_t), intent(in) :: op
         real(dp), intent(out) :: r
         integer, intent(out) :: status
         integer, intent(out), optional :: n_dof
+        real(dp), intent(in), optional :: edges(:)
+        real(dp), intent(out), optional :: dep(:)
         type(hp_system_t) :: sys
         type(ntv_factor_t) :: fac
         complex(dp), allocatable :: mat(:, :), x(:)
@@ -700,7 +711,81 @@ contains
         call ntv_free(fac)
         if (status /= HP_OK) return
         r = real(sum(sys%drive(:, 4)*x), dp)
+        if (present(edges) .and. present(dep)) call ntv_deposit(f, mesh, op, sys, x, edges, dep)
     end subroutine hp_ntv_kernel
+
+    !> The torque functional of hp_ntv_kernel split by where its quadrature
+    !! points lie: the same tensor Gauss rule as the load of drive 4 in element,
+    !! so that the bins sum to Re sum(drive(:, 4) x) up to rounding. A finite
+    !! orbit spends time in proportion to the measure at each of its points, so
+    !! this is the torque deposited where the orbit is, not on its psi*.
+    subroutine ntv_deposit(f, mesh, op, sys, x, edges, dep)
+        class(hp_geometry_t), intent(in) :: f
+        type(hp_mesh_t), intent(in) :: mesh
+        type(hp_operator_t), intent(in) :: op
+        type(hp_system_t), intent(in) :: sys
+        complex(dp), intent(in) :: x(:)
+        real(dp), intent(in) :: edges(:)
+        real(dp), intent(out) :: dep(:)
+        integer :: p, nq, n_col, n_lev, n_row, ec, er, e, c, q1, q2, a1, a2
+        integer, allocatable :: curve_kind(:)
+        real(dp), allocatable :: curve_val(:), node(:), wn(:), xq(:), wq(:), phi(:, :), &
+            xi_q(:, :)
+        real(dp) :: th_a, th, d, xi_lo, xi_hi, xi_b, xi, ww, col, dr, de, den, phase, &
+            precess, drive, torque, s
+        complex(dp) :: src, xh
+        complex(dp), allocatable :: xl(:, :)
+
+        dep = 0
+        p = mesh%p
+        nq = 2*p + 3
+        n_col = size(mesh%theta) - 1
+        n_lev = size(mesh%lam)
+        curve_val = [mesh%lam(1:n_lev - 1), mesh%zeta, mesh%lam(n_lev - 1:1:-1)]
+        curve_kind = [(-1, c=1, n_lev - 1), (0, c=1, size(mesh%zeta)), (1, c=1, n_lev - 1)]
+        n_row = size(curve_val) - 1
+        allocate (node(p + 1), wn(p + 1), xq(nq), wq(nq), phi(p + 1, nq), &
+            xi_q(n_row + 1, nq), xl(p + 1, p + 1))
+        call gauss_lobatto_legendre(p + 1, node, wn)
+        call gauss_legendre(nq, xq, wq)
+        do q1 = 1, nq
+            call lagrange_weights(p + 1, xq(q1), node, phi(:, q1))
+        end do
+        do ec = 1, n_col
+            th_a = (mesh%theta(ec + 1) - mesh%theta(ec))/2
+            do c = 1, n_row + 1
+                do q1 = 1, nq
+                    th = mesh%theta(ec) + th_a*(1 + xq(q1))
+                    call f%level(curve_kind(c), curve_val(c), th, xi_q(c, q1), d)
+                end do
+            end do
+            do er = 1, n_row
+                e = ec + (er - 1)*n_col
+                xl = reshape(x(sys%loc(:, e)), [p + 1, p + 1])
+                do q1 = 1, nq
+                    th = mesh%theta(ec) + th_a*(1 + xq(q1))
+                    xi_lo = xi_q(er, q1)
+                    xi_hi = xi_q(er + 1, q1)
+                    xi_b = (xi_hi - xi_lo)/2
+                    do q2 = 1, nq
+                        xi = xi_lo + xi_b*(1 + xq(q2))
+                        ww = wq(q1)*wq(q2)*th_a*xi_b
+                        call f%point_source(th, xi, op, src, col, dr, de, den, phase, &
+                            precess, drive, torque)
+                        xh = 0
+                        do a2 = 1, p + 1
+                            do a1 = 1, p + 1
+                                xh = xh + phi(a1, q1)*phi(a2, q2)*xl(a1, a2)
+                            end do
+                        end do
+                        s = f%position(th, xi)
+                        c = 1 + count(edges <= s)
+                        dep(c) = dep(c) + real(ww*torque*conjg(src)*xh, dp)
+                    end do
+                end do
+            end do
+        end do
+    end subroutine ntv_deposit
 
     !> hp_ntv_kernel with the dual-weighted residual estimate eta of the
     !! error of R: the primal and adjoint solutions of the mesh are
@@ -1080,6 +1165,12 @@ contains
         call g%point(th, xi, op, collide, drive_r, drive_e, density, phase, precess, drive, &
             torque)
     end subroutine field_point_source
+
+    real(dp) function field_position(g, th, xi) result(s)
+        class(hp_geometry_t), intent(in) :: g
+        real(dp), intent(in) :: th, xi
+        s = -1
+    end function field_position
 
     complex(dp) function op_perturbation(g, th, xi, op) result(src)
         class(hp_geometry_t), intent(in) :: g
