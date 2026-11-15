@@ -1,0 +1,21 @@
+#!/bin/sh
+# Nightly run on fortyard: every test, the slow ones included, then the slow
+# jobs of ci/nightly-jobs.json one after another. Fails when any of them fails.
+set -u
+export OPENBLAS_NUM_THREADS=1 MPLBACKEND=Agg
+failed=
+fo build && FO_TEST_RERUN=1 fo test --all || failed="$failed tests"
+jobs=$(python3 -I -c 'import json, sys
+for name, command in json.load(open(sys.argv[1])).items():
+    print(name + "\t" + command)' ci/nightly-jobs.json) || exit 1
+tab=$(printf '\t')
+while IFS="$tab" read -r name command; do
+    echo "=== nightly job: $name"
+    bash -euo pipefail -c "$command" < /dev/null || failed="$failed [$name]"
+done <<JOBS
+$jobs
+JOBS
+if [ -n "$failed" ]; then
+    echo "failed:$failed"
+    exit 1
+fi

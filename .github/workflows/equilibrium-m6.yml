@@ -40,9 +40,6 @@ jobs:
           ci/run.sh equilibrium-m6-d8
         env:
           SCI_MATRIX_LANE: psi
-      - name: Check the nightly triage
-        if: ${{ !github.event.pull_request.head.repo.fork }}
-        run: python3 ci/test_nightly_triage.py
       - name: Bundle exact sources for Slurm
         if: ${{ !github.event.pull_request.head.repo.fork && (github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
         env:
