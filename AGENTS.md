@@ -348,9 +348,18 @@ These rules are hard constraints:
 
 MILCA lands fast and fixes later, when it is applied in depth; it claims no
 universal correctness, and errors that a whole AI workflow shares are found by
-later studies and benchmarks. A new physics feature lands once it has a use
-case and tests that exercise it. The following complete it over time, as its
-application demands; they are aims, not landing conditions:
+later studies and benchmarks. Speed never compromises the philosophy, the
+design, a clean architecture or the choice of the best physics models and
+numerics available: the non-negotiable principles above, generated pointwise
+kernels, the layering and the library boundaries hold for every landing, and
+a landing never settles for a weaker model or method to save time. The best
+model or method is the one that answers the question at the requested
+accuracy and is founded on the more fundamental models it reduces from, not
+the most elaborate one. Limits, asymptotic expansions and expected scalings
+that serve as checks are derived, with FortSym where possible, or taken from a
+cited derivation; they are never guessed. A new physics feature lands once it
+has a use case and tests that exercise it. The following complete it over
+time, as its application demands; they are aims, not landing conditions:
 
 1. a concrete scientific or teaching use case;
 2. a complete mathematical model and coupling/energy/source ledger;
