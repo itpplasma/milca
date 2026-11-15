@@ -360,6 +360,7 @@ milca_test_labels(positronium_formation fast CLASSES quantum pairs TARGETS test_
 milca_test_labels(cyclotron_emission fast CLASSES quantum TARGETS test_cyclotron_emission)
 milca_test_labels(synchrotron_transport fast CLASSES quantum TARGETS test_synchrotron_transport)
 milca_test_labels(thermal_compton fast CLASSES quantum TARGETS test_thermal_compton)
+milca_test_labels(plummer_equilibrium fast CLASSES classical TARGETS test_plummer)
 milca_test_labels(qed_ee_power slow CLASSES quantum TARGETS test_qed_ee_power)
 if(MILCA_FORTSYM_BUILD)
     milca_test_labels(qed_leaf_regeneration fast CLASSES quantum TARGETS gen_qed)

@@ -1779,6 +1779,9 @@ add_test(NAME synchrotron_transport COMMAND test_synchrotron_transport)
 add_executable(test_thermal_compton test/test_thermal_compton.f90)
 target_link_libraries(test_thermal_compton PRIVATE milca)
 add_test(NAME thermal_compton COMMAND test_thermal_compton)
+add_executable(test_plummer test/test_plummer.f90)
+target_link_libraries(test_plummer PRIVATE milca)
+add_test(NAME plummer_equilibrium COMMAND test_plummer)
 add_executable(test_qed_ee_power test/test_qed_ee_power.f90)
 target_link_libraries(test_qed_ee_power PRIVATE milca)
 add_test(NAME qed_ee_power COMMAND test_qed_ee_power)
@@ -1977,7 +1980,8 @@ if(MILCA_FORTSYM_BUILD)
 endif()
 target_sources(milca_pairs PRIVATE src/generated/milca_quantum_classical_leaves.f90
     src/pairs/pair_law.f90)
-target_sources(milca_classical PRIVATE src/classical/classical_cell.f90)
+target_sources(milca_classical PRIVATE src/classical/classical_cell.f90
+    src/classical/self_gravity.f90)
 target_sources(milca_quantum PRIVATE src/quantum/quantum_pair_cell.f90
     src/quantum/quantum_classical_map.f90)
 set_source_files_properties(src/generated/milca_quantum_classical_leaves.f90

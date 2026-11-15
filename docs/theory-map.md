@@ -241,7 +241,7 @@ Gravity ([gravity](gravity.md)):
 |---|---|---|---|
 | G0 general relativity -> G1 post-Newtonian | v²/c², G M/(r c²) | binary orbits and perihelion advance; 3+1 against Einstein-Infeld-Hoffmann | planned |
 | G1 -> G2 Newtonian | v²/c² | 1PN corrections vanish at the stated order | planned |
-| G2 N-body -> G3 Vlasov-Poisson | 1/N | Plummer-sphere equilibrium, Jeans growth rate, cold collapse; two-body relaxation time against the Chandrasekhar operator | planned |
+| G2 N-body -> G3 Vlasov-Poisson | 1/N | Plummer-sphere equilibrium (energies 3π/64 and -3π/32, virial ratio and half-mass radius over five time units, `plummer_equilibrium`); Jeans growth rate, cold collapse; two-body relaxation time against the Chandrasekhar operator | Plummer equilibrium runs; rest planned |
 | gravity <-> plasma many-body code | sign of the coupling | the same fast-multipole and Ewald sums with reversed sign reproduce the Coulomb results with charges of one sign | planned |
 | fuzzy dark matter -> cold dark matter | ħ/(m L v) | Schrödinger-Poisson -> Vlasov-Poisson through the Wigner map (as the quantum branch's Wigner -> Vlasov edge) | planned |
 | self-interacting -> cold dark matter | σ/m | collision operator off reproduces collisionless dynamics | planned |
