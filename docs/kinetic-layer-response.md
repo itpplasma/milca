@@ -98,6 +98,23 @@ that KIM writes for an ASDEX Upgrade pedestal case (harmonic (6, 2), 512 points,
 M = 225, inputs not public), Phi, the electron and ion parallel currents and the
 integrated shielding current agree with KIM's local periodic branch to 4e-5
 within 1.5 cm of the resonant surface; the Boltzmann gyroaverage that KIM omits
-changes the integrated current by 1.6e-4 there. Next: the periodised background
-from profiles (force balance, collision frequencies) and an ITER case.
+changes the integrated current by 1.6e-4 there.
+
+`milca_kinetic_layer_window` builds the window from radial profiles (n_e, T_e,
+T_i, q, E_r against the effective radius): cubic splines of the profiles, the
+cylinder force balance du/dr = -2 r u/(q^2 R0^2 + r^2) - 8 pi dp/dr for
+u = B0^2 from the vacuum value at the first radius, the geometry k_par, k_s,
+omega_E and B0 of that true equilibrium, and the periodic continuation of
+profiles and geometry as functions (`fortnum_periodize`), so that the core of
+the window is the true background; integrating the force balance through the
+blended profiles would add the artificial pressure gradient of the
+transition bands to B0. Collision frequencies follow KIM after KAMEL#399.
+`kl_profiles` runs the whole chain from profile files. Checks
+(`kinetic_layer_window`): closed-form B0 and wavenumbers for constant q
+without pressure, the given profiles on the core, continuity at the window
+edge and the diamagnetic drop 8 pi Delta p of B0^2. On the ASDEX Upgrade case
+the window matches KIM's to 1e-8 in the geometry and 1e-11 in the profiles
+and collision frequencies, and Phi, j_par and the integrated shielding
+current from the profiles agree with KIM to 2e-5. Next: the kinetic layer
+closure of the per-n torus response and an ITER case.
 

@@ -23,7 +23,7 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
 include_directories(${CMAKE_Fortran_MODULE_DIRECTORY})
 # Dependency pins: one source used by FetchContent and by result provenance.
 set(MILCA_FORTPLOT_REVISION "1645fa41c11b5786c71bc27e5b41dae7c7bbba23")
-set(MILCA_FORTNUM_REVISION "558b2f9f747641e2ab1fb206e7be9131be9a51f0")
+set(MILCA_FORTNUM_REVISION "fe1e48772f7a41304d67ad626fa7158a452a8169")
 set(MILCA_FORTIO_REVISION 38add03dc691a7cd4715cd3e611ad42422e46091)
 set(FORTPLOT_BUILD_FORTARRAY_ADAPTER OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(fortplot
@@ -276,6 +276,7 @@ target_sources(milca_classical PRIVATE src/classical/ocp.f90 src/classical/pair_
     src/generated/milca_cloud_leaves.f90 src/classical/microscopic_cloud.f90)
 target_sources(milca_continuum PRIVATE src/continuum/vlasov_response.f90
     src/continuum/ou_susceptibility.f90 src/continuum/kinetic_layer_cylinder.f90
+    src/continuum/kinetic_layer_window.f90
     src/generated/milca_poisson_leaves.f90 src/continuum/poisson_laboratory.f90
     src/generated/milca_fp_leaves.f90 src/continuum/fp_laboratory.f90
     src/generated/milca_fp_relaxation_leaves.f90 src/continuum/fp_relaxation.f90
@@ -1746,6 +1747,9 @@ add_test(NAME beliaev_budker_coefficients COMMAND test_beliaev_budker)
 add_executable(test_ou_susceptibility test/test_ou_susceptibility.f90)
 target_link_libraries(test_ou_susceptibility PRIVATE milca)
 add_test(NAME ou_susceptibility COMMAND test_ou_susceptibility)
+add_executable(test_kinetic_layer_window test/test_kinetic_layer_window.f90)
+target_link_libraries(test_kinetic_layer_window PRIVATE milca)
+add_test(NAME kinetic_layer_window COMMAND test_kinetic_layer_window)
 add_executable(test_kinetic_layer_cylinder test/test_kinetic_layer_cylinder.f90)
 target_link_libraries(test_kinetic_layer_cylinder PRIVATE milca)
 add_test(NAME kinetic_layer_cylinder COMMAND test_kinetic_layer_cylinder)
@@ -1867,6 +1871,8 @@ add_executable(ntv_profile app/ntv_profile.f90)
 target_link_libraries(ntv_profile PRIVATE milca_ntv_geometry)
 add_executable(kl_cylinder app/kl_cylinder.f90)
 target_link_libraries(kl_cylinder PRIVATE milca)
+add_executable(kl_profiles app/kl_profiles.f90)
+target_link_libraries(kl_profiles PRIVATE milca)
 add_executable(ntv_axisymmetric_profile app/ntv_axisymmetric_profile.f90)
 target_link_libraries(ntv_axisymmetric_profile PRIVATE milca_ntv_geometry)
 add_executable(ntv_indicator_profile app/ntv_indicator_profile.f90)
