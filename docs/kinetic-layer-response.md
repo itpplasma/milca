@@ -152,10 +152,13 @@ Checks before landing, in this order:
    the fix of KIM's Ampere operator, itpplasma/KAMEL#414). The constant-psi
    Delta from the electrostatic current (B^r uniform across the layer) agrees
    with the electromagnetic one to 2 % in the real and 18 % in the imaginary
-   part: that layer is strongly shielded (B^r(r_s) is 4 % of its edge value),
-   so psi changes by a factor of about 2 within 0.5 cm. A response to the
-   slope of psi as well as to its value would remove this limitation of the
-   constant-psi matching, which KIM's own coupling to QL-Balance shares.
+   part. This gap is not the variation of psi across the strongly shielded
+   layer (B^r(r_s) is 4 % of its edge value): MILCA's kernels driven by the
+   electromagnetic run's own B^r(r) give a net current within 2 % of the
+   constant-psi one, but 14 % below the current of that run in magnitude.
+   The electromagnetic run uses KIM's non-periodic kernels, the periodic
+   electrostatic branch (which MILCA reproduces to 2e-5) its periodic ones;
+   the difference between the two KIM branches on this case is open.
    `milca_kinetic_layer_delta` (`kl_delta`) returns Delta and I_par per gauss
    for the profiles of one rational surface.
 2. Cylinder to torus (implemented as `closure = 'kinetic'` of
