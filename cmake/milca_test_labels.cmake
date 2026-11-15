@@ -344,6 +344,7 @@ milca_test_labels(quantum_cutoff_oracles fast CLASSES quantum
 milca_test_labels(relativistic_fermi_gas_oracles fast CLASSES quantum
     TARGETS test_relativistic_fermi_gas)
 milca_test_labels(qed_tree_level fast CLASSES quantum TARGETS test_qed_tree)
+milca_test_labels(fusion_reactivity fast CLASSES quantum TARGETS test_fusion_reactivity)
 milca_test_labels(qed_bremsstrahlung fast CLASSES quantum TARGETS test_qed_bremsstrahlung)
 milca_test_labels(qed_bremsstrahlung_rates fast CLASSES quantum
     TARGETS test_qed_bremsstrahlung_rates)
@@ -352,6 +353,8 @@ milca_test_labels(qed_thermal fast CLASSES quantum TARGETS test_qed_thermal)
 milca_test_labels(qed_ee_power slow CLASSES quantum TARGETS test_qed_ee_power)
 if(MILCA_FORTSYM_BUILD)
     milca_test_labels(qed_leaf_regeneration fast CLASSES quantum TARGETS gen_qed)
+    milca_test_labels(fusion_reactivity_leaf_regeneration fast CLASSES quantum
+        TARGETS gen_fusion_reactivity)
     milca_test_labels(radiation_reaction_leaf_regeneration fast CLASSES quantum
         TARGETS gen_radiation_reaction)
 endif()

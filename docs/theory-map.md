@@ -225,7 +225,7 @@ Nuclear reactions ([nuclear reactions](nuclear-reactions.md)):
 |---|---|---|---|
 | pionless EFT <-> Reid potential for pp | momentum/pion mass | S_pp(0) and Λ² agree within the EFT order ([pp fusion](pp-fusion.md), [EFT](pp-fusion-eft.md)) | limit-checked |
 | N0/N1 -> N2 R-matrix -> N3 S factor | energy range of the fit | S(E) of the microscopic model against R-matrix fits and measured cross sections (D-T, D-³He, p-¹¹B) | planned |
-| N3 -> Maxwellian reactivity | none, quadrature | Bosch-Hale (1992); p-¹¹B against Nevins-Swain (2000) and Sikora-Weller (2016) | planned |
+| N3 -> Maxwellian reactivity | none, quadrature | integrated Bosch-Hale S factor against their reactivity fit, 0.2-0.75 % (`fusion_reactivity`); p-¹¹B from the S factor of Wang et al. (2026), against Nevins-Swain (2000) and Sikora-Weller (2016) to come | limit-checked |
 | N4 non-Maxwellian kernels -> N3 | distance of f from a Maxwellian | kernel applied to a Maxwellian returns the N3 reactivity; beam-target limit | planned |
 | N5 nuclear elastic -> Coulomb | nuclear/Coulomb amplitude ratio | interference-free Rutherford limit at low energy and large impact parameter | planned |
 | plasma screening -> quantum plasma | coupling Γ, degeneracy | Salpeter weak-screening enhancement from the screening hierarchy | planned |

@@ -1686,6 +1686,14 @@ if(MILCA_FORTSYM_BUILD)
         -DWORK=${CMAKE_BINARY_DIR}/radiation-reaction-regeneration
         -DLEAF=milca_radiation_reaction_leaves.f90
         -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
+    add_executable(gen_fusion_reactivity gen/gen_fusion_reactivity.f90)
+    target_link_libraries(gen_fusion_reactivity PRIVATE milca_gen_support)
+    add_test(NAME fusion_reactivity_leaf_regeneration COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:gen_fusion_reactivity>
+        -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_fusion_reactivity_leaves.f90
+        -DWORK=${CMAKE_BINARY_DIR}/fusion-reactivity-regeneration
+        -DLEAF=milca_fusion_reactivity_leaves.f90
+        -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
     add_executable(gen_qed gen/gen_qed.f90)
     target_link_libraries(gen_qed PRIVATE milca_gen_support)
     add_test(NAME qed_leaf_regeneration COMMAND ${CMAKE_COMMAND}
@@ -1698,6 +1706,13 @@ endif()
 target_sources(milca_quantum PRIVATE src/generated/milca_radiation_reaction_leaves.f90)
 set_source_files_properties(src/generated/milca_radiation_reaction_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
+target_sources(milca_quantum PRIVATE src/generated/milca_fusion_reactivity_leaves.f90
+    src/quantum/fusion_reactivity.f90)
+set_source_files_properties(src/generated/milca_fusion_reactivity_leaves.f90
+    PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
+add_executable(test_fusion_reactivity test/test_fusion_reactivity.f90)
+target_link_libraries(test_fusion_reactivity PRIVATE milca)
+add_test(NAME fusion_reactivity COMMAND test_fusion_reactivity)
 target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
     src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90

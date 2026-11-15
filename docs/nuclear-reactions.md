@@ -1,7 +1,9 @@
 # Nuclear reactions
 
 Status: designed, 2026-11-15; the [proton-proton](pp-fusion.md) and
-[pionless EFT](pp-fusion-eft.md) calculations run. Fusion reactions enter MILCA
+[pionless EFT](pp-fusion-eft.md) calculations run, and N3 runs: Maxwellian
+reactivities from S factors (`test_fusion_reactivity`) for D-T (Bosch and Hale)
+and p-¹¹B (Wang, Li, Wu and Cui, arXiv:2601.00241, 2026). Fusion reactions enter MILCA
 at every level from few-body nuclear theory to reaction-rate kernels for the
 plasma distributions MILCA computes.
 
