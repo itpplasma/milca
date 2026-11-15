@@ -45,7 +45,11 @@ Einstein-Infeld-Hoffmann equations and higher orders with radiation reaction.
 **G2. Newtonian many-body dynamics.** Point masses summed by the fast
 multipole method (Greengard and Rokhlin 1987) and particle-mesh methods shared
 with the Coulomb many-body code; softening is a declared model choice, as for
-point charges.
+point charges. Point masses run on the shared N-body Hamiltonian with the
+coupling -G and the masses as charges (`milca_self_gravity`); a Plummer
+sphere sampled from its distribution function reproduces its kinetic and
+potential energies 3π/64 and -3π/32 (G = M = a = 1) and stays in virial
+equilibrium (`test_plummer`).
 
 **G3. Vlasov-Poisson and kinetic models.** Collisionless dynamics in physical
 and comoving coordinates, and collision operators for two-body relaxation in
