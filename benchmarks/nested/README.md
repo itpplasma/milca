@@ -221,9 +221,16 @@ eigenvectors are dominated by (2,3) label displacements per field period, and th
 decreases along both signs of each eigenvector. Cold starts at b=16 (N=6) or b=12
 (N=8, poloidal modes 12) converge to a helical state with a 14-25 % label error whose
 energy lies 1e-4 to 6e-4 below the exact energy, and delta=0.07 or eps=0.6 behave the
-same way. Like the integer family, this sheared case is therefore not a convergence
-oracle for an energy minimiser beyond b=12, and the instability of the continuum
-equilibrium is inferred from the discrete results, not proven.
+same way. The continuum equilibrium is a Mercier-unstable exact equilibrium: the
+finite-radius Mercier criterion is negative and d2V/dpsi2 > 0 (a magnetic hill) on every
+surface from rho = 0.1 to 0.95, and the flux-coordinate spectrum has unstable modes in
+both mode families, with the (2,3)-per-period saddle above in the periodic family and an
+antiperiodic m=1, n=3 mode that the map lane, which carries only n in nfp Z, cannot
+represent ([stability.md](../../docs/stability.md#landremans-sheared-exact-equilibrium)).
+An energy minimiser that accepts only energy-decreasing steps need not recover such an
+unstable stationary point, while a force-residual root finder may; this sheared case is
+therefore not a convergence oracle for an energy minimiser beyond b=12, and the failure
+of the minimiser there is not by itself a defect.
 
 [V] The first finding is removed by the opt-in boundary field-line angle of the frozen
 field (`ideal_seed_3d_init(..., angle_mpol=M, angle_ntor=N)`,

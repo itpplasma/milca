@@ -47,7 +47,7 @@ if(TARGET milca_gen_support)
         TIMEOUT 600 LABELS "mhd;stability")
 endif()
 target_sources(milca_mhd PRIVATE src/mhd/ideal_flux.f90 src/mhd/ideal_flux_tokamak.f90
-    src/mhd/ideal_mercier.f90)
+    src/mhd/ideal_mercier.f90 src/mhd/nested_flux.f90)
 add_executable(test_ideal_flux test/test_ideal_flux.f90
     test/support/ideal_flux_charts.f90)
 target_link_libraries(test_ideal_flux PRIVATE milca_mhd)
@@ -58,6 +58,19 @@ set_tests_properties(ideal_flux_leaves ideal_flux_kink ideal_flux_uniform
     ideal_flux_family ideal_flux_energy ideal_flux_spectrum ideal_flux_mercier
     PROPERTIES TIMEOUT 120 LABELS "mhd;stability;fast"
     ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+add_executable(test_nested_flux test/test_nested_flux.f90)
+target_link_libraries(test_nested_flux PRIVATE milca_mhd)
+foreach(case field well)
+    add_test(NAME nested_flux_${case} COMMAND test_nested_flux ${case})
+endforeach()
+set_tests_properties(nested_flux_field nested_flux_well
+    PROPERTIES TIMEOUT 120 LABELS "mhd;stability;fast"
+    ENVIRONMENT "OMP_NUM_THREADS=1")
+# Stability study of the sheared Landreman case (docs/stability.md), about
+# 6 minutes on 16 cores; run on a cluster node.
+add_test(NAME nested_flux_study COMMAND test_nested_flux study)
+set_tests_properties(nested_flux_study PROPERTIES TIMEOUT 3600 PROCESSORS 16
+    LABELS "mhd;stability;slow" ENVIRONMENT "OMP_NUM_THREADS=16;OPENBLAS_NUM_THREADS=1")
 add_executable(test_ideal_flux_tokamak test/test_ideal_flux_tokamak.f90)
 target_link_libraries(test_ideal_flux_tokamak PRIVATE milca_mhd)
 foreach(case field invariance mercier)

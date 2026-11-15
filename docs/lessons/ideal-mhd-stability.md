@@ -110,6 +110,17 @@ Hamada charts give the same internal-kink eigenvalue to 2.6e-5.
 
 ### Wrong limit or reference in a check
 
+- **Search restricted to one mode family.** With nfp field periods the
+  toroidal harmonics form nfp decoupled families n = n0 mod nfp; with two
+  periods even n are periodic and odd n antiperiodic over a period. The map
+  lane carries only n in nfp Z, and the flux space assembled any list of n
+  over one period, which aliases the coupling between families. On the
+  sheared Landreman case the map lane found only the periodic (2, 6) saddle;
+  the antiperiodic family holds further unstable modes, among them the
+  m = 1, n = 3 helical core displacement. `flux_space_init` now rejects
+  mixed families and aliased n (`ideal_flux_family`), and a stability
+  statement needs every family.
+
 - **Symbolic proofs blind to the current term.** The exact identities of
   `gen_ideal_dw` (uniform medium, plane waves) do not contain the current
   and pressure-gradient terms; flipping the sign of the current term left
@@ -127,3 +138,6 @@ Hamada charts give the same internal-kink eigenvalue to 2.6e-5.
 - Every observable with an exact gap in its spectrum gets a gap count.
 - A symbolic identity covers only the terms it contains; check the remaining
   terms with an integral identity on an equilibrium.
+- Search every mode family, n0 = 0, ..., nfp/2, before calling a 3D
+  equilibrium stable; an energy minimiser in one family sees nothing of the
+  others.

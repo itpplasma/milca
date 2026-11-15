@@ -117,6 +117,7 @@ program gen_ideal_flux
     call writer%emit('flux_metric', inames(1:27), [character(8) :: 'jacr', &
         'gr1', 'gr2', 'gr3', 'gz1', 'gz2', 'gz3'], [jacu(1), dual(:, 1), dual(:, 3)])
     call emit_form_matrix()
+    call emit_stream()
     call emit_toroidal_chart()
     call emit_wrappers()
     call writer%line('end module milca_ideal_flux_leaves')
@@ -218,6 +219,58 @@ contains
         call writer%emit('flux_form_matrix', [character(8) :: names(1:15), &
             names(16), names(17), names(18)], cn, cm)
     end subroutine emit_form_matrix
+
+    subroutine emit_stream()
+        ! Stream-function jets of a given Cartesian field B (with g(i,j) =
+        ! d_j B_i) on a chart whose surfaces are flux surfaces:
+        ! sqrt(g) B^theta = psi'(iota - lambda_zeta) and sqrt(g) B^zeta =
+        ! psi'(1 + lambda_theta), with sqrt(g) B^theta = B.(x_zeta x x_rho)
+        ! and sqrt(g) B^zeta = B.(x_rho x x_theta). Outputs lam(7) in the
+        ! order of flux_jets and the two flux densities with their rho
+        ! derivatives, whose surface means give psi', psi'', iota, iota'.
+        type(expr_t) :: bv(3), gv(3, 3), st(0:3), sz(0:3), gb(3), o(11), c1(3), c2(3)
+        character(8) :: an(27 + 12 + 4), on(11)
+        integer :: uu
+        an(1:27) = inames(1:27)
+        do i = 1, 3
+            write(an(27 + i), '(a,i1)') 'b', i
+            bv(i) = sym(trim(an(27 + i)))
+            do j = 1, 3
+                write(an(30 + i + 3*(j - 1)), '(a,i1,i1)') 'g', i, j
+                gv(i, j) = sym(trim(an(30 + i + 3*(j - 1))))
+            end do
+        end do
+        an(40:43) = [character(8) :: 'psi1', 'psi2', 'iota', 'iota1']
+        c1 = cross(xu(:, 3), xu(:, 1)); c2 = cross(xu(:, 1), xu(:, 2))
+        st(0) = dot3(bv, c1); sz(0) = dot3(bv, c2)
+        do uu = 1, 3
+            do i = 1, 3
+                gb(i) = gv(i, 1)*xu(1, uu) + gv(i, 2)*xu(2, uu) + gv(i, 3)*xu(3, uu)
+            end do
+            st(uu) = dot3(gb, c1) + dot3(bv, cross(xuu(:, 3, uu), xu(:, 1))) &
+                + dot3(bv, cross(xu(:, 3), xuu(:, 1, uu)))
+            sz(uu) = dot3(gb, c2) + dot3(bv, cross(xuu(:, 1, uu), xu(:, 2))) &
+                + dot3(bv, cross(xu(:, 1), xuu(:, 2, uu)))
+        end do
+        o(1) = sz(0)/psi1 - 1
+        o(2) = iota - st(0)/psi1
+        o(3) = sz(1)/psi1 - sz(0)*psi2/psi1**2
+        o(4) = sz(2)/psi1
+        o(5) = sz(3)/psi1
+        o(6) = iota1 - st(1)/psi1 + st(0)*psi2/psi1**2
+        o(7) = -st(3)/psi1
+        o(8:11) = [st(0), sz(0), st(1), sz(1)]
+        do i = 1, 7
+            write(on(i), '(a,i1)') 'l', i
+        end do
+        on(8:11) = [character(8) :: 'sbt', 'sbz', 'sbtr', 'sbzr']
+        call writer%emit('flux_stream', an, on, o)
+    end subroutine emit_stream
+
+    type(expr_t) function dot3(p, q)
+        type(expr_t), intent(in) :: p(3), q(3)
+        dot3 = p(1)*q(1) + p(2)*q(2) + p(3)*q(3)
+    end function dot3
 
     subroutine emit_toroidal_chart()
         ! x = R (cos phi, sin phi, 0) + Z e_z with R, Z, phi functions of
@@ -371,6 +424,27 @@ contains
         call writer%line('    real(dp), intent(out) :: jacr, grho(3), gzeta(3)')
         call wrapped_call('flux_metric', args)
         call writer%line('end subroutine flux_metric_array')
+        args = args(1:index(args, 'jacr') - 1)//'b(1),b(2),b(3),'
+        do j = 1, 3
+            do i = 1, 3
+                write(item, '(a,i1,a,i1,a)') 'g(', i, ',', j, ')'
+                args = args//trim(item)//','
+            end do
+        end do
+        args = args//'psi1,psi2,iota,iota1,'
+        do i = 1, 7
+            write(item, '(a,i1,a)') 'lam(', i, ')'
+            args = args//trim(item)//','
+        end do
+        args = args//'sb(1),sb(2),sb(3),sb(4)'
+        call writer%line('pure subroutine flux_stream_array(xu, xuu, b, g, psi1, psi2, &')
+        call writer%line('        iota, iota1, lam, sb)')
+        call writer%line('    use, intrinsic :: iso_fortran_env, only: dp => real64')
+        call writer%line('    real(dp), intent(in) :: xu(3,3), xuu(3,3,3), b(3), g(3,3), &')
+        call writer%line('        psi1, psi2, iota, iota1')
+        call writer%line('    real(dp), intent(out) :: lam(7), sb(4)')
+        call wrapped_call('flux_stream', args)
+        call writer%line('end subroutine flux_stream_array')
     end subroutine emit_wrappers
 
     subroutine wrapped_call(name, args)

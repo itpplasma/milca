@@ -33,7 +33,7 @@ program gen_nested_oracles
     s = x(1)**2/(1 + eps) + x(2)**2/(1 - eps)
     f = sqrt(s*(2 - s) - 4*x(3)**2 - 4*tau*s*x(3))
     b = [((2*x(3) + tau*s)*x(1) - (1 + eps)/sqrt(1 - eps**2)*f*x(2))/s, &
-      ((2*x(3) + tau*s)*x(2) + (1 - eps)/sqrt(1 - eps**2)*f*x(1))/s, 1 - s - 2*tau*x(3)]
+        ((2*x(3) + tau*s)*x(2) + (1 - eps)/sqrt(1 - eps**2)*f*x(1))/s, 1 - s - 2*tau*x(3)]
     q = om2*(x(1)**2 + x(2)**2 + 4*x(3)**2)/2 + 2*tau*x(3)
     psi = om2*(q + dot(b, b)/2 - 1 + tau**2/(2*om2) + om2*eps**2/2)/2
     p = pa - 2*psi/om2
@@ -137,6 +137,7 @@ program gen_nested_oracles
     call w%emit('nested_sheared_surface', &
                 [character(8) :: 'rho', 'theta', 't', 'eps', 'tau', 'saxis', 'lam'], &
                [character(8) :: 'x', 'y', 'z', 'jac', 'rhs'], [xy, jac, rhs], ad=.true.)
+    call emit_sheared_chart()
     ! The closed one-form J B^theta dt - J B^t dtheta has periods
     ! P'=integral J B^theta/rho dt, T'=integral J B^t/rho dtheta,
     ! where primes are d/dpsi, psi=rho^2/2. Hence iota=P'/T'.
@@ -262,6 +263,42 @@ contains
         call prove(diff(vw, kk)*wb/kk + ww*wb*vv, 'sheared mixed derivative')
         call prove(vw**2 - vv*vww - (1 + 0*kk)/4, 'sheared tension invariant')
     end subroutine
+    subroutine emit_sheared_chart()
+        ! Position jets in (rho, theta, t) for flux-coordinate consumers, in the
+        ! argument order of flux_jets (gen/gen_ideal_flux.f90), and the
+        ! near-axis volume and toroidal-flux densities: per unit (psi, theta, t)
+        ! with psi = rho^2/2, and their second rho-derivatives, which give the
+        ! O(rho^2) coefficients because the O(rho) terms average to zero.
+        type(expr_t) :: coord(3), o(27 + 4), dens, tor
+        character(8) :: on(27 + 4)
+        integer :: i, uu, vv, c
+        coord = [rho, theta, t]
+        c = 0
+        do uu = 1, 3
+            do i = 1, 3
+                c = c + 1; o(c) = diff(xy(i), coord(uu))
+                write(on(c), '(a,i1,i1)') 'x', i, uu
+            end do
+        end do
+        do vv = 1, 3
+            do uu = 1, vv
+                do i = 1, 3
+                    c = c + 1; o(c) = diff(diff(xy(i), coord(uu)), coord(vv))
+                    write(on(c), '(a,i1,i1,i1)') 'y', i, uu, vv
+                end do
+            end do
+        end do
+        call w%emit('nested_sheared_chart', &
+                    [character(8) :: 'rho', 'theta', 't', 'eps', 'tau', 'saxis', 'lam'], &
+                    on(1:27), o(1:27))
+        dens = g/(lam*h*sqrt((ch**2 - rho**2)*(1 - yy**2)))
+        tor = 1/(2*lam*h*sqrt(1 - yy**2))
+        o(1:4) = [dens, diff(diff(dens, rho), rho), tor, diff(diff(tor, rho), rho)]
+        call w%emit('nested_sheared_axis_well', &
+                    [character(8) :: 'rho', 'theta', 't', 'eps', 'tau', 'saxis', 'lam'], &
+                    [character(8) :: 'vol', 'volrr', 'tor', 'torrr'], o(1:4))
+    end subroutine
+
     function dot(a, b) result(r)
         type(expr_t), intent(in)::a(3), b(3)
         type(expr_t)::r

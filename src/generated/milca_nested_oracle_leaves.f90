@@ -2396,6 +2396,286 @@ end subroutine nested_sheared_surface_vjp
 ! Generator revision: f7d51909b9311a796aa3572f7e98820a8d577ff6
 ! Regenerate with: gen_nested_oracles from pinned FortSym build
 
+pure elemental subroutine nested_sheared_chart(rho, theta, t, eps, tau, saxis, lam, x11, x21, x31, &
+        x12, x22, x32, x13, x23, x33, y111, y211, y311, y112, y212, y312, y122, y222, y322, y113, y213, &
+        y313, y123, y223, y323, y133, y233, y333)
+    use, intrinsic :: iso_fortran_env, only: dp => real64
+    implicit none
+    real(dp), intent(in) :: rho, theta, t, eps, tau, saxis, lam
+    real(dp), intent(out) :: x11, x21, x31, x12, x22, x32, x13, x23, x33, y111, y211, y311, y112, &
+        y212, y312, y122, y222, y322, y113, y213, y313, y123, y223, y323, y133, y233, y333
+    real(dp) :: t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16, t17, t18, &
+        t19, t20, t21, t22, t23, t24, t25, t26, t27, t28, t29, t30, t31, t32, t33, t34, t35, t36, t37, t38, &
+        t39, t40, t41, t42, t43, t44, t45, t46, t47, t48, t49, t50, t51, t52, t53, t54, t55, t56, t57, t58, &
+        t59, t60
+
+    t1 = cos(t)
+    t2 = sin(theta)
+    t3 = (rho*t2)**2
+    t4 = -t3
+    t5 = sqrt(t4 + 1)
+    t6 = t*2
+    t7 = sin(t6)
+    t8 = tau + eps*t7/real(2, kind=kind(0.0_dp))
+    t9 = exp(-t8)
+    t10 = exp(t8)
+    t11 = t9 + t10
+    t12 = t5*t11/real(2, kind=kind(0.0_dp))
+    t13 = t10 - t9
+    t14 = rho*t2*t13/t12/real(2, kind=kind(0.0_dp))
+    t15 = cos(theta)
+    t16 = sqrt((t11/real(2, kind=kind(0.0_dp)))**2 - t3)
+    t17 = -rho*t15/t16
+    t18 = saxis + atan(t14) - asin(t17)
+    t19 = sqrt(eps**2 + t18**2*4)
+    t20 = sqrt((t19 - eps)/real(2, kind=kind(0.0_dp)))
+    t21 = t20*2
+    t22 = t19*2
+    t23 = sqrt(-t17**2 + 1)
+    t24 = t16*2
+    t25 = -rho*rho*t15*t2*t2*1*2/t16**2/t24 - t15*1/t16
+    t26 = t14**2 + 1
+    t27 = t5*2
+    t28 = rho*rho*t2*t2*t2*t11*t13*1*2/t12**2/t27/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) + t2*t13*1/t12/real(2, kind=kind(0.0_dp))
+    t29 = -t25/t23 + t28/t26
+    t30 = sin(t)
+    t31 = sqrt((eps + t19)/real(2, kind=kind(0.0_dp)))
+    t32 = t31*2
+    t33 = -rho*rho*rho*t15*t15*t2*1*2/t16**2/t24 + rho*t2*1/t16
+    t34 = rho*rho*rho*t15*t2*t2*t11*t13*1*2/t12**2/t27/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) + rho*t15*t13*1/t12/real(2, kind=kind(0.0_dp))
+    t35 = -t33/t23 + t34/t26
+    t36 = cos(t6)
+    t37 = eps*t36*t10*1*2/real(2, kind=kind(0.0_dp))
+    t38 = -eps*t36*t9*1*2/real(2, kind=kind(0.0_dp)) + t37
+    t39 = eps*t36*t9*1*2/real(2, kind=kind(0.0_dp)) + t37
+    t40 = -rho*t2*t5*t13*t38/t12**2/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*t2* &
+        t39/t12/real(2, kind=kind(0.0_dp))
+    t41 = -rho*t15*t11*t38*2/t16**2/t23/t24/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + &
+        t40/t26
+    t42 = t23*2
+    t43 = -rho*t15*t2*t2*1*1*2/t16**2/t24
+    t44 = rho*t2*t2*t2*t11*t13*1*1*2/t12**2/t27/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp) &
+        )
+    t45 = rho*t15*t25*t25*2/t16/t23**2/t42 - rho*t2*t13*t28*t28*2/t12/t26**2/real(2, &
+        kind=kind(0.0_dp)) - (-rho*rho*rho*t15*t2*t2*t2*t2*2*1*1*2*2/t16**3/t24/t24 - rho*rho*rho*t15*t2*t2* &
+        t2*t2*1*1*2*2*2/t16**2/t24**2/t24 - rho*t15*t2*t2*1*1*2/t16**2/t24 - rho*t15*t2*t2*1*1*2/t16**2/ &
+        t24 - rho*t15*t2*t2*1*1*2/t16**2/t24)/t23 + (rho*rho*rho*t2*t2*t2*t2*t2*t11*t11*t13*2*1*1*2*2/ &
+        t12**3/t27/t27/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + &
+        rho*rho*rho*t2*t2*t2*t2*t2*t11*t13*1*1*2*2*2/t12**2/t27**2/t27/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) + t44 + t44 + t44)/t26
+    t46 = -rho*rho*t15*t15*t2*1*1*2/t16**2/t24
+    t47 = rho*rho*t15*t2*t2*t11*t13*1*1*2/t12**2/t27/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp))
+    t48 = rho*t15*t33*t25*2/t16/t23**2/t42 - rho*t2*t13*t34*t28*2/t12/t26**2/real(2, &
+        kind=kind(0.0_dp)) - (-rho*rho*rho*rho*t15*t15*t2*t2*t2*2*1*1*2*2/t16**3/t24/t24 - rho*rho*rho*rho* &
+        t15*t15*t2*t2*t2*1*1*2*2*2/t16**2/t24**2/t24 - rho*rho*t15*t15*t2*1*1*2/t16**2/t24 - rho*rho*t15* &
+        t15*t2*1*1*2/t16**2/t24 - rho*rho*t15*t15*t2*1*1*2/t16**2/t24 + rho*rho*t2*t2*t2*1*1*2/t16**2/t24 + &
+        t2*1*1/t16)/t23 + (rho*rho*rho*rho*t15*t2*t2*t2*t2*t11*t11*t13*2*1*1*2*2/t12**3/t27/t27/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*rho*rho*rho*t15*t2* &
+        t2*t2*t2*t11*t13*1*1*2*2*2/t12**2/t27**2/t27/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + &
+        t47 + t47 + t47 + t47 + t15*t13*1*1/t12/real(2, kind=kind(0.0_dp)))/t26
+    t49 = rho*rho*rho*t15*t2*t2*1*1*2/t16**2/t24
+    t50 = rho*rho*rho*t15*t15*t2*t11*t13*1*1*2/t12**2/t27/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp))
+    t51 = rho*t15*t33*t33*2/t16/t23**2/t42 - rho*t2*t13*t34*t34*2/t12/t26**2/real(2, &
+        kind=kind(0.0_dp)) - (-rho*rho*rho*rho*rho*t15*t15*t15*t2*t2*2*1*1*2*2/t16**3/t24/t24 - rho*rho*rho* &
+        rho*rho*t15*t15*t15*t2*t2*1*1*2*2*2/t16**2/t24**2/t24 - rho*rho*rho*t15*t15*t15*1*1*2/t16**2/t24 + &
+        t49 + t49 + t49 + rho*t15*1*1/t16)/t23 + (rho*rho*rho*rho*rho*t15*t15*t2*t2*t2*t11*t11*t13*2*1*1*2* &
+        2/t12**3/t27/t27/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + &
+        rho*rho*rho*rho*rho*t15*t15*t2*t2*t2*t11*t13*1*1*2*2*2/t12**2/t27**2/t27/real(2, kind=kind(0.0_dp))/ &
+        real(2, kind=kind(0.0_dp)) + t50 + t50 + t50 - rho*rho*rho*t2*t2*t2*t11*t13*1*1*2/t12**2/t27/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - rho*t2*t13*1*1/t12/real(2, kind=kind(0.0_dp)))/t26
+    t52 = rho*rho*t15*t15*t11*t38*t25*2*2/t16**2/t16/t23**2/t24/t42/real(2, kind=kind(0.0_dp))/ &
+        real(2, kind=kind(0.0_dp)) - rho*t2*t13*t28*t40*2/t12/t26**2/real(2, kind=kind(0.0_dp)) - (rho*rho* &
+        t15*t2*t2*t11*t38*2*1*2*2/t16**3/t24/t24/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + &
+        rho*rho*t15*t2*t2*t11*t38*1*2*2*2/t16**2/t24**2/t24/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) + t15*t11*t38*1*2/t16**2/t24/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp) &
+        ))/t23 + (-rho*rho*t2*t2*t2*t5*t11*t13*t38*2*1*2/t12**3/t27/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*rho*t2*t2*t2*t11*t39*1*2/t12**2/t27/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*rho*t2*t2*t2*t13*t38*1*2/t12**2/t27/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - t2*t5*t13*t38*1/t12**2/real(2, kind=kind(0.0_dp))/ &
+        real(2, kind=kind(0.0_dp)) + t2*t39*1/t12/real(2, kind=kind(0.0_dp)))/t26
+    t53 = rho*rho*t15*t15*t11*t38*t33*2*2/t16**2/t16/t23**2/t24/t42/real(2, kind=kind(0.0_dp))/ &
+        real(2, kind=kind(0.0_dp)) - rho*t2*t13*t34*t40*2/t12/t26**2/real(2, kind=kind(0.0_dp)) - (rho*rho* &
+        rho*t15*t15*t2*t11*t38*2*1*2*2/t16**3/t24/t24/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) &
+        + rho*rho*rho*t15*t15*t2*t11*t38*1*2*2*2/t16**2/t24**2/t24/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - rho*t2*t11*t38*1*2/t16**2/t24/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)))/t23 + (-rho*rho*rho*t15*t2*t2*t5*t11*t13*t38*2*1*2/t12**3/t27/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*rho*rho*t15*t2*t2* &
+        t11*t39*1*2/t12**2/t27/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*rho*rho*t15*t2* &
+        t2*t13*t38*1*2/t12**2/t27/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - rho*t15*t5*t13* &
+        t38*1/t12**2/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*t15*t39*1/t12/real(2, &
+        kind=kind(0.0_dp)))/t26
+    t54 = eps*eps*t36*t36*t10*1*1*2*2/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))
+    t55 = -eps*t10*t7*1*1*2*2/real(2, kind=kind(0.0_dp))
+    t56 = eps*eps*t36*t36*t9*1*1*2*2/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + t54 + &
+        eps*t9*t7*1*1*2*2/real(2, kind=kind(0.0_dp)) - eps*t10*t7*1*1*2*2/real(2, kind=kind(0.0_dp))
+    t57 = -rho*t2*t5*t39*t38/t12**2/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))
+    t58 = rho*rho*rho*t15*t15*t15*t11*t11*t38*t38*2*2*2/t16**2/t16**2/t16/t23**2/t24/t24/t42/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) &
+        + rho*t15*t11*t11*t38*t38*2*2*2/t16**3/t23/t24/t24/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*t15*t11*t11*t38*t38* &
+        2*2*2/t16**2/t23/t24**2/t24/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - rho*t15*t11*t56*2/t16**2/t23/t24/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - rho*t15*t38*t38*2/t16**2/t23/t24/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - rho*t2*t13*t40*t40*2/t12/t26**2/real(2, &
+        kind=kind(0.0_dp)) + (rho*t2*t5*t5*t13*t38*t38*2/t12**3/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - rho*t2*t5*t13*t56/t12**2/real(2, kind=kind(0.0_dp))/ &
+        real(2, kind=kind(0.0_dp)) - rho*t2*t5*t39*t38/t12**2/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - rho*t2*t5*t39*t38/t12**2/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) &
+        + rho*t2*(-eps*eps*t36*t36*t9*1*1*2*2/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + t54 - &
+        eps*t9*t7*1*1*2*2/real(2, kind=kind(0.0_dp)) - eps*t10*t7*1*1*2*2/real(2, kind=kind(0.0_dp)))/t12/ &
+        real(2, kind=kind(0.0_dp)))/t26
+    t59 = -t30*t18*t41*1*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    t60 = t1*t18*t41*1*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    x11 = t1*t18*t29*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    x21 = t30*t18*t29*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    x31 = -t2*1/lam/t5
+    x12 = t1*t18*t35*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    x22 = t30*t18*t35*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    x32 = -rho*t15*1/lam/t5
+    x13 = t1*t18*t41*2*4/t21/t22/real(2, kind=kind(0.0_dp)) - t30*t20*1
+    x23 = t1*t31*1 + t30*t18*t41*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    x33 = 0
+    y111 = -t1*t18*t18*t29*t29*2*2*2*4*4/t21**2/t21/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t1*t18*t18*t29*t29*2*2*2*4*4/t21/t22**2/t22/real(2, kind=kind(0.0_dp)) + t1* &
+        t18*t45*2*4/t21/t22/real(2, kind=kind(0.0_dp)) + t1*t29*t29*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    y211 = -t30*t18*t18*t29*t29*2*2*2*4*4/t32**2/t32/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t30*t18*t18*t29*t29*2*2*2*4*4/t32/t22**2/t22/real(2, kind=kind(0.0_dp)) + t30* &
+        t18*t45*2*4/t32/t22/real(2, kind=kind(0.0_dp)) + t30*t29*t29*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    y311 = -rho*t2*t2*t2*1*1*2/lam/t5**2/t27
+    y112 = -t1*t18*t18*t35*t29*2*2*2*4*4/t21**2/t21/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t1*t18*t18*t35*t29*2*2*2*4*4/t21/t22**2/t22/real(2, kind=kind(0.0_dp)) + t1* &
+        t18*t48*2*4/t21/t22/real(2, kind=kind(0.0_dp)) + t1*t35*t29*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    y212 = -t30*t18*t18*t35*t29*2*2*2*4*4/t32**2/t32/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t30*t18*t18*t35*t29*2*2*2*4*4/t32/t22**2/t22/real(2, kind=kind(0.0_dp)) + t30* &
+        t18*t48*2*4/t32/t22/real(2, kind=kind(0.0_dp)) + t30*t35*t29*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    y312 = -rho*rho*t15*t2*t2*1*1*2/lam/t5**2/t27 - t15*1*1/lam/t5
+    y122 = -t1*t18*t18*t35*t35*2*2*2*4*4/t21**2/t21/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t1*t18*t18*t35*t35*2*2*2*4*4/t21/t22**2/t22/real(2, kind=kind(0.0_dp)) + t1* &
+        t18*t51*2*4/t21/t22/real(2, kind=kind(0.0_dp)) + t1*t35*t35*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    y222 = -t30*t18*t18*t35*t35*2*2*2*4*4/t32**2/t32/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t30*t18*t18*t35*t35*2*2*2*4*4/t32/t22**2/t22/real(2, kind=kind(0.0_dp)) + t30* &
+        t18*t51*2*4/t32/t22/real(2, kind=kind(0.0_dp)) + t30*t35*t35*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    y322 = -rho*rho*rho*t15*t15*t2*1*1*2/lam/t5**2/t27 + rho*t2*1*1/lam/t5
+    y113 = -t1*t18*t18*t41*t29*2*2*2*4*4/t21**2/t21/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t1*t18*t18*t41*t29*2*2*2*4*4/t21/t22**2/t22/real(2, kind=kind(0.0_dp)) + t1* &
+        t18*t52*2*4/t21/t22/real(2, kind=kind(0.0_dp)) + t1*t41*t29*2*4/t21/t22/real(2, kind=kind(0.0_dp)) - &
+        t30*t18*t29*1*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    y213 = t1*t18*t29*1*2*4/t32/t22/real(2, kind=kind(0.0_dp)) - t30*t18*t18*t41*t29*2*2*2*4*4/ &
+        t32**2/t32/t22/t22/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - t30*t18*t18*t41*t29*2*2* &
+        2*4*4/t32/t22**2/t22/real(2, kind=kind(0.0_dp)) + t30*t18*t52*2*4/t32/t22/real(2, kind=kind(0.0_dp)) &
+        + t30*t41*t29*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    y313 = 0
+    y123 = -t1*t18*t18*t41*t35*2*2*2*4*4/t21**2/t21/t22/t22/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) - t1*t18*t18*t41*t35*2*2*2*4*4/t21/t22**2/t22/real(2, kind=kind(0.0_dp)) + t1* &
+        t18*t53*2*4/t21/t22/real(2, kind=kind(0.0_dp)) + t1*t41*t35*2*4/t21/t22/real(2, kind=kind(0.0_dp)) - &
+        t30*t18*t35*1*2*4/t21/t22/real(2, kind=kind(0.0_dp))
+    y223 = t1*t18*t35*1*2*4/t32/t22/real(2, kind=kind(0.0_dp)) - t30*t18*t18*t41*t35*2*2*2*4*4/ &
+        t32**2/t32/t22/t22/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - t30*t18*t18*t41*t35*2*2* &
+        2*4*4/t32/t22**2/t22/real(2, kind=kind(0.0_dp)) + t30*t18*t53*2*4/t32/t22/real(2, kind=kind(0.0_dp)) &
+        + t30*t41*t35*2*4/t32/t22/real(2, kind=kind(0.0_dp))
+    y323 = 0
+    y133 = -t1*t20*1*1 - t1*t18*t18*t41*t41*2*2*2*4*4/t21**2/t21/t22/t22/real(2, kind=kind(0.0_dp))/ &
+        real(2, kind=kind(0.0_dp)) - t1*t18*t18*t41*t41*2*2*2*4*4/t21/t22**2/t22/real(2, kind=kind(0.0_dp)) &
+        + t1*t18*t58*2*4/t21/t22/real(2, kind=kind(0.0_dp)) + t1*t41*t41*2*4/t21/t22/real(2, &
+        kind=kind(0.0_dp)) - t30*t18*t41*1*2*4/t21/t22/real(2, kind=kind(0.0_dp)) - t30*t18*t41*1*2*4/t21/ &
+        t22/real(2, kind=kind(0.0_dp))
+    y233 = t60 + t60 - t30*t31*1*1 - t30*t18*t18*t41*t41*2*2*2*4*4/t32**2/t32/t22/t22/real(2, &
+        kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) - t30*t18*t18*t41*t41*2*2*2*4*4/t32/t22**2/t22/real(2, &
+        kind=kind(0.0_dp)) + t30*t18*t58*2*4/t32/t22/real(2, kind=kind(0.0_dp)) + t30*t41*t41*2*4/t32/t22/ &
+        real(2, kind=kind(0.0_dp))
+    y333 = 0
+
+end subroutine nested_sheared_chart
+
+! Generated by fortsym. Do not edit.
+! Generator: gen_nested_oracles
+! Generator revision: f7d51909b9311a796aa3572f7e98820a8d577ff6
+! Regenerate with: gen_nested_oracles from pinned FortSym build
+
+pure elemental subroutine nested_sheared_axis_well(rho, theta, t, eps, tau, saxis, lam, vol, volrr, &
+        tor, torrr)
+    use, intrinsic :: iso_fortran_env, only: dp => real64
+    implicit none
+    real(dp), intent(in) :: rho, theta, t, eps, tau, saxis, lam
+    real(dp), intent(out) :: vol, volrr, tor, torrr
+    real(dp) :: t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16, t17, t18, &
+        t19, t20, t21, t22, t23, t24, t25, t26, t27, t28, t29, t30, t31, t32, t33, t34, t35, t36, t37, t38, &
+        t39, t40, t41, t42, t43
+
+    t1 = t*2
+    t2 = tau + eps*sin(t1)/real(2, kind=kind(0.0_dp))
+    t3 = exp(-t2)
+    t4 = exp(t2)
+    t5 = t3 + t4
+    t6 = (t5/real(2, kind=kind(0.0_dp)))**2
+    t7 = t6 - rho**2
+    t8 = sin(theta)
+    t9 = (rho*t8)**2
+    t10 = -t9
+    t11 = t10 + 1
+    t12 = sqrt(t7*t11)
+    t13 = sqrt(t11)
+    t14 = t13*t5/real(2, kind=kind(0.0_dp))
+    t15 = t4 - t3
+    t16 = rho*t8*t15/t14/real(2, kind=kind(0.0_dp))
+    t17 = cos(theta)
+    t18 = sqrt(t6 - t9)
+    t19 = -rho*t17/t18
+    t20 = saxis + atan(t16) - asin(t19)
+    t21 = sqrt(eps**2 + t20**2*4)
+    t22 = lam*t12*t21
+    t23 = t21 + eps*cos(t1)
+    t24 = t21*2
+    t25 = sqrt(-t19**2 + 1)
+    t26 = t18*2
+    t27 = -rho*rho*t17*t8*t8*1*2/t18**2/t26 - t17*1/t18
+    t28 = t16**2 + 1
+    t29 = t13*2
+    t30 = rho*rho*t8*t8*t8*t5*t15*1*2/t14**2/t29/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) + t8*t15*1/t14/real(2, kind=kind(0.0_dp))
+    t31 = -t27/t25 + t30/t28
+    t32 = t12*2
+    t33 = -rho*t8*t8*t7*1*2 - rho*t11*1*2
+    t34 = lam*t12*t20*t31*2*4/t24 + lam*t21*t33/t32
+    t35 = -t20*t34*t31*2*4/t22**2/t24/real(2, kind=kind(0.0_dp))
+    t36 = -rho*t17*t8*t8*1*1*2/t18**2/t26
+    t37 = rho*t8*t8*t8*t5*t15*1*1*2/t14**2/t29/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))
+    t38 = rho*t17*t27*t27*2/t18/t25**2/(t25*2) - rho*t8*t15*t30*t30*2/t14/t28**2/real(2, &
+        kind=kind(0.0_dp)) - (-rho*rho*rho*t17*t8*t8*t8*t8*2*1*1*2*2/t18**3/t26/t26 - rho*rho*rho*t17*t8*t8* &
+        t8*t8*1*1*2*2*2/t18**2/t26**2/t26 - rho*t17*t8*t8*1*1*2/t18**2/t26 - rho*t17*t8*t8*1*1*2/t18**2/ &
+        t26 - rho*t17*t8*t8*1*1*2/t18**2/t26)/t25 + (rho*rho*rho*t8*t8*t8*t8*t8*t5*t5*t15*2*1*1*2*2/t14**3/ &
+        t29/t29/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp))/real(2, kind=kind(0.0_dp)) + rho*rho* &
+        rho*t8*t8*t8*t8*t8*t5*t15*1*1*2*2*2/t14**2/t29**2/t29/real(2, kind=kind(0.0_dp))/real(2, &
+        kind=kind(0.0_dp)) + t37 + t37 + t37)/t28
+    t39 = rho*rho*t8*t8*1*1*2*2
+    t40 = lam*t20*t33*t31*2*4/t32/t24
+    t41 = lam*t21*t13*2
+    t42 = -lam*rho*t8*t8*t21*1*2*2/t29 + lam*t13*t20*t31*2*2*4/t24
+    t43 = -lam*rho*t8*t8*t20*t31*1*2*2*2*4/t24/t29
+    vol = t23/t22/real(2, kind=kind(0.0_dp))
+    volrr = t23*t34*t34*2/t22**3/real(2, kind=kind(0.0_dp)) - t20*t34*t31*2*4/t22**2/t24/real(2, &
+        kind=kind(0.0_dp)) - t20*t34*t31*2*4/t22**2/t24/real(2, kind=kind(0.0_dp)) - t23*(-lam*t12*t20*t20* &
+        t31*t31*2*2*2*4*4/t24**2/t24 + lam*t12*t20*t38*2*4/t24 + lam*t12*t31*t31*2*4/t24 - lam*t21*t33*t33* &
+        2/t32**2/t32 + lam*t21*(t39 + t39 - t8*t8*t7*1*1*2 - t11*1*1*2)/t32 + t40 + t40)/t22**2/real(2, &
+        kind=kind(0.0_dp)) - t20*t20*t31*t31*2*2*2*4*4/t22/t24**2/t24/real(2, kind=kind(0.0_dp)) + t20*t38* &
+        2*4/t22/t24/real(2, kind=kind(0.0_dp)) + t31*t31*2*4/t22/t24/real(2, kind=kind(0.0_dp))
+    tor = 1/t41
+    torrr = t42*t42*2*1/t41**3 - (-lam*rho*rho*t8*t8*t8*t8*t21*1*1*2*2*2*2/t29**2/t29 - lam*rho*t8* &
+        t8*t20*t31*1*2*2*2*4/t24/t29 - lam*rho*t8*t8*t20*t31*1*2*2*2*4/t24/t29 - lam*t8*t8*t21*1*1*2*2/t29 - &
+        lam*t13*t20*t20*t31*t31*2*2*2*2*4*4/t24**2/t24 + lam*t13*t20*t38*2*2*4/t24 + lam*t13*t31*t31*2*2*4/ &
+        t24)*1/t41**2
+
+end subroutine nested_sheared_axis_well
+
+! Generated by fortsym. Do not edit.
+! Generator: gen_nested_oracles
+! Generator revision: f7d51909b9311a796aa3572f7e98820a8d577ff6
+! Regenerate with: gen_nested_oracles from pinned FortSym build
+
 pure elemental subroutine nested_sheared_flux_density(rho, theta, t, eps, tau, saxis, lam, toroidal, &
         poloidal)
     use, intrinsic :: iso_fortran_env, only: dp => real64
