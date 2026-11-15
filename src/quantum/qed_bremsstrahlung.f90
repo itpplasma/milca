@@ -7,12 +7,14 @@
 ! ln |p - p' - k|^2, which follow the forward and Coulomb peaks.
 module milca_qed_bremsstrahlung
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use milca_qed_tree, only: four_vector_t, on_shell, nucleus_bremsstrahlung_spin_sum
+    use milca_qed_tree, only: four_vector_t, on_shell, minkowski, &
+        nucleus_bremsstrahlung_spin_sum, electron_bremsstrahlung_spin_sum
     use fortnum_quadrature, only: gauss_legendre
     implicit none
     private
 
     public :: nucleus_photon_spectrum, nucleus_energy_loss, nucleus_thermal_power
+    public :: electron_energy_radiated, electron_photon_spectrum
 
     real(dp), parameter :: pi = acos(-1.0_dp)
 
@@ -116,5 +118,111 @@ contains
         end do
         power = power/norm
     end function nucleus_thermal_power
+
+    !> Photon energy radiated per electron-electron collision in the
+    !> centre-of-mass frame, integral of omega d sigma/d omega over the
+    !> photon energy, in alpha r_e^2 m c^2, for invariant s > 4.
+    real(dp) function electron_energy_radiated(s, n) result(total)
+        real(dp), intent(in) :: s
+        integer, intent(in) :: n
+        real(dp) :: x(n), w(n), omax, y, omega, jw
+        integer :: i
+        call gauss_legendre(n, x, w)
+        omax = (s - 4)/(2*sqrt(s))
+        total = 0
+        do i = 1, n
+            y = (x(i) + 1)/2
+            omega = omax*sin(pi*y/2)**2
+            jw = omax*pi*sin(pi*y/2)*cos(pi*y/2)/2
+            if (omega <= 0) cycle
+            total = total + w(i)*jw*omega*electron_photon_spectrum(s, omega, n)
+        end do
+    end function electron_energy_radiated
+
+    !> d sigma/d omega of electron-electron bremsstrahlung in the
+    !> centre-of-mass frame, in alpha r_e^2, integrated over the photon
+    !> direction and the electron directions. The electron direction in the
+    !> rest frame of the outgoing pair is integrated over one hemisphere
+    !> (exchanging the two electrons covers the other, which cancels the
+    !> identical-particle 1/2) in ln |t| about the incoming electron's
+    !> direction, which follows the Coulomb peak.
+    real(dp) function electron_photon_spectrum(s, omega, n) result(total)
+        real(dp), intent(in) :: s, omega
+        integer, intent(in) :: n
+        real(dp) :: x(n), w(n), root_s, e, p, ck, mass, q, beta(3), gam
+        real(dp) :: n1(3), e1(3), e2(3), tr(3), p1s(0:3), tlo, thi, tt, ca, ja, phi, flux
+        real(dp) :: b2, bp, e3(0:3)
+        type(four_vector_t) :: p1, p2, p3, p4, k
+        integer :: j, a, b
+        call gauss_legendre(n, x, w)
+        root_s = sqrt(s)
+        e = root_s/2
+        p = sqrt(e**2 - 1)
+        p1 = on_shell(1.0_dp, [0.0_dp, 0.0_dp, p])
+        p2 = on_shell(1.0_dp, [0.0_dp, 0.0_dp, -p])
+        ! F = sqrt((p1.p2)^2 - 1) = sqrt(s (s - 4))/2
+        flux = sqrt(s*(s - 4))/2
+        total = 0
+        do j = 1, n
+            ck = x(j)
+            k%c = [omega, omega*sqrt(max(0.0_dp, 1 - ck**2)), 0.0_dp, omega*ck]
+            ! the outgoing pair: total four-momentum P - k, mass, boost
+            mass = sqrt((root_s - omega)**2 - omega**2)
+            q = sqrt(max(mass**2/4 - 1, 0.0_dp))
+            if (q <= 0) cycle
+            beta = -k%c(1:3)/(root_s - omega)
+            b2 = dot_product(beta, beta)
+            gam = 1/sqrt(1 - b2)
+            ! p1 in the pair rest frame
+            bp = dot_product(beta, p1%c(1:3))
+            p1s(0) = gam*(p1%c(0) - bp)
+            p1s(1:3) = p1%c(1:3) + ((gam - 1)*bp/b2 - gam*p1%c(0))*beta
+            n1 = p1s(1:3)/norm2(p1s(1:3))
+            tr = [1.0_dp, 0.0_dp, 0.0_dp]
+            if (abs(n1(1)) > 0.9_dp) tr = [0.0_dp, 1.0_dp, 0.0_dp]
+            e1 = tr - dot_product(tr, n1)*n1
+            e1 = e1/norm2(e1)
+            e2 = [n1(2)*e1(3) - n1(3)*e1(2), n1(3)*e1(1) - n1(1)*e1(3), &
+                n1(1)*e1(2) - n1(2)*e1(1)]
+            ! |t| = 2 (E1* E3* - p1* q cos a) - 2, linear in cos a on [0, 1]
+            tlo = log(max(2*(p1s(0)*mass/2 - norm2(p1s(1:3))*q) - 2, tiny(1.0_dp)))
+            thi = log(2*(p1s(0)*mass/2) - 2)
+            do a = 1, n
+                tt = exp(tlo + (thi - tlo)*(x(a) + 1)/2)
+                ca = (p1s(0)*mass/2 - (tt + 2)/2)/(norm2(p1s(1:3))*q)
+                ja = (thi - tlo)/2*tt/(2*norm2(p1s(1:3))*q)
+                do b = 1, n
+                    phi = pi*(x(b) + 1)
+                    e3(1:3) = q*(ca*n1 + sqrt(max(0.0_dp, 1 - ca**2))* &
+                        (cos(phi)*e1 + sin(phi)*e2))
+                    e3(0) = mass/2
+                    p3 = boost(e3, beta, gam)
+                    p4%c = p1%c + p2%c - k%c - p3%c
+                    ! dPhi3 = omega d omega dOmega_k/(16 pi^3) q dOmega*/(16 pi^2 M);
+                    ! d sigma/(alpha r_e^2) = 64 pi^3 X/(4F) dPhi3; photon
+                    ! azimuth 2 pi, electron azimuth pi dx
+                    total = total + w(j)*w(a)*ja*w(b)*pi*2*pi* &
+                        64*pi**3/(4*flux)*omega/(16*pi**3)*q/(16*pi**2*mass)* &
+                        electron_bremsstrahlung_spin_sum(1.0_dp, p1, p2, p3, p4, k)
+                end do
+            end do
+        end do
+    end function electron_photon_spectrum
+
+    ! the four-vector v of the frame moving with -beta seen from the lab:
+    ! boost from the pair rest frame back to the centre of mass
+    function boost(v, beta, gam) result(u)
+        real(dp), intent(in) :: v(0:3), beta(3), gam
+        type(four_vector_t) :: u
+        real(dp) :: b2, bp
+        b2 = dot_product(beta, beta)
+        bp = dot_product(beta, v(1:3))
+        u%c(0) = gam*(v(0) + bp)
+        if (b2 == 0) then
+            u%c(1:3) = v(1:3)
+        else
+            u%c(1:3) = v(1:3) + ((gam - 1)*bp/b2 + gam*v(0))*beta
+        end if
+    end function boost
 
 end module milca_qed_bremsstrahlung
