@@ -101,6 +101,9 @@ resonant-ion per-surface differences in
 
 ## Verification and integration rules
 
+These habits make a landing informative; none of them is a gate. MILCA lands
+fast and finds the remaining errors when it is applied in depth.
+
 1. **Different evidence, not duplicate implementations:** challenge a result by
    analytic/asymptotic limits, conservation/adjoint/reciprocity identities,
    independent symbolic derivation, discretization, Monte Carlo versus
@@ -135,11 +138,11 @@ resonant-ion per-surface differences in
 
 ## Admission and delivery
 
-Implement the **smallest complete scientific slice** with a named question,
-an explicit mathematical model, an independent oracle or clearly scoped
-limiting case, convergence/error status, and time/memory at matched accuracy.
-Keep derivations, reference inputs, reproducible commands and provenance;
-report missing certificates honestly.
+Implement the **smallest complete scientific slice** with a named question and
+an explicit mathematical model, and land it. Independent oracles, convergence
+and error status, certificates and time/memory at matched accuracy are added as
+the slice is applied; record what is missing rather than waiting for it. Keep
+derivations, reference inputs, reproducible commands and provenance.
 
 Generic numerics belong in FortNum/FortSparse/FortFEM/FortSym/FortIO and
 interchange in libneo as defined in [AGENTS.md](AGENTS.md). Maintain independent

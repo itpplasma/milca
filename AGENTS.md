@@ -115,9 +115,10 @@ context.
   after applicable gates; do not require human review merely for large diffs
   or AI authorship. Independently audit samples of automated changes.
 - Physics/assumption changes, high-impact unexplained output changes and
-  reference-oracle/acceptance updates need independent scientific evidence and
-  escalation when unresolved. Never change an implementation and its only
-  expected-output oracle in one automatically approved step.
+  reference-oracle/acceptance updates land with the evidence at hand; record
+  what is unresolved, and deeper evidence follows when MILCA is applied. Do not
+  silently change an implementation and its only expected-output oracle
+  together; say so in the commit message.
 - For external comparators, preserve independent implementations; offer small
   upstream PRs with reproducers, and respect the maintainers' review policy.
 - Do not treat background tests or cached passes as completed verification
@@ -345,7 +346,11 @@ These rules are hard constraints:
 
 ## Physics admission rules
 
-A new production physics feature needs:
+MILCA lands fast and fixes later, when it is applied in depth; it claims no
+universal correctness, and errors that a whole AI workflow shares are found by
+later studies and benchmarks. A new physics feature lands once it has a use
+case and tests that exercise it. The following complete it over time, as its
+application demands; they are aims, not landing conditions:
 
 1. a concrete scientific or teaching use case;
 2. a complete mathematical model and coupling/energy/source ledger;
