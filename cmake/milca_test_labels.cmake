@@ -1032,3 +1032,9 @@ milca_test_labels(vrmhd_island_decimal_steps fast CLASSES mhd
     TARGETS test_vrmhd_island)
 milca_test_labels(vrmhd_island_graded_input fast CLASSES mhd
     TARGETS test_vrmhd_island)
+milca_test_labels(ideal_dw_exact_identities_and_regeneration fast CLASSES mhd
+    TARGETS gen_ideal_dw)
+milca_test_labels(ideal_flux_exact_identities_and_regeneration fast CLASSES mhd
+    TARGETS gen_ideal_flux)
+milca_test_labels(ideal_flux_tokamak_field fast CLASSES mhd TARGETS test_ideal_flux_tokamak)
+milca_test_labels(ideal_flux_tokamak_invariance fast CLASSES mhd TARGETS test_ideal_flux_tokamak)

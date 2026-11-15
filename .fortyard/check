@@ -19,9 +19,17 @@ if fo test --only-changed --list | grep -q 'widened'; then
     names=$(git diff --cached -U0 "$base" -- CMakeLists.txt 'cmake/*.cmake' |
         sed -n 's/^+.*\(add_test(NAME\|milca_test_labels(\) *\([A-Za-z0-9_]*\).*/\2/p' |
         sort -u)
-    if [ -n "$names" ]; then
+    # tests that only some builds register (for example with a FortSym
+    # build for leaf regeneration) are not run here
+    known=""
+    for name in $names; do
+        if fo test --list "$name" >/dev/null 2>&1; then
+            known="$known $name"
+        fi
+    done
+    if [ -n "$known" ]; then
         # shellcheck disable=SC2086
-        fo test $names
+        fo test $known
     else
         echo "build description changed without new tests; the suite runs nightly"
     fi
