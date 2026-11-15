@@ -47,6 +47,21 @@ program gs_response_3d
     !! Q = eps^(-2/3), the reconnected flux A (T m^2/rad^2) and A/area (T),
     !! the layer jump of d Phi/d psin at the layer edges, the same carried to
     !! spot, and |Phi_vac|.
+    !! closure = 'kinetic' uses the same matching with Delta_layer from the
+    !! cylinder kinetic layer (milca_kinetic_layer_delta, model of KIM) of
+    !! each rational: profiles n_e, T_e, T_i, q, E_r against the effective
+    !! radius from the directory kinetic_profiles (files n.dat, Te.dat,
+    !! Ti.dat, q.dat, Er.dat; cm, cm^-3, eV, statV/cm), toroidal field
+    !! |kinetic_btor| (G) at major radius kinetic_r0 (cm), ion charge and mass
+    !! numbers kinetic_zi, kinetic_ai, window core half-width kinetic_core and
+    !! transition width kinetic_band (cm), kinetic_nwin window points,
+    !! kinetic_mmax Fourier modes and conservation model kinetic_model. The
+    !! rational sits where |q| of the profiles equals |q_s|, and Delta per
+    !! psin is Delta_r |dq/dpsin|/|dq/dr|, so the local shear matches. The
+    !! right-handed cylinder (r, theta_s, z) has its axis along -phi, hence
+    !! harmonic (-m, -n), q = -q_s and B_z = -F/R (docs/kinetic-layer-
+    !! response.md). prefix_resist.dat is written as for 'resistive', with
+    !! L the core half-width in psin, Q = 0 and b(0)/b0 = 1 (constant psi).
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_meridian_feec_n, only: meridian_feec_t, meridian_feec_build, &
         meridian_point_basis_t, meridian_point_basis_init
@@ -70,6 +85,9 @@ program gs_response_3d
         layer_xmax, layer_fit_widths, &
         layer_init, layer_closure, layer_coefficients, layer_slope, &
         layer_regular_slope, layer_jump, layer_kink, layer_large, layer_inside
+    use milca_kinetic_layer_window, only: kl_profiles_t, kl_profiles_read, KLW_OK
+    use milca_kinetic_layer_delta, only: kl_delta, kl_resonance
+    use milca_kinetic_layer_cylinder, only: KL_OK
     use milca_mhd_layer_n, only: layer_params_t, layer_scales, layer_delta_x => &
         layer_delta, layer_metrics, resistive_closure
     implicit none
@@ -97,6 +115,10 @@ program gs_response_3d
     real(dp) :: export_psin(maxr) = 0.0_dp
     integer :: export_np = 256, export_mmax = 40
     character(len=512) :: profiles = ''
+    character(len=512) :: kinetic_profiles = ''
+    real(dp) :: kinetic_btor = 0.0_dp, kinetic_r0 = 0.0_dp, kinetic_zi = 1.0_dp, &
+        kinetic_ai = 2.0_dp, kinetic_core = 1.5_dp, kinetic_band = 3.0_dp
+    integer :: kinetic_nwin = 256, kinetic_mmax = 96, kinetic_model = 1
     real(dp) :: omega_drive = 0.0_dp, layer_nu = 0.0_dp, eta_scale = 1.0_dp
     logical :: inertia_q2 = .false.
     logical :: zero_pressure = .false.
@@ -108,7 +130,9 @@ program gs_response_3d
         boundary_sheet, qlow, rat_pad, rat_grade, edge_moved_current, closure, &
         layer_delta, layer_ratio, layer_nfit, spot, rat_auto, export_psin, &
         export_np, export_mmax, profiles, omega_drive, layer_nu, eta_scale, &
-        inertia_q2, zero_pressure, error_estimate
+        inertia_q2, zero_pressure, error_estimate, kinetic_profiles, kinetic_btor, &
+        kinetic_r0, kinetic_zi, kinetic_ai, kinetic_core, kinetic_band, kinetic_nwin, &
+        kinetic_mmax, kinetic_model
 
     type(psi_grid_t) :: g
     type(coil_set_t) :: set
@@ -138,7 +162,8 @@ program gs_response_3d
     type(rational_layer_t), allocatable :: lays(:)
     real(dp), allocatable :: di_rat(:), dq_rat(:), jump_unit(:), delta_rat(:)
     complex(dp), allocatable :: b2cl(:, :), phicl(:), phitot(:), lam_cl(:)
-    logical :: frob, resist
+    logical :: frob, resist, kinetic
+    type(kl_profiles_t) :: kin_prof
     real(dp), allocatable :: prof_tab(:, :), lscale(:), qlay(:), gpsi(:)
     complex(dp), allocatable :: dlayer(:), lcen(:)
     real(dp), allocatable :: xr(:, :)
@@ -192,12 +217,20 @@ program gs_response_3d
             ' at psin = ', root, ', m = ', m_rat(k)
     end do
     nrat = k
-    resist = trim(closure) == 'resistive' .and. trim(model) == 'ideal'
+    kinetic = trim(closure) == 'kinetic' .and. trim(model) == 'ideal'
+    ! the kinetic closure shares the resistive matching and outputs
+    resist = (trim(closure) == 'resistive' .and. trim(model) == 'ideal') .or. kinetic
     frob = (trim(closure) == 'frobenius' .and. trim(model) == 'ideal') .or. resist
     if (trim(closure) /= 'sheet' .and. trim(closure) /= 'frobenius' .and. &
-        trim(closure) /= 'resistive') &
-        error stop 'closure must be sheet, frobenius or resistive'
-    if (resist) then
+        trim(closure) /= 'resistive' .and. trim(closure) /= 'kinetic') &
+        error stop 'closure must be sheet, frobenius, resistive or kinetic'
+    if (kinetic) then
+        call kl_profiles_read(trim(kinetic_profiles), kin_prof, st)
+        if (st /= KLW_OK) error stop 'kinetic_profiles'
+        if (kinetic_btor == 0 .or. kinetic_r0 <= 0) &
+            error stop 'kinetic closure needs kinetic_btor and kinetic_r0'
+        write (*, '(a,i0,a)') 'kinetic closure: ', size(kin_prof%r), ' profile points'
+    else if (resist) then
         call read_profiles(trim(profiles), prof_tab)
         write (*, '(a,i0,a)') 'resistive closure: ', size(prof_tab, 2), &
             ' profile points'
@@ -388,7 +421,11 @@ program gs_response_3d
             jump_unit(i) = layer_jump(lays(i), layer_block(phicl, i))
         end do
         if (resist) then
-            call resistive_layers()
+            if (kinetic) then
+                call kinetic_layers()
+            else
+                call resistive_layers()
+            end if
             call resistive_closure(lays, dlayer, cmplx(jump_unit, 0.0_dp, dp), cl)
         end if
     else if (trim(model) == 'ideal') then
@@ -661,9 +698,11 @@ contains
                         lscale(l), qlay(l), arec, arec/area(l), jedge, jmp, &
                         abs(phivac(l)), abs(a1c(1) - a1c(2))/max(abs(arec), &
                         tiny(1.0_dp)), lcen(l), arec*lcen(l)/area(l)
-                    write (*, '(a,f8.4,a,es11.3,a,es11.3,a,es11.3)') '  resistive q ', &
-                        q_rat(l), ' |A/area| ', abs(arec)/area(l), ' |jump| ', &
-                        abs(jedge), ' |A/Phi_vac| ', abs(arec/phivac(l))
+                    write (*, '(a,f8.4,a,es11.3,a,es11.3,a,es11.3,a,es10.2)') &
+                        '  resistive q ', q_rat(l), ' |A/area| ', abs(arec)/area(l), &
+                        ' |jump| ', abs(jedge), ' |A/Phi_vac| ', abs(arec/phivac(l)), &
+                        ' matching |jump - Delta A|/|jump| ', &
+                        abs(jedge - dlayer(l)*arec)/max(abs(jedge), tiny(1.0_dp))
                 end block
             end if
         end do
@@ -803,6 +842,40 @@ contains
                 /par%fprime*gpsi(l)
         end do
     end subroutine resistive_layers
+
+    subroutine kinetic_layers()
+        !! Layer response Delta_layer (per psin) of every rational from the
+        !! cylinder kinetic layer (header: orientation and shear matching).
+        type(kl_profiles_t) :: kp
+        complex(dp) :: dk, ik
+        real(dp) :: rs, dqdr, drdpsin
+        integer :: l
+        allocate (dlayer(nrat), lcen(nrat), lscale(nrat), qlay(nrat), gpsi(nrat))
+        lcen = (1.0_dp, 0.0_dp)
+        qlay = 0.0_dp
+        gpsi = 0.0_dp
+        do l = 1, nrat
+            call kl_resonance(kin_prof, abs(q_rat(l)), rs, dqdr, st)
+            if (st /= KL_OK) error stop 'kinetic closure: rational outside the profiles'
+            kp = kin_prof
+            kp%q = -sign(1.0_dp, q_rat(l))*abs(kin_prof%q)
+            kp%btor = -sign(1.0_dp, f_of_psin(g, psin_rat(l)))*abs(kinetic_btor)
+            kp%r0 = kinetic_r0
+            kp%zi = kinetic_zi
+            kp%ai = kinetic_ai
+            kp%m = -m_rat(l)
+            kp%n = -n
+            call kl_delta(kp, rs, kinetic_core, kinetic_band, kinetic_nwin, kinetic_mmax, &
+                kinetic_model, dk, ik, st)
+            if (st /= KL_OK) error stop 'kinetic layer'
+            drdpsin = abs(dq_rat(l)/dqdr)
+            dlayer(l) = dk*drdpsin
+            lscale(l) = kinetic_core/drdpsin
+            write (*, '(a,f8.4,a,f9.4,a,2es11.3,a,2es11.3,a,es10.3)') 'kinetic layer q ', &
+                q_rat(l), ': r_s[cm] ', rs, ' Delta_r[1/cm] ', dk, ' Delta[1/psin] ', &
+                dlayer(l), ' dr/dpsin[cm] ', drdpsin
+        end do
+    end subroutine kinetic_layers
 
     subroutine polar_map(u, theta, x)
         !! Flux-surface map: psin = u^2 on the ray of geometric angle theta.

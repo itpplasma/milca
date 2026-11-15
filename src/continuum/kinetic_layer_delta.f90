@@ -14,10 +14,11 @@ module milca_kinetic_layer_delta
     use milca_kinetic_layer_cylinder, only: kl_background_t, kl_kernels, kl_solve, &
         kl_current, kl_light, KL_OK
     use milca_kinetic_layer_window, only: kl_profiles_t, kl_window, KLW_OK
+    use fortnum_cubic_spline, only: cubic_spline_t, cubic_spline_init, cubic_spline_eval
     implicit none
     private
-    public :: kl_delta
-    integer, parameter, public :: KL_BAD_WINDOW = 100
+    public :: kl_delta, kl_resonance
+    integer, parameter, public :: KL_BAD_WINDOW = 100, KL_NO_RESONANCE = 101
 
     real(dp), parameter :: pi = 4*atan(1.0_dp)
     complex(dp), parameter :: iu = (0.0_dp, 1.0_dp)
@@ -83,5 +84,45 @@ contains
         end function prim
 
     end subroutine kl_delta
+
+    !> Innermost radius r_s [cm] of the profiles with |q(r_s)| = qabs and
+    !> d|q|/dr there [1/cm], from the cubic spline of |q|.
+    subroutine kl_resonance(p, qabs, r_s, dqdr, status)
+        type(kl_profiles_t), intent(in) :: p
+        real(dp), intent(in) :: qabs
+        real(dp), intent(out) :: r_s, dqdr
+        integer, intent(out) :: status
+        type(cubic_spline_t) :: sp
+        real(dp) :: lo, hi, flo, f(1), df(1)
+        integer :: i, it
+
+        r_s = 0
+        dqdr = 0
+        status = KL_NO_RESONANCE
+        call cubic_spline_init(p%r, reshape(abs(p%q), [size(p%q), 1]), sp, i)
+        if (i /= 0) return
+        do i = 1, size(p%r) - 1
+            if ((abs(p%q(i)) - qabs)*(abs(p%q(i + 1)) - qabs) > 0) cycle
+            lo = p%r(i)
+            hi = p%r(i + 1)
+            flo = abs(p%q(i)) - qabs
+            do it = 1, 200
+                r_s = (lo + hi)/2
+                call cubic_spline_eval(sp, r_s, f, df)
+                if ((f(1) - qabs)*flo > 0) then
+                    lo = r_s
+                    flo = f(1) - qabs
+                else
+                    hi = r_s
+                end if
+                if (hi - lo < 1e-13_dp*abs(hi)) exit
+            end do
+            r_s = (lo + hi)/2
+            call cubic_spline_eval(sp, r_s, f, df)
+            dqdr = df(1)
+            status = KL_OK
+            return
+        end do
+    end subroutine kl_resonance
 
 end module milca_kinetic_layer_delta

@@ -158,10 +158,29 @@ Checks before landing, in this order:
    constant-psi matching, which KIM's own coupling to QL-Balance shares.
    `milca_kinetic_layer_delta` (`kl_delta`) returns Delta and I_par per gauss
    for the profiles of one rational surface.
-2. Cylinder to torus: the FEEC closure against the cylinder boundary-value
-   problem at large aspect ratio, as for L5 (agreement to a few 1e-3 there),
-   with the orientation of B_tor, q, m and n mapped explicitly between the
-   cylinder and the torus.
+2. Cylinder to torus (implemented as `closure = 'kinetic'` of
+   `gs_response_3d`): the closure itself is the L5 matching with a
+   prescribed complex Delta, which the L5 suite checks against the cylinder
+   boundary-value problem at large aspect ratio. New are the orientation and
+   the radial scale of Delta:
+   - MILCA expands a per-n field as e^{i (n zeta - m theta_s)} with theta_s
+     counter-clockwise in (R, Z) and (R, phi, Z) right handed
+     (`milca_vacuum_surfaces`). The cylinder (r, theta, z) of the kinetic
+     layer is right handed, so with theta = theta_s its axis points along
+     -phi: the harmonic is (-m, -n) in the cylinder's e^{i (m theta +
+     n z/R0)}, q = -q_s and B_z = -F/R. Both descriptions then have the
+     resonance at m = n q_s and the same phase, so Delta carries over
+     without conjugation.
+   - The rational sits where |q| of the kinetic profiles equals |q_s|, and
+     Delta per psin is Delta_r |dq/dpsin|/|dq/dr|, so the local shear of
+     the two descriptions matches and no definition of the effective radius
+     enters.
+   - Sign of the time convention: in a flat collisional plasma, Im Delta of
+     the kinetic layer at the Doppler frequency omega_E has the sign of the
+     resistive-inertial layer of L5 with gamma = -i (0 - n Omega), n Omega =
+     omega_E (`test_kinetic_layer_delta`), so KIM's and MILCA's conventions
+     agree.
+   On the A = 10 test torus the solution meets the matching condition to
+   1e-14 (`gs_response_3d_kinetic_closure`).
 3. Ideal limit (shielding grows with |Delta|) and the comparison with
-   MEPHIT's kinetic hybrid on a device case.
-
+   MEPHIT's kinetic hybrid on a device case; the ITER demonstration case.

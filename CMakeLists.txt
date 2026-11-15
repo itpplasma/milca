@@ -1754,7 +1754,7 @@ add_executable(test_kinetic_layer_cylinder test/test_kinetic_layer_cylinder.f90)
 target_link_libraries(test_kinetic_layer_cylinder PRIVATE milca)
 add_test(NAME kinetic_layer_cylinder COMMAND test_kinetic_layer_cylinder)
 add_executable(test_kinetic_layer_delta test/test_kinetic_layer_delta.f90)
-target_link_libraries(test_kinetic_layer_delta PRIVATE milca)
+target_link_libraries(test_kinetic_layer_delta PRIVATE milca milca_mhd)
 add_test(NAME kinetic_layer_delta COMMAND test_kinetic_layer_delta)
 add_executable(test_jeans test/test_jeans.f90)
 target_link_libraries(test_jeans PRIVATE milca)
@@ -2465,12 +2465,18 @@ add_test(NAME mhd_shielding_cylinder_limit_reciprocity COMMAND test_mhd_shieldin
 set_tests_properties(mhd_shielding_cylinder_limit_reciprocity PROPERTIES TIMEOUT 600
     ENVIRONMENT "OMP_NUM_THREADS=4")
 add_executable(gs_response_3d app/gs_response_3d.f90)
-target_link_libraries(gs_response_3d PRIVATE milca)
+target_link_libraries(gs_response_3d PRIVATE milca milca_continuum)
 add_test(NAME gs_response_3d_ampere_indicator_contract COMMAND ${CMAKE_COMMAND}
     -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_check
     -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
     -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_app.cmake)
 set_tests_properties(gs_response_3d_ampere_indicator_contract PROPERTIES TIMEOUT 60
+    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+add_test(NAME gs_response_3d_kinetic_closure COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_kinetic
+    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
+    -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_kinetic.cmake)
+set_tests_properties(gs_response_3d_kinetic_closure PROPERTIES TIMEOUT 240
     ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
 add_executable(test_mhd_ideal_n test/test_mhd_ideal_n.f90)
 target_link_libraries(test_mhd_ideal_n PRIVATE milca)

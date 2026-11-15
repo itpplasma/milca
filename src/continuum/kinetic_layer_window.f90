@@ -31,7 +31,7 @@ module milca_kinetic_layer_window
     use milca_kinetic_layer_cylinder, only: kl_background_t, kl_species_t, kl_light
     implicit none
     private
-    public :: kl_profiles_t, kl_window
+    public :: kl_profiles_t, kl_window, kl_profiles_read
     integer, parameter, public :: KLW_OK = 0, KLW_BAD_INPUT = 1, KLW_SPLINE = 2
 
     real(dp), parameter :: pi = 4*atan(1.0_dp), ev = 1.602176634e-12_dp
@@ -162,6 +162,57 @@ contains
         end function rhs
 
     end subroutine kl_window
+
+    !> n_e, T_e, T_i, q and E_r from the files n.dat, Te.dat, Ti.dat, q.dat and
+    !> Er.dat of directory dir (two columns: r [cm] and the value in the units
+    !> of kl_profiles_t), which share their radii. The scalars of p are kept.
+    subroutine kl_profiles_read(dir, p, status)
+        character(*), intent(in) :: dir
+        type(kl_profiles_t), intent(inout) :: p
+        integer, intent(out) :: status
+        if (allocated(p%r)) deallocate (p%r)
+        status = KLW_BAD_INPUT
+        if (.not. load(dir//'/n.dat', p%ne)) return
+        if (.not. load(dir//'/Te.dat', p%te)) return
+        if (.not. load(dir//'/Ti.dat', p%ti)) return
+        if (.not. load(dir//'/q.dat', p%q)) return
+        if (.not. load(dir//'/Er.dat', p%er)) return
+        status = KLW_OK
+
+    contains
+
+        logical function load(f, y)
+            character(*), intent(in) :: f
+            real(dp), allocatable, intent(out) :: y(:)
+            real(dp), allocatable :: rr(:)
+            real(dp) :: x1, x2
+            integer :: v, n, ios, k
+            load = .false.
+            open (newunit=v, file=f, status='old', action='read', iostat=ios)
+            if (ios /= 0) return
+            n = 0
+            do
+                read (v, *, iostat=ios) x1, x2
+                if (ios /= 0) exit
+                n = n + 1
+            end do
+            rewind (v)
+            allocate (rr(n), y(n))
+            do k = 1, n
+                read (v, *) rr(k), y(k)
+            end do
+            close (v)
+            if (.not. allocated(p%r)) then
+                p%r = rr
+            else if (size(p%r) /= n) then
+                return
+            else if (maxval(abs(p%r - rr)) > 1e-9_dp*maxval(abs(p%r))) then
+                return
+            end if
+            load = n >= 4
+        end function load
+
+    end subroutine kl_profiles_read
 
     subroutine alloc_species(s, z, mass, n)
         type(kl_species_t), intent(out) :: s
