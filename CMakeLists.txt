@@ -1731,7 +1731,8 @@ target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
     src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90
     src/quantum/pair_equilibrium.f90 src/quantum/strong_field.f90
     src/quantum/hydrogenic_recombination.f90 src/quantum/cyclotron_emission.f90
-    src/quantum/synchrotron_transport.f90)
+    src/quantum/synchrotron_transport.f90
+    src/quantum/thermal_compton.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 set_source_files_properties(src/generated/milca_beliaev_budker_leaves.f90
@@ -1775,6 +1776,9 @@ add_test(NAME cyclotron_emission COMMAND test_cyclotron_emission)
 add_executable(test_synchrotron_transport test/test_synchrotron_transport.f90)
 target_link_libraries(test_synchrotron_transport PRIVATE milca)
 add_test(NAME synchrotron_transport COMMAND test_synchrotron_transport)
+add_executable(test_thermal_compton test/test_thermal_compton.f90)
+target_link_libraries(test_thermal_compton PRIVATE milca)
+add_test(NAME thermal_compton COMMAND test_thermal_compton)
 add_executable(test_qed_ee_power test/test_qed_ee_power.f90)
 target_link_libraries(test_qed_ee_power PRIVATE milca)
 add_test(NAME qed_ee_power COMMAND test_qed_ee_power)

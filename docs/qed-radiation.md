@@ -97,7 +97,10 @@ absorption follows by Kirchhoff's law, and a slab with reflecting walls
 weights the emission with the escape factor (1 - R)(1 - e^-τ)/(τ(1 - R e^-τ))
 (`milca_synchrotron_transport`), which reaches the thin emission and the
 blackbody flux of the walls in its limits; the opacity parameter is
-Trubnikov's Λ = ω_pe² L/(ω_c c).
+Trubnikov's Λ = ω_pe² L/(ω_c c). Compton scattering on Juttner electrons with
+the Klein-Nishina cross section runs as the photon scattering and energy
+exchange rates (`milca_thermal_compton`), which reach the Thomson gain
+(4/3)⟨p²⟩ per scattering, the recoil −ε and the Kompaneets exchange 4θ − ε.
 
 **Q6. Losses in fluid and transport models.** Emissivities and loss rates for
 relativistic Maxwellian and non-Maxwellian electrons, reduced from Q2, Q4 and
