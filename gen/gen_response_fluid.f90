@@ -115,7 +115,7 @@ program gen_response_fluid
         [inner - outer + xin*grad_jump])
     write (unit, '(a)') 'end module milca_response_fluid_leaves'
     close (unit)
-    call execute_command_line('fprettify --disable-indent -i 4 -l 88 '// &
+    call execute_command_line('fo fmt '// &
                        'src/generated/milca_response_fluid_leaves.f90', exitstat=status)
     if (status /= 0) error stop 'format generated response leaves'
 contains
