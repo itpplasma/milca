@@ -138,7 +138,8 @@ Classical branch:
 Quantum branch:
 
 1. Nonrelativistic electrostatic many-electron Schrödinger/von Neumann
-   equation (the QED boundary is external).
+   equation, the nonrelativistic electrostatic limit of QED in a box
+   ([QED and radiation](qed-radiation.md)).
 2. -> quantum BBGKY for reduced density matrices -> cumulant truncations,
    Hartree/TDHF, quantum Lenard--Balescu, Uehling--Uhlenbeck, and the G1--G2
    nonequilibrium Green-function closures (second Born, GW, T-matrix).

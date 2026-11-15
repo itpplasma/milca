@@ -76,7 +76,10 @@ observable is acceptable.
 The full design space is recorded in the capability and numerical-method
 catalogues. They prevent architectural dead ends but do not determine
 implementation order. Quantum plasma fundamentals are included where they
-clarify or supply plasma closures; the fundamental ownership boundary is QED.
+clarify or supply plasma closures. Since 2026-11-15 QED, nuclear reactions,
+gravity and general relativity are inside the scope as well
+([QED and radiation](docs/qed-radiation.md),
+[nuclear reactions](docs/nuclear-reactions.md), [gravity](docs/gravity.md)).
 
 The primary scientific target is **direct kinetic steady state**:
 source/collision/transport/field-balanced non-Maxwellian states should be
@@ -210,10 +213,11 @@ methods live on ordinary 3D meshes; Wigner models reuse phase-space
 Eulerian/semi-Lagrangian/DG/spectral machinery; quantum-fluid/EOS closures use
 ordinary FEM/FV/DG on macroscopic domains.
 
-The native fundamentals branch stops at **QED**. General quantized photon
-dynamics, pair creation/annihilation, strong-field QED cascades and radiative
-QED corrections remain external. QED-derived rates or closures may enter
-through provider interfaces.
+The native fundamentals branch reaches **QED** (since 2026-11-15): quantized
+electron, positron and photon fields in a box as the microscopic reference,
+tree-level and one-loop cross sections, QED kinetics, radiation reaction,
+radiation collisions and pair plasmas; the existing classical and quantum
+models are to be derived from it as reductions. See [QED and radiation](docs/qed-radiation.md).
 
 See [quantum plasma fundamentals](docs/quantum-plasma.md).
 

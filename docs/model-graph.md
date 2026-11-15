@@ -32,7 +32,34 @@ flowchart TB
     EDGE["edge: sheath fluid, neutrals,<br/>full-f drift kinetics"]:::plan
     RX["reacting, partially ionised,<br/>radiation"]:::plan
     TR["macro transport, multiscale coupling"]:::plan
+    QED["QED in a box: electrons, positrons,<br/>photons in Fock space"]:::plan
+    QKIN["QED kinetics: Boltzmann for electrons,<br/>positrons, photons; tree-level cross sections"]:::plan
+    RADC["radiation reaction, radiation collision<br/>operator, pair balance"]:::plan
+    NUC["nuclear reactions: few-body, potential, R-matrix,<br/>S factors, rate kernels, nuclear elastic scattering"]:::part
+    GR["general relativity: 3+1, GRMHD,<br/>cosmological background"]:::plan
+    PN["post-Newtonian many-body"]:::plan
+    GRAV["self-gravitating many-body:<br/>stars, clusters, dark matter"]:::plan
+    GVP["Vlasov-Poisson gravity, fuzzy dark matter,<br/>self-interacting dark matter"]:::plan
+    MOND["modified gravity: QUMOND, AQUAL<br/>(alternative to dark matter)"]:::plan
+    GFL["self-gravitating fluids with cooling"]:::plan
 
+    QED --> NB
+    QED --> QM
+    QED --> QKIN
+    QKIN --> COLL
+    QKIN --> RADC
+    RADC --> FK
+    RADC --> RX
+    NUC -.-> FK
+    NUC -.-> RX
+    GR --> PN
+    GR --> MHD
+    PN --> GRAV
+    GRAV --> GVP
+    QW --> GVP
+    GVP --> GFL
+    RADC -.-> GFL
+    MOND -.-> GVP
     NB --> CL
     NB --> BBGKY
     QM --> QF
@@ -61,7 +88,8 @@ flowchart TB
 ```
 
 Solid blue: running with documented evidence; dashed blue: partly running;
-dotted orange: designed.
+dotted orange: designed. A dotted arrow supplies rates, sources or an
+alternative field equation to a model instead of deriving it.
 
 | Model | Status | Page |
 |---|---|---|
@@ -84,3 +112,6 @@ dotted orange: designed.
 | edge | designed | [edge physics](edge-physics.md) |
 | reacting plasmas, radiation | designed | [reacting](reacting-partially-ionized.md), [radiation](radiation.md) |
 | macro transport | designed | [transport and multiscale](transport-multiscale.md) |
+| QED in a box, QED kinetics, radiation collisions | designed | [QED and radiation](qed-radiation.md) |
+| nuclear reactions | partly running (pp) | [nuclear reactions](nuclear-reactions.md), [pp fusion](pp-fusion.md) |
+| general relativity, post-Newtonian, self-gravitating many-body, dark matter, modified gravity | designed | [gravity](gravity.md) |
