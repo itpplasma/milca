@@ -294,7 +294,8 @@ target_sources(milca_continuum PRIVATE src/continuum/vlasov_response.f90
     src/generated/milca_debye_sphere_leaves.f90 src/continuum/debye_sphere_reference.f90
     src/generated/milca_slab_oscillation_leaves.f90 src/continuum/slab_oscillation.f90
     src/generated/milca_shielding_dynamics_leaves.f90 src/continuum/shielding_dynamics.f90
-    src/generated/milca_homma_leaves.f90 src/continuum/rosenbluth_reference.f90)
+    src/generated/milca_homma_leaves.f90 src/continuum/rosenbluth_reference.f90
+    src/generated/milca_beliaev_budker_leaves.f90 src/continuum/beliaev_budker.f90)
 set_source_files_properties(
     src/generated/milca_species_leaves.f90 src/generated/milca_coulomb_leaves.f90
     src/generated/milca_ocp_leaves.f90
@@ -1696,6 +1697,14 @@ if(MILCA_FORTSYM_BUILD)
         -DWORK=${CMAKE_BINARY_DIR}/fusion-reactivity-regeneration
         -DLEAF=milca_fusion_reactivity_leaves.f90
         -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
+    add_executable(gen_beliaev_budker gen/gen_beliaev_budker.f90)
+    target_link_libraries(gen_beliaev_budker PRIVATE milca_gen_support)
+    add_test(NAME beliaev_budker_leaf_regeneration COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:gen_beliaev_budker>
+        -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_beliaev_budker_leaves.f90
+        -DWORK=${CMAKE_BINARY_DIR}/beliaev-budker-regeneration
+        -DLEAF=milca_beliaev_budker_leaves.f90
+        -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
     add_executable(gen_qed gen/gen_qed.f90)
     target_link_libraries(gen_qed PRIVATE milca_gen_support)
     add_test(NAME qed_leaf_regeneration COMMAND ${CMAKE_COMMAND}
@@ -1719,6 +1728,11 @@ target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
     src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
+set_source_files_properties(src/generated/milca_beliaev_budker_leaves.f90
+    PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
+add_executable(test_beliaev_budker test/test_beliaev_budker.f90)
+target_link_libraries(test_beliaev_budker PRIVATE milca)
+add_test(NAME beliaev_budker_coefficients COMMAND test_beliaev_budker)
 add_executable(test_qed_tree test/test_qed_tree.f90)
 target_link_libraries(test_qed_tree PRIVATE milca)
 add_test(NAME qed_tree_level COMMAND test_qed_tree)
