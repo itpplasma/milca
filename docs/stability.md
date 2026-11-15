@@ -601,9 +601,10 @@ Checks, each against a derived limit or identity:
 | `ideal_dw_pinch_equivalence_and_derivatives` | intuitive terms against the Eulerian form, integrated over compactly supported fields on the force-balanced pinch | sum agrees to 2e-17 relative; 1.1 % apart without force balance; each term far above the 1e-12 gate |
 | `ideal_flux_energy` | the five terms of the m = 1 kink eigenvector of rung R2 against x^H K x = omega^2 | 1e-15 at 16 and 32 cells |
 | `ideal_flux_mercier` | screw pinch against Suydam's criterion times the factor below, both Mercier forms; the same pinch in a non-straight angle | 1e-10 at r = 0.2 to 0.8 |
-| `ideal_flux_tokamak_mercier` | circular Solov'ev tori against the large-aspect-ratio criterion [21] | relative deviation 1.3e-2 and 3.3e-3 (q = 0.6), 3.2e-3 and 8.7e-4 (q = 1.6) at R0/a = 10 and 20, falling as (a/R0)^2; the sign flips between q < 1 and q > 1 as the factor 1 - q^2 requires |
+| `ideal_flux_tokamak_mercier` | circular Solov'ev tori against the large-aspect-ratio criterion [21] | relative deviation 1.3e-2 and 3.3e-3 (q = 0.6), 3.2e-3 and 8.7e-4 (q = 1.6) at R0/a = 10 and 20, falling by about 4 when a/R0 halves; the sign flips between q < 1 and q > 1 as the factor 1 - q^2 requires |
 | `ideal_flux_spectrum` | D^rho = f(rho) exp(i theta) in an angle theta with theta* = theta + k rho^2 sin theta: power in m is J_(1-m)(m k rho^2)^2 sqrt(1 - k^2 rho^4) | 1e-15 |
 | `ideal_flux_family` | one field period with nfp = 2 against the full torus for odd n; zero coupling of n = 1 and 2 over the full torus; rejection of mixed families and aliased n | 4e-16, 1e-16 |
+| `nested_flux_well` | finite-radius d2V/dpsi2 on the sheared Landreman case against its near-axis expansion from the exact volume and flux densities | 8e-5, 3e-4, 1.3e-3 at rho = 0.02, 0.04, 0.08, as rho^2 |
 
 The cylinder factor follows from the definitions of [20]. For a screw pinch
 of length 2 pi R0 with psi = toroidal flux/(2 pi), dpsi/dr = r Bz,
@@ -630,6 +631,76 @@ mode.
 
 Still open in S7: ballooning, the global-to-local limit (O7 on R2 to R4) and
 the comparison with published Mercier profiles.
+
+### Landreman's sheared exact equilibrium
+
+The sheared family of Landreman's exact equilibria [22] (eps = 1.2,
+lambda = 1.6, S = 1.4, delta = 0.14, two field periods, mu0 = 1,
+`examples/nested-oracles/landreman-sheared.nml`) is a **Mercier-unstable
+exact equilibrium**. `milca_nested_flux` presents it as a flux-coordinate
+equilibrium: the chart is the oracle's surface map, B, grad B and p are the
+exact fields, and psi', iota and the stream function follow from B on the
+chart. The rebuilt field equals the exact one to 3e-15 and iota equals the
+oracle's flux-ratio transform to 1e-10 (`nested_flux_field`). The CTest
+`nested_flux_study` (label slow, about 6 minutes on 16 cores) reproduces the
+numbers below; rho is the oracle label sqrt(psi_label/delta), and growth
+rates are in the oracle's units with density 1.
+
+- **Transform.** iota = 2.799647 on the axis and 2.810439 at the edge, a
+  0.39 % variation; no surface with iota = 3.
+- **Mercier and well.** D_Merc < 0 on every sampled surface from rho = 0.10
+  (-3.4e4) to 0.95 (-4.2e2), with D_shear between 2.5e-3 and 3.9e-3,
+  D_curr between +1.0 and +1.4, D_well between -3.1e4 and -3.7e2 and D_geod
+  between -3.1e3 and -48. d2V/dpsi2 = 565 to 698 > 0 with the pressure
+  falling outward, a magnetic hill at every radius, and 563.6 on the axis
+  from the near-axis expansion. The two Mercier forms agree to 1e-12 near
+  the axis (`nested_flux_well`).
+- **Antiperiodic family (odd n).** With harmonics m = -1..8, |m iota + n|
+  < 3.5 and gamma = 5/3, two modes are unstable. The lowest,
+  omega^2 = -1.99e-2, has 92 % of its delta psi power at rho = 0.5 in
+  (m, n) = (2, -5), with delta psi ~ exp(i(m theta* + n zeta)); the
+  second, omega^2 = -7.74e-3, has 93 % in (1, -3), delta psi ~
+  cos(theta* - 3 zeta), a helical core displacement that is antiperiodic
+  over a field period (m iota + n = -0.2, no resonant surface). 16 and 24 radial cells agree to 4e-6.
+  Its terms, as fractions of |2 delta W|, are bending +2.98, magnetic
+  compression +0.82, sound +1.60, parallel current -0.34 and
+  pressure-curvature -6.06: the pressure-curvature term supplies the drive.
+- **Periodic family (even n).** No unstable mode in the window
+  |m iota + n| < 3.5;
+  with < 5.5, two modes are unstable, dominated by (3, -8) and (2, -6). The
+  latter is the (2, 3)-per-field-period saddle that the map lane found
+  ([benchmarks/nested/README.md](../benchmarks/nested/README.md)).
+- **Axisymmetric control.** eps = 0 with the other parameters unchanged is
+  unstable for n = -3: three modes, the lowest omega^2 = -3.31e-2 with
+  99.8 % of delta psi in (1, -3), pressure-curvature -2.05 of |2 delta W|.
+  At these parameters 3D shaping is not needed for instability; the control
+  is not at fixed beta.
+- **Not converged.** Widening the window to |m iota + n| < 5.5 adds unstable
+  antiperiodic modes (six in all), lowers the lowest eigenvalue to -5.0e-2
+  (still (2, -5)) and the (1, -3) mode to -3.35e-2 (96 % in (1, -3); bending
+  +0.41, compression +0.23, sound +0.56, current -0.07, pressure-curvature
+  -2.14). On a Mercier-unstable equilibrium the unstable count grows with
+  the resolved mode numbers (O1 note above). The values are Ritz upper
+  bounds on the lowest eigenvalue of each family, not a converged spectrum.
+
+Interpretation: a pressure-driven instability of a Mercier-unstable
+equilibrium. In every unstable mode found the pressure-curvature term
+supplies the drive and the parallel-current term is small, so these are
+not primarily current-driven kinks; the instability is the one the local
+interchange (Mercier) criterion predicts and needs no new mechanism. It does not invalidate the equilibrium as an exact
+benchmark of force balance. An energy-minimizing equilibrium solver need not
+recover such an unstable stationary point (a saddle of the energy), while a
+force-residual root finder may; the failure of the former on this case is
+not by itself a defect.
+
+The volume-averaged beta 2<p>/<B^2> with zero edge pressure is 24.5 % here
+and 26.3 % for eps = 0.
+
+Open: the converged ideal spectrum per family (harmonic window and
+resolution beyond m = 8), whether the (1, -3) mode or a high-m Mercier mode
+dominates in the continuum limit, free-boundary effects, and the nonlinear
+evolution (saturation, rearrangement, reconnection), which the linear
+energy principle does not determine.
 
 ### Verification ladder
 
@@ -714,6 +785,8 @@ Publications (S and ? entries above are still to be read in full):
     r B0^2 (q'/q)^2/(8 mu0) + p'(1 - q^2) > 0 as given in C. B. Forest,
     *Classic Problems in MHD*, lecture 23, eq. (23.37),
     https://magnetohydrodynamics.physics.wisc.edu/lecture23.html.
+22. M. Landreman, arXiv:2609.26742 (2026); the evaluation in MILCA is
+    described in [nested-oracles.md](nested-oracles.md).
 
 Open-source comparators, to be studied and run, no code taken from them. The
 commit is the one inspected on 2026-11-12; each comparison run replaces it

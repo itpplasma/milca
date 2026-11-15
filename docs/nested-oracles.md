@@ -218,6 +218,16 @@ with a larger sample count reports wall time for 1/2/4/8 threads, without
 allocation inside the point loop. `equilibrium_nested_oracle_regeneration`
 reruns the exact proofs and compares regenerated leaves.
 
+[V] For stability analysis `milca_nested_flux` presents the sheared family
+as a flux-coordinate equilibrium of `milca_ideal_flux`
+([stability.md](stability.md#landremans-sheared-exact-equilibrium)). The
+generated leaf `nested_sheared_chart` supplies the first and second
+derivatives of the surface map in (rho, theta, t); psi', iota and the
+stream-function jets follow from the exact B on that chart. The leaf
+`nested_sheared_axis_well` supplies the volume and toroidal-flux densities
+per unit label and their second rho-derivatives, which give the near-axis
+magnetic well.
+
 [V] The oracles themselves do not enter a solve. The boundary/toroidal-profile
 initializer `ideal_seed_3d_init` and the frozen-form pullback and physical
 readback `map_3d_equilibrium` (docs/ideal-seed-3d.md) supply the 3D map path.

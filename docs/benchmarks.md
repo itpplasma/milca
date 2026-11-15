@@ -208,9 +208,12 @@ choices have executable inputs. Integrated/rotation/boundary bounds and
 matched external solver comparisons remain unavailable. The exact references are
 stationary points, not necessarily energy minima: on the integer family
 (iota=2=nfp) and on the sheared family (eps=1.2, delta=0.14) the discrete
-Hessian near the exact state becomes indefinite under refinement, so their
-pressure/label errors are not a convergence oracle for an energy minimiser
-beyond b=12 (measurements in
+Hessian near the exact state becomes indefinite under refinement. The
+sheared case is a Mercier-unstable exact equilibrium
+([stability.md](stability.md#landremans-sheared-exact-equilibrium)). An
+energy minimiser need not recover an unstable stationary point, while a
+force-residual root finder may, so their pressure/label errors are not a
+convergence oracle for an energy minimiser beyond b=12 (measurements in
 [the comparison notes](../benchmarks/nested/README.md)). Non-nested cases are
 cross-code (X) and named after the physics problem:
 
