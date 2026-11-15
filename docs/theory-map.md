@@ -220,6 +220,7 @@ QED and radiation ([QED and radiation](qed-radiation.md)):
 | Q2/Q4 + Q5 -> Q6 loss rates | optical depth, gradient length | emissivities of the kinetic model against published bremsstrahlung and synchrotron loss fits; Trubnikov's reflection formula against angular transport | planned |
 | pair equilibrium (Q2, optically thick) | n/n_degenerate, T_e/m c² | Fermi-Dirac pairs reach the Juttner density and mass action when nondegenerate and 3ζ(3)θ³/(2π²) when ultrarelativistic; γγ → e⁺e⁻ in a Wien gas equals thermal annihilation to 1e-8 (`pair_equilibrium`) | limit-checked |
 | pair balance (Q2) | T_e/m c², optical depth | Svensson (1982) equilibria | planned |
+| hydrogenic recombination -> positronium formation | reduced mass | exact 1s capture (Stobbe and Milne) reproduces hydrogen at 10⁴ K, 1.58e-13 cm³/s, and its threshold limit; positronium is 4 α_H at twice the temperature (`positronium_formation`) | ground state limit-checked |
 
 Nuclear reactions ([nuclear reactions](nuclear-reactions.md)):
 

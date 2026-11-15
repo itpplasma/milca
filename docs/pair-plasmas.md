@@ -29,7 +29,9 @@ Relativistic pair plasmas near compact objects belong to the
   dominant at the electronvolt temperatures of the experiments, positronium
   formation by radiative capture and by charge exchange with neutrals. Radiative
   positronium formation is hydrogen-like with reduced mass m/2 and is checked
-  against the scaled hydrogen rates.
+  against the scaled hydrogen rates; capture into the ground state runs
+  (`milca_hydrogenic_recombination`), excited states and charge exchange
+  follow.
 - **Geometry.** Dipole and stellarator vacuum fields from the existing
   equilibrium lanes.
 - **Stability.** Linear drift-kinetic and gyrokinetic stability in slab,
