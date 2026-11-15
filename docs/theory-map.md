@@ -249,6 +249,7 @@ Gravity ([gravity](gravity.md)):
 | QUMOND -> Newtonian | a₀/g | with ν = 1 the second Poisson solve returns Φ_N to round-off; for g_N ≫ a₀ the correction is ∫(ν − 1) g_N dr; spherical (Plummer) and Kuzmin-disk fields obey the exact algebraic relation; deep-MOND v⁴ = G M a₀ (1 + √y); two masses: projection and flux identities (`qumond_limits`) | limit-checked |
 | AQUAL -> Newtonian | a₀/g | high-acceleration limit is Newtonian gravity | planned |
 | G4 fluids -> G3 kinetic | Knudsen number | Jeans instability of the fluid against the kinetic growth rate: the kinetic root reaches the cold-fluid limit γ = 1 − (3/2)k² and vanishes as √(2/π)(1 − k²) at the Jeans length (`test_jeans`) | kinetic side runs; fluid side planned |
+| Ornstein-Uhlenbeck kinetic response -> collisionless and collisional limits (KL0) | nu/(k_par v_T), k_par v_T/nu | susceptibility functions against a Hermite-basis solution of the same equation with all conservation models, the plasma dispersion function as nu -> 0 and the closed form at k_par = 0 (`ou_susceptibility`); KiLCA closed forms | limit-checked |
 
 Cross-branch overlaps: the relativistic collision operators sit in both the QED
 and the classical collision hierarchy; reaction products of N4 are sources of
