@@ -276,7 +276,7 @@ target_sources(milca_classical PRIVATE src/classical/ocp.f90 src/classical/pair_
     src/generated/milca_cloud_leaves.f90 src/classical/microscopic_cloud.f90)
 target_sources(milca_continuum PRIVATE src/continuum/vlasov_response.f90
     src/continuum/ou_susceptibility.f90 src/continuum/kinetic_layer_cylinder.f90
-    src/continuum/kinetic_layer_window.f90
+    src/continuum/kinetic_layer_window.f90 src/continuum/kinetic_layer_delta.f90
     src/generated/milca_poisson_leaves.f90 src/continuum/poisson_laboratory.f90
     src/generated/milca_fp_leaves.f90 src/continuum/fp_laboratory.f90
     src/generated/milca_fp_relaxation_leaves.f90 src/continuum/fp_relaxation.f90
@@ -1753,6 +1753,9 @@ add_test(NAME kinetic_layer_window COMMAND test_kinetic_layer_window)
 add_executable(test_kinetic_layer_cylinder test/test_kinetic_layer_cylinder.f90)
 target_link_libraries(test_kinetic_layer_cylinder PRIVATE milca)
 add_test(NAME kinetic_layer_cylinder COMMAND test_kinetic_layer_cylinder)
+add_executable(test_kinetic_layer_delta test/test_kinetic_layer_delta.f90)
+target_link_libraries(test_kinetic_layer_delta PRIVATE milca)
+add_test(NAME kinetic_layer_delta COMMAND test_kinetic_layer_delta)
 add_executable(test_jeans test/test_jeans.f90)
 target_link_libraries(test_jeans PRIVATE milca)
 add_test(NAME jeans_instability COMMAND test_jeans)
