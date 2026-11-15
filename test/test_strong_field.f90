@@ -28,6 +28,13 @@ program test_strong_field
     g = quantum_gaunt(1.0_dp, 400)
     print '(a, f10.6)', 'g(chi = 1):', g
     call require(g > 0 .and. g < 1, 'quantum emission below the classical power')
+    ! pair creation: the saddle-point limit, approached as 1 + O(chi)
+    s1 = pair_creation_rate(0.01_dp, 200)/(3*sqrt(3.0_dp)/(16*sqrt(2.0_dp))*0.01_dp) - 1
+    s2 = pair_creation_rate(0.005_dp, 200)/(3*sqrt(3.0_dp)/(16*sqrt(2.0_dp))*0.005_dp) - 1
+    print '(a, 2es11.3)', 'pair creation over saddle limit - 1 at chi = 0.01, 0.005:', s1, s2
+    call require(abs(s1) < 0.1_dp .and. abs(s2/s1 - 0.5_dp) < 0.05_dp, 'pair creation at small chi')
+    call require(abs(pair_creation_spectrum(1.0_dp, 0.3_dp)/pair_creation_spectrum(1.0_dp, 0.7_dp) &
+        - 1) < 1e-13_dp, 'electron-positron symmetry')
     print '(a)', 'quantum synchrotron emission matches its derived limits'
 
 contains

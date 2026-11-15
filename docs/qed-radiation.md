@@ -104,7 +104,8 @@ fields (Erber 1966) for χ of order one, and the Monte Carlo emission rates of
 QED particle-in-cell codes. It is the parent of Q3. The spin-averaged
 emission rate in the locally constant field approximation runs
 (`milca_strong_field`); its power reduces to the Landau-Lifshitz value with
-the Gaunt factor 1 - (55√3/16)χ + 48χ².
+the Gaunt factor 1 - (55√3/16)χ + 48χ², and so does pair creation by a
+photon, whose rate reaches (3√3/(16√2))χ e^{-8/(3χ)} at small χ.
 
 ## First slice (P1g)
 
