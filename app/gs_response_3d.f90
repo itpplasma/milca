@@ -335,7 +335,11 @@ program gs_response_3d
         do i = 1, nrat
             call layer_init(ul, psin_rat(i), abs(q_rat(i)), dq_rat(i), di_rat(i), &
                 m_rat(i), delta_rat(i), layer_ratio, layer_nfit, lays(i), st)
-            if (st /= 0) error stop 'layer fit rings'
+            if (st /= 0) then
+                write (*, '(a,f10.6,a,f14.10,a,i0)') 'layer fit rings failed for q ', &
+                    q_rat(i), ' at psin ', psin_rat(i), ', status ', st
+                error stop 'layer fit rings'
+            end if
         end do
     end if
 
