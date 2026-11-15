@@ -11,6 +11,13 @@
 !   g(chi) = 3/(2 chi^2) int_0^1 delta S d delta,
 ! derived limits g -> 1 - (55 sqrt(3)/16) chi as chi -> 0, and the
 ! classical synchrotron spectrum int_y^inf K_{5/3} at delta << 1.
+! Pair creation by a photon of energy fraction delta to the electron, with the
+! photon's chi and gamma = photon energy/(m c^2), the crossed rate
+!   dW/d delta = alpha m c^2/(hbar gamma) P(chi, delta),
+!   P = [(delta/(1 - delta) + (1 - delta)/delta) K_{2/3}(y) + int_y^inf K_{1/3}]/(sqrt(3) pi),
+!   y = 2/(3 chi delta (1 - delta)),
+! whose total at chi << 1 is, by the saddle at delta = 1/2,
+! (3 sqrt(3)/(16 sqrt(2))) chi exp(-8/(3 chi)) (Erber 1966).
 module milca_strong_field
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortnum_quadrature, only: gauss_legendre
@@ -18,6 +25,7 @@ module milca_strong_field
     private
 
     public :: bessel_k_frac, bessel_k_tail, quantum_synchrotron_rate, quantum_gaunt
+    public :: pair_creation_spectrum, pair_creation_rate
 
     real(dp), parameter :: pi = 3.14159265358979323846_dp
     integer, parameter :: nk = 160
@@ -80,5 +88,34 @@ contains
         end do
         g = 1.5_dp*g/chi**2
     end function quantum_gaunt
+
+    !> P(chi, delta) of the pair-creation rate.
+    real(dp) function pair_creation_spectrum(chi, delta) result(s)
+        real(dp), intent(in) :: chi, delta
+        real(dp) :: y
+        y = 2/(3*chi*delta*(1 - delta))
+        s = ((delta/(1 - delta) + (1 - delta)/delta)*bessel_k_frac(2.0_dp/3, y) + &
+            bessel_k_tail(1.0_dp/3, y))*exp(-y)/(sqrt(3.0_dp)*pi)
+    end function pair_creation_spectrum
+
+    !> int_0^1 P d delta times exp(8/(3 chi)), with n points on each half,
+    !> delta = (1 - cos(pi u/2))/2 clustering at the ends.
+    real(dp) function pair_creation_rate(chi, n) result(r)
+        real(dp), intent(in) :: chi
+        integer, intent(in) :: n
+        real(dp) :: x(n), w(n), u, delta, y
+        integer :: i
+        call gauss_legendre(n, x, w)
+        r = 0
+        do i = 1, n
+            u = (x(i) + 1)/2
+            delta = (1 - cos(pi*u/2))/2
+            y = 2/(3*chi*delta*(1 - delta))
+            ! twice the half 0 < delta < 1/2; exp(-y + 8/(3 chi)) stays finite
+            r = r + w(i)*pi/8*sin(pi*u/2)*2* &
+                ((delta/(1 - delta) + (1 - delta)/delta)*bessel_k_frac(2.0_dp/3, y) + &
+                bessel_k_tail(1.0_dp/3, y))*exp(-y + 8/(3*chi))/(sqrt(3.0_dp)*pi)
+        end do
+    end function pair_creation_rate
 
 end module milca_strong_field
