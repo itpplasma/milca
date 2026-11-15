@@ -44,7 +44,7 @@ module milca_kinetic_layer_cylinder
         KL_BAD_INPUT = 3
 
     real(dp), parameter :: pi = 4*atan(1.0_dp)
-    real(dp), parameter, public :: kl_charge = 4.80320471e-10_dp, kl_light = 2.99792458e10_dp
+    real(dp), parameter, public :: kl_charge = 4.80320471257e-10_dp, kl_light = 2.99792458e10_dp
     complex(dp), parameter :: iu = (0.0_dp, 1.0_dp)
 
     !> One species on the window grid: charge number, mass [g], density
