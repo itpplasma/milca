@@ -5,6 +5,12 @@
 ! m = c = 1; cross sections in Z^2 alpha r_e^2. The photon angle is
 ! integrated in ln(1 - beta cos theta_k) and the electron angle in
 ! ln |p - p' - k|^2, which follow the forward and Coulomb peaks.
+! An optional nuclear charge z applies the Coulomb correction of Elwert (Ann.
+! Phys. 426, 178, 1939), the ratio of the Coulomb-wave densities at the
+! nucleus, (beta/beta') (1 - exp(-2 pi nu))/(1 - exp(-2 pi nu')), nu = z
+! alpha/beta. It keeps the spectrum finite at the tip, where the Born result
+! vanishes, and matches Sommerfeld's exact nonrelativistic tip up to the
+! factor (pi nu/sinh(pi nu))^2.
 module milca_qed_bremsstrahlung
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_qed_tree, only: four_vector_t, on_shell, minkowski, &
@@ -17,14 +23,17 @@ module milca_qed_bremsstrahlung
     public :: electron_energy_radiated, electron_photon_spectrum
 
     real(dp), parameter :: pi = acos(-1.0_dp)
+    real(dp), parameter :: alpha = 7.2973525693e-3_dp
 
 contains
 
     !> d sigma/d omega of an electron of total energy e for photon energy
-    !> omega < e - 1, with n quadrature points per angle.
-    real(dp) function nucleus_photon_spectrum(e, omega, n) result(total)
+    !> omega < e - 1, with n quadrature points per angle; Born unless the
+    !> nuclear charge z is present.
+    real(dp) function nucleus_photon_spectrum(e, omega, n, z) result(total)
         real(dp), intent(in) :: e, omega
         integer, intent(in) :: n
+        real(dp), intent(in), optional :: z
         real(dp) :: x(n), w(n), p, pp, beta, lo, hi, q2, jac, slo, shi, sk, ck, jk, phi, a(3)
         type(four_vector_t) :: pin, pout, k
         integer :: i, j, l
@@ -57,7 +66,22 @@ contains
         end do
         ! d sigma/(d omega dOmega' dOmega_k) = X p' omega/(4 pi^2 p)
         total = total*pp*omega/(4*pi**2*p)
+        if (present(z)) total = total*elwert(z, beta, pp/(e - omega))
     end function nucleus_photon_spectrum
+
+    pure real(dp) function elwert(z, beta, beta_out)
+        real(dp), intent(in) :: z, beta, beta_out
+        elwert = beta/beta_out*(-expm1(-2*pi*z*alpha/beta))/(-expm1(-2*pi*z*alpha/beta_out))
+    end function elwert
+
+    pure real(dp) function expm1(x)
+        real(dp), intent(in) :: x
+        if (abs(x) < 1e-5_dp) then
+            expm1 = x*(1 + x/2*(1 + x/3))
+        else
+            expm1 = exp(x) - 1
+        end if
+    end function expm1
 
     ! p' of modulus pp at azimuth phi around a, with |a - p'|^2 = q2
     function on_sphere(a, pp, q2, phi) result(v)
@@ -79,9 +103,10 @@ contains
     !> integral of omega d sigma/d omega over 0 < omega < e - 1. With
     !> omega = (e - 1) sin^2(pi y/2) the logarithm at omega -> 0 and the
     !> square root of p' at the upper end become smooth in y.
-    real(dp) function nucleus_energy_loss(e, nang, nomega) result(total)
+    real(dp) function nucleus_energy_loss(e, nang, nomega, z) result(total)
         real(dp), intent(in) :: e
         integer, intent(in) :: nang, nomega
+        real(dp), intent(in), optional :: z
         real(dp) :: x(nomega), w(nomega), omega, y, jac
         integer :: i
         call gauss_legendre(nomega, x, w)
@@ -90,16 +115,17 @@ contains
             y = (x(i) + 1)/2
             omega = (e - 1)*sin(pi*y/2)**2
             jac = (e - 1)*pi*sin(pi*y/2)*cos(pi*y/2)/2
-            total = total + w(i)*jac*omega*nucleus_photon_spectrum(e, omega, nang)
+            total = total + w(i)*jac*omega*nucleus_photon_spectrum(e, omega, nang, z)
         end do
     end function nucleus_energy_loss
 
     !> Radiated power per n_e n_i of a Juttner plasma of temperature
     !> theta = kT/(m c^2), in Z^2 alpha r_e^2 m c^3; the kinetic energy is
     !> integrated up to umax theta with nmom points in its square root.
-    real(dp) function nucleus_thermal_power(theta, nang, nomega, nmom, umax) result(power)
+    real(dp) function nucleus_thermal_power(theta, nang, nomega, nmom, umax, z) result(power)
         real(dp), intent(in) :: theta, umax
         integer, intent(in) :: nang, nomega, nmom
+        real(dp), intent(in), optional :: z
         real(dp) :: x(nmom), w(nmom), u, t, gam, p, weight, norm
         integer :: i
         call gauss_legendre(nmom, x, w)
@@ -114,7 +140,7 @@ contains
             ! p^2 dp exp(-(gam-1)/theta) = p gam theta exp(-u) du, du = 2 t dt
             weight = w(i)*sqrt(umax)/2*2*t*p*gam*theta*exp(-u)
             norm = norm + weight
-            power = power + weight*(p/gam)*nucleus_energy_loss(gam, nang, nomega)
+            power = power + weight*(p/gam)*nucleus_energy_loss(gam, nang, nomega, z)
         end do
         power = power/norm
     end function nucleus_thermal_power
