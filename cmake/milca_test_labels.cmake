@@ -343,6 +343,10 @@ milca_test_labels(quantum_cutoff_oracles fast CLASSES quantum
     TARGETS test_quantum_cutoff)
 milca_test_labels(relativistic_fermi_gas_oracles fast CLASSES quantum
     TARGETS test_relativistic_fermi_gas)
+milca_test_labels(qed_tree_level fast CLASSES quantum TARGETS test_qed_tree)
+if(MILCA_FORTSYM_BUILD)
+    milca_test_labels(qed_leaf_regeneration fast CLASSES quantum TARGETS gen_qed)
+endif()
 milca_test_labels(fermi_gas_cold_sommerfeld fast CLASSES quantum
     TARGETS test_fermi_gas_cold)
 milca_test_labels(fermion_ensemble_oracles fast CLASSES quantum
