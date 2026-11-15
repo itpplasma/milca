@@ -1724,6 +1724,9 @@ set_source_files_properties(src/generated/milca_fusion_reactivity_leaves.f90
 add_executable(test_fusion_reactivity test/test_fusion_reactivity.f90)
 target_link_libraries(test_fusion_reactivity PRIVATE milca)
 add_test(NAME fusion_reactivity COMMAND test_fusion_reactivity)
+add_executable(test_fusion_beam_target test/test_fusion_beam_target.f90)
+target_link_libraries(test_fusion_beam_target PRIVATE milca)
+add_test(NAME fusion_beam_target COMMAND test_fusion_beam_target)
 target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
     src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90

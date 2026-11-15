@@ -12,7 +12,7 @@ module milca_fusion_reactivity
     implicit none
     private
 
-    public :: maxwellian_reactivity, s_factor_t, pb11_s_factor, pb11_breaks
+    public :: maxwellian_reactivity, beam_target_reactivity, s_factor_t, pb11_s_factor, pb11_breaks
     public :: PB11_GAMOW_SQRT_KEV, PB11_MRC2_KEV
 
     real(dp), parameter :: light_cm = 2.99792458e10_dp, barn_cm2 = 1e-24_dp
@@ -95,6 +95,40 @@ contains
         end do
         rate = light_cm*sqrt(8/(pi*mrc2))*t**(-1.5_dp)*rate*barn_cm2
     end function maxwellian_reactivity
+
+    !> <sigma v_rel> in cm^3/s of a monoenergetic beam (energy e_beam and
+    !> mass m_beam, keV and keV/c^2, nonrelativistic) on a Maxwellian target
+    !> of mass m_target and temperature t_target (keV): with s^2 = T/m_t and
+    !> the beam speed v_b, both in c,
+    !>   <sigma v> = 1/(sqrt(2 pi) s v_b) int sigma(E_r) v_r^2
+    !>               [exp(-(v_r - v_b)^2/(2 s^2)) - exp(-(v_r + v_b)^2/(2 s^2))] dv_r,
+    !> E_r = mu v_r^2/2, the isotropic Maxwellian averaged over the angle
+    !> between beam and target velocity. Gamow constant bg, S factor sf.
+    real(dp) function beam_target_reactivity(e_beam, m_beam, m_target, t_target, bg, sf, n) &
+            result(rate)
+        real(dp), intent(in) :: e_beam, m_beam, m_target, t_target, bg
+        procedure(s_factor_t) :: sf
+        integer, intent(in) :: n
+        real(dp) :: x(n), w(n), vb, s, mu, lo, hi, vr, er, sigma, kern
+        integer :: i
+        call gauss_legendre(n, x, w)
+        vb = sqrt(2*e_beam/m_beam)
+        s = sqrt(t_target/m_target)
+        mu = m_beam*m_target/(m_beam + m_target)
+        ! the window of relative speeds the target Maxwellian reaches
+        lo = max(vb - 12*s, 0.0_dp)
+        hi = vb + 12*s
+        rate = 0
+        do i = 1, n
+            vr = lo + (hi - lo)*(x(i) + 1)/2
+            if (vr <= 0) cycle
+            er = mu*vr**2/2
+            sigma = sf(er)/er*exp(-bg/sqrt(er))
+            kern = exp(-(vr - vb)**2/(2*s**2)) - exp(-(vr + vb)**2/(2*s**2))
+            rate = rate + w(i)*(hi - lo)/2*sigma*vr**2*kern
+        end do
+        rate = rate/(sqrt(2*pi)*s*vb)*light_cm*barn_cm2
+    end function beam_target_reactivity
 
     pure subroutine sort(v)
         real(dp), intent(inout) :: v(:)
