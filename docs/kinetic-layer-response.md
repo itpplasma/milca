@@ -55,3 +55,42 @@ Checks (`ou_susceptibility`):
 - the closed forms of KiLCA (calc_Imn_array). On a grid of 24 points they agree to 1e-12 or
   better except at small x1 with large x2, where the KiLCA forms lose up to 6e-9 and the
   Hermite solution agrees with this module to 2e-12.
+
+## KL1: cylinder response (`milca_kinetic_layer_cylinder`)
+
+Gaussian units. The background is given on one period of a radially periodised
+window (equidistant, endpoint excluded): k_par, k_s, omega_E, B0, E_r and per
+species n, T, n', T' and the collision frequency. For one harmonic the kernels
+in the Fourier basis exp(i k_l r), |l| <= M, are
+
+    K(l, l') = (2 pi/N) sum_j exp(-i (k_l - k_l') r_j)/(8 pi^2) sum_species core,
+
+with the gyroaverage harmonic only. With b+ = rho_T^2 (k_perp^2 + k_perp'^2)/2,
+bx = rho_T^2 k_perp k_perp', S_n = exp(-b+) I_n(bx) and
+F(I^a, I^b) = I^a (S0 (A1 + A2 (1 - b+)) + A2 bx S1) + A2 S0 I^b/2:
+
+| kernel | core |
+|---|---|
+| rho-Phi | (1/lambda_D^2) (-G_B + i v_T^2 k_s/(omega_c nu) F(I00, I02)) |
+| rho-B_r | -(1/lambda_D^2) v_T^3/(omega_c nu c) F(I01, I03) |
+| j_par-Phi | (1/lambda_D^2) i v_T^3 k_s/(omega_c nu) F(I10, I12) |
+| j_par-B_r | -(1/lambda_D^2) v_T^4/(omega_c nu c) F(I11, I13) |
+
+The susceptibility indices follow from moment counting: the output moment
+supplies k, the source (u_par for B_r and the u_par^2 of the energy factor of the
+A2 drive) supplies l. KIM uses I^{21} in place of I^{03} for rho-B_r; the two
+are equal for the energy-conserving operator (checked numerically), not for
+the bare Ornstein-Uhlenbeck operator. G_B = exp(-rho_T^2 (k - k')^2/2) is the
+gyroaverage of the Boltzmann term at the particle position (Eq. 2.41 of the
+paper); KIM sets it to 1 (`boltzmann_gyroaverage = .false.`). Poisson's
+equation (4 pi K^rhoPhi - diag(k_l^2)) Phi = -4 pi B_r K^rhoB(:, 0) is solved for
+a radially constant B_r, and j_par = K^jPhi Phi + B_r K^jB(:, 0).
+
+Checks (`kinetic_layer_cylinder`): the overflow-free Bessel products against the
+direct ones; the local rho-Phi core against the second-order Larmor-radius form
+(Eq. 2.66) with an O(b^2) remainder; diagonal kernels on a uniform background;
+and the ideal limit Phi = -i E_r B_r/(k_par B0) far from the resonance, whose
+remaining deviation is the ion Larmor-radius correction (rho_i k_s)^2 (3.4e-3 at
+k_s = 0.12/cm, 3.4e-5 at 0.012/cm). Next: the periodised background from
+profiles and the comparison with KIM-1L on ASDEX Upgrade 33353.
+
