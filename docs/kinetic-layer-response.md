@@ -91,6 +91,13 @@ direct ones; the local rho-Phi core against the second-order Larmor-radius form
 (Eq. 2.66) with an O(b^2) remainder; diagonal kernels on a uniform background;
 and the ideal limit Phi = -i E_r B_r/(k_par B0) far from the resonance, whose
 remaining deviation is the ion Larmor-radius correction (rho_i k_s)^2 (3.4e-3 at
-k_s = 0.12/cm, 3.4e-5 at 0.012/cm). Next: the periodised background from
-profiles and the comparison with KIM-1L on ASDEX Upgrade 33353.
+k_s = 0.12/cm, 3.4e-5 at 0.012/cm).
+
+`kl_cylinder` solves one window from a text background. Given the window background
+that KIM writes for an ASDEX Upgrade pedestal case (harmonic (6, 2), 512 points,
+M = 225, inputs not public), Phi, the electron and ion parallel currents and the
+integrated shielding current agree with KIM's local periodic branch to 4e-5
+within 1.5 cm of the resonant surface; the Boltzmann gyroaverage that KIM omits
+changes the integrated current by 1.6e-4 there. Next: the periodised background
+from profiles (force balance, collision frequencies) and an ITER case.
 
