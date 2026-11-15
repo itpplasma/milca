@@ -1223,6 +1223,8 @@ foreach(quantum_family fermi_gas quantum_fock quantum_evolution quantum_correlat
     target_link_libraries(test_${quantum_family} PRIVATE milca)
     add_test(NAME ${quantum_family}_oracles COMMAND test_${quantum_family})
 endforeach()
+add_executable(pb11_power_balance app/pb11_power_balance.f90)
+target_link_libraries(pb11_power_balance PRIVATE milca)
 add_executable(pp_fusion_export app/pp_fusion_export.f90)
 add_dependencies(pp_fusion_export milca_build_info)
 target_include_directories(pp_fusion_export PRIVATE ${CMAKE_BINARY_DIR}/result_include)
