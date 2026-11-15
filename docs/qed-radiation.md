@@ -101,7 +101,10 @@ instances with stated validity.
 is included exactly (Furry picture, Volkov states) instead of perturbatively,
 which gives quantum synchrotron emission and pair creation in strong magnetic
 fields (Erber 1966) for χ of order one, and the Monte Carlo emission rates of
-QED particle-in-cell codes. It is the parent of Q3.
+QED particle-in-cell codes. It is the parent of Q3. The spin-averaged
+emission rate in the locally constant field approximation runs
+(`milca_strong_field`); its power reduces to the Landau-Lifshitz value with
+the Gaunt factor 1 - (55√3/16)χ + 48χ².
 
 ## First slice (P1g)
 
