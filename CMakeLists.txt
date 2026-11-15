@@ -1728,7 +1728,8 @@ add_executable(test_fusion_beam_target test/test_fusion_beam_target.f90)
 target_link_libraries(test_fusion_beam_target PRIVATE milca)
 add_test(NAME fusion_beam_target COMMAND test_fusion_beam_target)
 target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
-    src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90)
+    src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90
+    src/quantum/pair_equilibrium.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 set_source_files_properties(src/generated/milca_beliaev_budker_leaves.f90
@@ -1754,6 +1755,9 @@ add_test(NAME radiation_reaction COMMAND test_radiation_reaction)
 add_executable(test_qed_thermal test/test_qed_thermal.f90)
 target_link_libraries(test_qed_thermal PRIVATE milca)
 add_test(NAME qed_thermal COMMAND test_qed_thermal)
+add_executable(test_pair_equilibrium test/test_pair_equilibrium.f90)
+target_link_libraries(test_pair_equilibrium PRIVATE milca)
+add_test(NAME pair_equilibrium COMMAND test_pair_equilibrium)
 add_executable(test_qed_ee_power test/test_qed_ee_power.f90)
 target_link_libraries(test_qed_ee_power PRIVATE milca)
 add_test(NAME qed_ee_power COMMAND test_qed_ee_power)

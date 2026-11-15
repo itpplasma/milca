@@ -121,7 +121,13 @@ runaway energies.
    defect of the friction-only reduction against the Coulomb scattering it
    competes with.
 4. Thermal pair balance as a function of temperature, density and optical
-   depth, compared with Svensson (1982).
+   depth, compared with Svensson (1982). The optically thick end runs:
+   Fermi-Dirac pairs in chemical equilibrium with photons at fixed net charge
+   (`pair_equilibrium`), and pair creation in a Wien photon gas
+   (`photon_pair_rate`), which balances thermal annihilation by detailed
+   balance between the Breit-Wheeler and Dirac cross sections. The optically
+   thin end, where pairs come from e-e, e-p and photon-particle collisions
+   and the photons escape, follows.
 5. The p-¹¹B and D-³He power balance: fusion power from published
    reactivities (Bosch and Hale 1992; Sikora and Weller 2016; Putvinski et al.
    2019) and, once available, from [nuclear reactions](nuclear-reactions.md),

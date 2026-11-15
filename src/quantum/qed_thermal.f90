@@ -5,14 +5,19 @@
 !               / (8 theta K2(1/theta)^2),   s >= 4,
 ! units m = c = 1, rate coefficients in r_e^2 c. The modified Bessel
 ! functions enter exponentially scaled, so low temperatures do not underflow.
+! The same reduction with massless partners gives pair creation in a Wien
+! photon gas (Boltzmann occupation, density 2 theta^3/pi^2):
+!   R = theta/(16 pi^4) int sigma_BW(s) s^(3/2) K1(sqrt(s)/theta) ds,  s >= 4,
+! pairs per lambda_C^3 and per lambda_C/c in units of r_e^2/lambda_C^2, the
+! 1/2 for identical photons included.
 module milca_qed_thermal
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use milca_qed_leaves, only: qed_dirac_annihilation_total
+    use milca_qed_leaves, only: qed_dirac_annihilation_total, qed_breit_wheeler_total
     use fortnum_quadrature, only: gauss_legendre
     implicit none
     private
 
-    public :: scaled_bessel_k, annihilation_rate, pair_energy_rate, kernel_s
+    public :: scaled_bessel_k, annihilation_rate, pair_energy_rate, photon_pair_rate, kernel_s
 
     abstract interface
         !> A function of the invariant s of a colliding pair.
@@ -94,5 +99,28 @@ contains
         end do
         rate = rate/(8*theta*k2**2)
     end function pair_energy_rate
+
+    !> Pairs created per volume and time by gamma gamma -> e+ e- in a Wien
+    !> photon gas at temperature theta; a diluted Wien spectrum scales with
+    !> the square of its density.
+    real(dp) function photon_pair_rate(theta, n) result(rate)
+        real(dp), intent(in) :: theta
+        integer, intent(in) :: n
+        real(dp), parameter :: pi = 3.14159265358979323846_dp
+        real(dp) :: x(n), w(n), y, root_s, s, sigma, smax, jac
+        integer :: i
+        call gauss_legendre(n, x, w)
+        smax = sqrt(60.0_dp)
+        rate = 0
+        do i = 1, n
+            y = smax*(x(i) + 1)/2
+            root_s = 2 + y**2*theta
+            s = root_s**2
+            jac = smax/2*2*y*theta*2*root_s
+            call qed_breit_wheeler_total(sqrt(1 - 4/s), sigma)
+            rate = rate + w(i)*jac*sigma*s*root_s*scaled_bessel_k(1, root_s/theta)*exp(-y**2)
+        end do
+        rate = rate*theta/(16*pi**4)*exp(-2/theta)
+    end function photon_pair_rate
 
 end module milca_qed_thermal
