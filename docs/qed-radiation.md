@@ -142,12 +142,13 @@ state; every later step reports its defect against its parent.
 
 `app/pb11_power_balance` (sCluster, 2026-11-15) compares the p-¹¹B fusion
 power with electron-ion and electron-electron bremsstrahlung at equal
-electron and ion temperature, boron fractions x = n_B/n_p of 0.1 to 0.3:
+electron and ion temperature, boron fractions x = n_B/n_p of 0.1 to 0.3,
+electron-ion bremsstrahlung with the Coulomb correction of Elwert:
 
 | T (keV) | 50 | 100 | 150 | 200 | 300 | 500 | 800 |
 |---|---|---|---|---|---|---|---|
-| best P_fus/P_brems | 0.034 | 0.22 | 0.38 | 0.43 | 0.38 | 0.26 | 0.17 |
-| optimal x | 0.096 | 0.102 | 0.107 | 0.111 | 0.116 | 0.119 | 0.118 |
+| best P_fus/P_brems | 0.032 | 0.21 | 0.37 | 0.42 | 0.38 | 0.26 | 0.17 |
+| optimal x | 0.094 | 0.101 | 0.106 | 0.110 | 0.115 | 0.119 | 0.118 |
 | P_ee/P_ei | 0.09 | 0.18 | 0.26 | 0.34 | 0.44 | 0.51 | 0.49 |
 
 Bremsstrahlung alone exceeds the fusion power at every temperature, as
@@ -155,10 +156,10 @@ Putvinski, Ryutov and Yushmanov (2019) found. The boron fraction enters only
 through the densities, n_p = n_e/(1 + 5x) and n_B = x n_p, so the optimum
 follows from the computed rates: it is x = 1/√125 ≈ 0.089 when only
 electron-ion bremsstrahlung counts and moves to 0.10-0.12 with the
-electron-electron part. Not yet included:
-synchrotron losses, the Coulomb correction to electron-ion bremsstrahlung for
-boron (Born approximation scaled with Z^2), and electron temperatures below
-the ion temperature.
+electron-electron part. The Coulomb correction raises electron-ion
+bremsstrahlung by 5.6 % at 50 keV and 1.7 % at 200 keV against Born. Not yet
+included: synchrotron losses and electron temperatures below the ion
+temperature.
 
 ## Sources
 
