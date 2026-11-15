@@ -84,7 +84,28 @@ as first principles.
   a reduction of general relativity. In its quasi-linear formulation QUMOND
   (Milgrom 2010) it is two linear Poisson problems with an algebraic step
   between them; in AQUAL (Bekenstein and Milgrom 1984) one nonlinear Poisson
-  problem, both on the finite-element machinery.
+  problem, both on the finite-element machinery. QUMOND runs for
+  axisymmetric mass distributions (`milca_qumond`): P1 finite elements on
+  the meridional half plane with the volume weight 2πR and FortSparse
+  factors solve ∇²Φ_N = 4πGρ with the monopole potential on a large outer
+  sphere, form g̃ = ν(|g_N|/a₀) g_N on each element, and solve ∇²Φ = −∇·g̃
+  with the natural boundary condition, so that g = −∇Φ is the projection of
+  g̃ onto gradients. The interpolating function is a declared model choice
+  from ν_n(y) = (1/2 + (1/4 + y⁻ⁿ)^½)^(1/n), n = 1 "simple" and n = 2
+  "standard" (Famaey and McGaugh 2012); a midplane surface density enters as
+  an edge load. Checks (`test_qumond`): in spherical symmetry (Plummer
+  sphere) the algebraic relation holds to the discretization error, 6e-4
+  and second order, for both ν; far from the mass v⁴/(G M a₀) follows the
+  derived 1 + √y, y = G M/(r² a₀), and is 1.0005 at 10³ MOND radii; with
+  ν = 1 the second solve returns the Newtonian potential to round-off, and
+  for g_N ≫ a₀ the correction is ∫(ν − 1) g_N dr to 2e-3; the Kuzmin disk,
+  whose algebraic field is curl-free (Brada and Milgrom 1995), matches the
+  exact potential to 7e-4; for two separated masses the algebraic field has
+  circulation and the solution departs from it by 2.3 %, independent of the
+  mesh, while ‖g‖² + ‖g − g̃‖² = ‖g̃‖² holds to 1e-12 and the fluxes of g
+  and g̃ through spheres agree to 1e-4. The derivatives follow from the
+  same two factorizations and ν′; they and a certificate are not
+  implemented.
 
 ## Speed
 
@@ -112,11 +133,13 @@ a fixed metric.
 - M. Milgrom, Astrophys. J. 270, 365 (1983); Mon. Not. R. Astron. Soc. 403,
   886 (2010).
 - J. D. Bekenstein and M. Milgrom, Astrophys. J. 286, 7 (1984).
+- R. Brada and M. Milgrom, Mon. Not. R. Astron. Soc. 276, 453 (1995).
 - L. Greengard and V. Rokhlin, J. Comput. Phys. 73, 325 (1987).
 - L. M. Widrow and N. Kaiser, Astrophys. J. 416, L71 (1993).
 - W. Hu, R. Barkana and A. Gruzinov, Phys. Rev. Lett. 85, 1158 (2000).
 - J. Heyvaerts, Mon. Not. R. Astron. Soc. 407, 355 (2010).
 - T. W. Baumgarte and S. L. Shapiro, *Numerical Relativity* (Cambridge, 2010).
+- B. Famaey and S. S. McGaugh, Living Rev. Relativ. 15, 10 (2012).
 - V. Springel, Mon. Not. R. Astron. Soc. 401, 791 (2010).
 - F. Löffler et al., Class. Quantum Grav. 29, 115001 (2012).
 - H.-Y. Schive, T. Chiueh and T. Broadhurst, Nature Phys. 10, 496 (2014).

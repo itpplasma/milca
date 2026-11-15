@@ -246,7 +246,8 @@ Gravity ([gravity](gravity.md)):
 | fuzzy dark matter -> cold dark matter | ħ/(m L v) | Schrödinger-Poisson -> Vlasov-Poisson through the Wigner map (as the quantum branch's Wigner -> Vlasov edge) | planned |
 | fuzzy-dark-matter soliton (Schrödinger-Poisson ground state) | none, identities | virial theorem 2K + W = 0, ε M = K + 2W, scaling ψ -> λ²ψ(λr), r_1/2 M = 3.925 (`fuzzy_dark_matter_soliton`) | limit-checked |
 | self-interacting -> cold dark matter | σ/m | collision operator off reproduces collisionless dynamics | planned |
-| QUMOND/AQUAL -> Newtonian | a₀/g | high-acceleration limit is Newtonian gravity | planned |
+| QUMOND -> Newtonian | a₀/g | with ν = 1 the second Poisson solve returns Φ_N to round-off; for g_N ≫ a₀ the correction is ∫(ν − 1) g_N dr; spherical (Plummer) and Kuzmin-disk fields obey the exact algebraic relation; deep-MOND v⁴ = G M a₀ (1 + √y); two masses: projection and flux identities (`qumond_limits`) | limit-checked |
+| AQUAL -> Newtonian | a₀/g | high-acceleration limit is Newtonian gravity | planned |
 | G4 fluids -> G3 kinetic | Knudsen number | Jeans instability of the fluid against the kinetic growth rate: the kinetic root reaches the cold-fluid limit γ = 1 − (3/2)k² and vanishes as √(2/π)(1 − k²) at the Jeans length (`test_jeans`) | kinetic side runs; fluid side planned |
 
 Cross-branch overlaps: the relativistic collision operators sit in both the QED
