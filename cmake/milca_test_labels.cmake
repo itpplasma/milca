@@ -349,6 +349,7 @@ milca_test_labels(qed_bremsstrahlung_rates fast CLASSES quantum
     TARGETS test_qed_bremsstrahlung_rates)
 milca_test_labels(radiation_reaction fast CLASSES quantum TARGETS test_radiation_reaction)
 milca_test_labels(qed_thermal fast CLASSES quantum TARGETS test_qed_thermal)
+milca_test_labels(qed_ee_power slow CLASSES quantum TARGETS test_qed_ee_power)
 if(MILCA_FORTSYM_BUILD)
     milca_test_labels(qed_leaf_regeneration fast CLASSES quantum TARGETS gen_qed)
     milca_test_labels(radiation_reaction_leaf_regeneration fast CLASSES quantum

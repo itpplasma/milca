@@ -88,7 +88,9 @@ resonant-ion per-surface differences in
    and native-field orbit coupling [#331](https://github.com/itpplasma/milca/issues/331).
    Promote each independently validated slice on scientific demand.
 4. **After P1g, in this order:** nuclear reaction rates N3-N4 for D-T, D-³He
-   and p-¹¹B ([nuclear reactions](docs/nuclear-reactions.md)); the real-time
+   and p-¹¹B ([nuclear reactions](docs/nuclear-reactions.md)); electron-positron
+   plasmas, with positronium formation and the positron species in the kinetic
+   models ([pair plasmas](docs/pair-plasmas.md)); the real-time
    QED reference in Fock space (Q0, [QED](docs/qed-radiation.md)); the
    self-gravitating many-body slice G2-G3 on the shared fast-multipole code,
    then the dark-matter hypotheses (cold, warm, self-interacting, fuzzy,

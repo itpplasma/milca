@@ -1717,6 +1717,9 @@ add_test(NAME radiation_reaction COMMAND test_radiation_reaction)
 add_executable(test_qed_thermal test/test_qed_thermal.f90)
 target_link_libraries(test_qed_thermal PRIVATE milca)
 add_test(NAME qed_thermal COMMAND test_qed_thermal)
+add_executable(test_qed_ee_power test/test_qed_ee_power.f90)
+target_link_libraries(test_qed_ee_power PRIVATE milca)
+add_test(NAME qed_ee_power COMMAND test_qed_ee_power)
 
 # Campaign Q3/Q8: finite-N ideal fermion ensembles and relativistic Fermi EOS.
 if(MILCA_FORTSYM_BUILD)

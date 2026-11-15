@@ -12,7 +12,15 @@ module milca_qed_thermal
     implicit none
     private
 
-    public :: scaled_bessel_k, annihilation_rate
+    public :: scaled_bessel_k, annihilation_rate, pair_energy_rate, kernel_s
+
+    abstract interface
+        !> A function of the invariant s of a colliding pair.
+        real(dp) function kernel_s(s)
+            import :: dp
+            real(dp), intent(in) :: s
+        end function kernel_s
+    end interface
 
 contains
 
@@ -59,5 +67,32 @@ contains
         end do
         rate = rate/(8*theta*k2**2)
     end function annihilation_rate
+
+    !> <v_Moller gamma_cm w(s)> over two Juttner distributions of equal mass:
+    !> the lab energy of the pair is gamma_cm sqrt(s), so the reduction of
+    !> Gondolo and Gelmini carries K2(sqrt(s)/theta) in place of K1. With w
+    !> the centre-of-mass energy radiated per collision (a cross section
+    !> times energy, symmetric emission) this is the lab power per pair
+    !> density product.
+    real(dp) function pair_energy_rate(theta, n, w) result(rate)
+        real(dp), intent(in) :: theta
+        integer, intent(in) :: n
+        procedure(kernel_s) :: w
+        real(dp) :: x(n), wq(n), y, root_s, s, k2, smax, jac
+        integer :: i
+        call gauss_legendre(n, x, wq)
+        k2 = scaled_bessel_k(2, 1/theta)
+        smax = sqrt(60.0_dp)
+        rate = 0
+        do i = 1, n
+            y = smax*(x(i) + 1)/2
+            root_s = 2 + y**2*theta
+            s = root_s**2
+            jac = smax/2*2*y*theta*2*root_s
+            rate = rate + wq(i)*jac*w(s)*(s - 4)*root_s*scaled_bessel_k(2, root_s/theta)* &
+                exp(-y**2)
+        end do
+        rate = rate/(8*theta*k2**2)
+    end function pair_energy_rate
 
 end module milca_qed_thermal

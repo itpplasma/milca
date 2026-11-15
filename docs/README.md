@@ -136,6 +136,7 @@ overview and [scope and design principles](scope.md) for the long-term aims.
   [reacting and partially ionized plasmas](reacting-partially-ionized.md),
   [radiation](radiation.md), [QED and radiation collisions](qed-radiation.md),
   [nuclear reactions](nuclear-reactions.md), [gravity and dark matter](gravity.md),
+  [electron-positron plasmas](pair-plasmas.md),
   [quantum plasma](quantum-plasma.md),
   [space plasmas](space-plasmas.md), [extensions](extensions.md)
 - [Programme estimates](programme-estimates.md)
