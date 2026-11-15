@@ -51,6 +51,7 @@ module milca_ntv_orbit_geometry
         procedure :: measure
         procedure :: perturbation => orbit_perturbation
         procedure :: point_source => orbit_point_source
+        procedure :: position => orbit_position
     end type
 
 contains
@@ -218,6 +219,18 @@ contains
         call point_at(g, th, xi, op, pt, collide, drive_r, drive_e, density, phase, precess, &
             drive, torque)
     end subroutine orbit_point_source
+
+    !> The flux label s of the orbit point at (theta, xi).
+    real(dp) function orbit_position(g, th, xi) result(s)
+        class(hp_orbit_geometry_t), intent(in) :: g
+        real(dp), intent(in) :: th, xi
+        type(orbit_point_t) :: pt
+        real(dp) :: mu
+        integer :: st
+        mu = g%mu_hat(th, xi, pt, st)
+        s = pt%s
+        if (st /= ORBIT_OK) s = g%s_star
+    end function orbit_position
 
     real(dp) function mu_hat(g, th, xi, pt, status)
         class(hp_orbit_geometry_t), intent(in) :: g

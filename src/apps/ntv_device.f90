@@ -124,6 +124,10 @@ module milca_ntv_device
         real(dp) :: hp_adapt = 0
         ! Refinement produces no mesh with more unknowns than this.
         integer :: hp_max_unknowns = 250000
+        ! Finite orbit width: flux-label edges of the bins in which the torque
+        ! is deposited where the orbits are (input line 'deposit'); unset, the
+        ! midpoints between the profile surfaces (more than one surface).
+        real(dp), allocatable :: deposit_edges(:)
     end type
 
     !> Per surface and species: K_1j and K_2j [m^2/s Wb^2/m^2], dpsi_pol/dr [Wb/m],
@@ -149,6 +153,14 @@ module milca_ntv_device
             heat_flux = 0, torque = 0, offset_rotation = 0, lost_weight = 0, mesh_error = 0
         integer :: factorisations = 0, iterations = 0, status = DEVICE_OK, unsettled = 0, &
             mesh_unknowns = 0
+        ! Finite orbit width with deposit bins: deposit(b) is the part of the
+        ! torque of this psi* surface [N m/m^3] whose orbits are in bin b
+        ! (sum = torque); vprime is dV/ds of the surface up to a constant
+        ! factor. Without deposit_edges, torque_real is the torque density in
+        ! real space on the bin of this surface: sum over surfaces j of
+        ! deposit_j(b) V'_j ds_j/(V'_b ds_b), ds the bin widths.
+        real(dp), allocatable :: deposit(:)
+        real(dp) :: vprime = 0, torque_real = 0
     end type
 
     !> Axisymmetric transport matrix of one surface: d(a, b, i, j) of
@@ -246,19 +258,31 @@ contains
         type(hp_mesh_t), allocatable :: band(:, :, :)
         real(dp), allocatable :: band_seed(:, :, :)
         integer, allocatable :: nband(:, :)
-        integer :: ns, nsp, nchunk, nunit, i, a, k, c, u
+        ! Finite orbit width: deposit bin edges, per (bin, surface, energy,
+        ! species) the kernel's deposit at the nodes, and dV/ds per surface.
+        real(dp), allocatable :: de(:), dk(:, :, :, :), vp(:)
+        logical :: depositing
+        integer :: ns, nsp, nchunk, nunit, nb, i, a, k, c, u
 
         ns = size(prof%s)
         nsp = size(species)
         status = DEVICE_BAD_INPUT
         if (ns < 1 .or. nsp < 1 .or. res%n_x < 1 .or. res%chunk < 1) return
         if (res%orbit_width .and. res%collisions /= 0) return
-        allocate (sf(ns), j0(ns), dpsi_dr(ns), psi_pol_s(ns), b_ref(ns), phi(ns))
+        allocate (sf(ns), j0(ns), dpsi_dr(ns), psi_pol_s(ns), b_ref(ns), phi(ns), vp(ns))
         do i = 1, ns
             call surface(eq, pert, n_tor, prof%s(i), res, sf(i), j0(i), dpsi_dr(i), &
-                psi_pol_s(i), status, b_ref=b_ref(i))
+                psi_pol_s(i), status, b_ref=b_ref(i), vprime=vp(i))
             if (status /= DEVICE_OK) return
         end do
+        if (allocated(res%deposit_edges)) then
+            de = res%deposit_edges
+        else if (ns > 1) then
+            de = (prof%s(1:ns - 1) + prof%s(2:ns))/2
+        end if
+        depositing = res%orbit_width .and. allocated(de)
+        nb = 0
+        if (depositing) nb = size(de) + 1
         ! Potential of the profile, dPhi/dpsi_pol = Omega_tE along NEO-2's
         ! toroidal direction (-phi of the file), by the trapezoidal rule.
         phi(1) = 0
@@ -291,6 +315,7 @@ contains
             end do
             if (any(ustat /= DEVICE_OK)) status = DEVICE_SOLVE
             if (res%collisions == 0 .and. all(ustat == DEVICE_OK)) status = DEVICE_OK
+            call real_space()
             return
         end if
         if (res%collisions /= 0) then
@@ -317,7 +342,9 @@ contains
         nchunk = (ns + res%chunk - 1)/res%chunk
         nunit = nsp*res%n_x*nchunk
         allocate (units(3, nunit), ustat(nunit), r(ns, res%n_x, nsp), &
-            nfac(ns, res%n_x, nsp), nits(ns, res%n_x, nsp), lost(ns, res%n_x, nsp))
+            nfac(ns, res%n_x, nsp), nits(ns, res%n_x, nsp), lost(ns, res%n_x, nsp), &
+            dk(nb, ns, res%n_x, nsp))
+        dk = 0
         lost = .false.
         u = 0
         do a = 1, nsp
@@ -354,8 +381,37 @@ contains
             end do
         end do
         status = merge(DEVICE_OK, DEVICE_SOLVE, all(ustat == DEVICE_OK))
+        call real_space()
 
     contains
+
+        !> vprime of every result and, with bins centred on the surfaces,
+        !> torque_real; deposits of failed surfaces are dropped.
+        subroutine real_space()
+            real(dp) :: ds(ns)
+            integer :: j, ii
+            do a = 1, nsp
+                do i = 1, ns
+                    result(i, a)%vprime = vp(i)
+                end do
+            end do
+            if (.not. depositing .or. allocated(res%deposit_edges)) return
+            ! Bin widths; the outer bins as wide as twice their inner half.
+            ds(1) = 2*(de(1) - prof%s(1))
+            ds(ns) = 2*(prof%s(ns) - de(ns - 1))
+            if (ns > 2) ds(2:ns - 1) = de(2:ns - 1) - de(1:ns - 2)
+            do a = 1, nsp
+                do j = 1, ns
+                    result(j, a)%torque_real = 0
+                    do ii = 1, ns
+                        if (result(ii, a)%status /= DEVICE_OK) cycle
+                        if (.not. allocated(result(ii, a)%deposit)) cycle
+                        result(j, a)%torque_real = result(j, a)%torque_real &
+                            + result(ii, a)%deposit(j)*vp(ii)*ds(ii)/(vp(j)*ds(j))
+                    end do
+                end do
+            end do
+        end subroutine real_space
 
         subroutine sweep(a, k, first, last, st)
             integer, intent(in) :: a, k, first, last
@@ -377,13 +433,14 @@ contains
                     end if
                     if (nband(i, a) > 0) then
                         r(i, k, a) = orbit_r(i, a, x(k), ks, &
-                            start=band(band_of(i, a, x(k)), i, a))
+                            start=band(band_of(i, a, x(k)), i, a), dep=dk(:, i, k, a))
                     else
-                        r(i, k, a) = orbit_r(i, a, x(k), ks)
+                        r(i, k, a) = orbit_r(i, a, x(k), ks, dep=dk(:, i, k, a))
                     end if
                     lost(i, k, a) = orbit_outside(ks)
                     if (lost(i, k, a)) then
                         r(i, k, a) = 0
+                        dk(:, i, k, a) = 0
                         cycle
                     end if
                     if (ks /= HP_OK) return
@@ -519,12 +576,14 @@ contains
         !> hp_ntv_kernel on mesh, or with res%hp_adapt the corrected kernel
         !> R + eta of goal-oriented refinement from it (at most 8 estimates),
         !> refined until R + eta has settled and eta is within the tolerance.
-        subroutine adapt_kernel(g, mesh, op, rv, st, mode, info)
+        subroutine adapt_kernel(g, mesh, op, rv, st, mode, info, dep)
             class(hp_geometry_t), intent(in) :: g
             type(hp_mesh_t), intent(inout) :: mesh
             type(hp_operator_t), intent(in) :: op
             real(dp), intent(out) :: rv
             integer, intent(out) :: st
+            ! The deposit of rv in the bins de (hp_ntv_kernel).
+            real(dp), intent(out), optional :: dep(:)
             ! MESH_FIXED: solve on mesh. MESH_CHECK: refine until eta is
             ! within hp_adapt of R + eta, so that R on the mesh is.
             ! MESH_SETTLE: in addition until R + eta changes by at most hp_adapt.
@@ -536,7 +595,11 @@ contains
             type(hp_mesh_t) :: next
             integer :: it, n_dof
             if (mode == MESH_FIXED .or. .not. res%hp_adapt > 0) then
-                call hp_ntv_kernel(g, mesh, op, rv, st, n_dof)
+                if (present(dep)) then
+                    call hp_ntv_kernel(g, mesh, op, rv, st, n_dof, de, dep)
+                else
+                    call hp_ntv_kernel(g, mesh, op, rv, st, n_dof)
+                end if
                 if (present(info)) info = adapt_info_t(0.0_dp, n_dof, .true.)
                 return
             end if
@@ -568,6 +631,11 @@ contains
             rv = val
             if (present(info)) info = adapt_info_t(abs(eta)/max(abs(val), tiny(val)), &
                 n_dof, settled)
+            if (present(dep)) then
+                ! The deposit on the final mesh, carried to R + eta in proportion.
+                call hp_ntv_kernel(g, mesh, op, prev, st, edges=de, dep=dep)
+                if (st == HP_OK .and. prev /= 0) dep = dep*(val/prev)
+            end if
         end subroutine adapt_kernel
 
         pure real(dp) function elements(m)
@@ -576,7 +644,7 @@ contains
         end function elements
 
         !> R of species a on surface i at x = v^2/v_th^2 with finite orbit width.
-        real(dp) function orbit_r(i, a, xv, st, start, used, mode, info) result(rv)
+        real(dp) function orbit_r(i, a, xv, st, start, used, mode, info, dep) result(rv)
             integer, intent(in) :: i, a
             real(dp), intent(in) :: xv
             integer, intent(out) :: st
@@ -584,12 +652,15 @@ contains
             type(hp_mesh_t), intent(out), optional :: used
             integer, intent(in), optional :: mode
             type(adapt_info_t), intent(out), optional :: info
+            ! The deposit of rv in the bins de, when depositing.
+            real(dp), intent(out), optional :: dep(:)
             type(orbit_particle_t) :: p
             type(hp_orbit_geometry_t) :: g
             type(hp_operator_t) :: op
             type(hp_mesh_t) :: mesh
             real(dp) :: v
             rv = 0
+            if (present(dep)) dep = 0
             v = sqrt(2*prof%temperature(i, a)/species(a)%mass*xv)
             p%mass = species(a)%mass
             p%charge = species(a)%z*elementary
@@ -617,15 +688,21 @@ contains
             op%nu = deflection_frequency(species, prof%density(i, :), &
                 prof%temperature(i, :), prof%kappa(i, :), a, xv)/v
             call start_mesh(g, mesh, start)
-            call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
+            if (present(dep) .and. depositing) then
+                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info, dep)
+            else
+                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
+            end if
             if (present(used)) call normalised(g, mesh, used)
         end function orbit_r
 
         !> R of species a on surface i at x = v^2/v_th^2.
-        real(dp) function kernel_r(i, a, xv, st, start, used, mode, info) result(rv)
+        real(dp) function kernel_r(i, a, xv, st, start, used, mode, info, dep) result(rv)
             integer, intent(in) :: i, a
             real(dp), intent(in) :: xv
             integer, intent(out) :: st
+            ! Finite orbit width: the deposit of rv in the bins de.
+            real(dp), intent(out), optional :: dep(:)
             ! Adapted meshes (normalised) in and out and the refinement mode
             ! (adapt_kernel), hp kernels only.
             type(hp_mesh_t), intent(in), optional :: start
@@ -637,11 +714,12 @@ contains
             real(dp), allocatable :: f10(:, :)
             real(dp) :: v, nu
             if (res%orbit_width) then
-                rv = orbit_r(i, a, xv, st, start, used, mode, inf)
+                rv = orbit_r(i, a, xv, st, start, used, mode, inf, dep)
                 call note_unknowns(i, a, st, inf)
                 if (present(info)) info = inf
                 if (orbit_outside(st)) then
                     rv = 0
+                    if (present(dep)) dep = 0
                     st = DEVICE_ORBIT_LOST
                 end if
                 return
@@ -689,6 +767,8 @@ contains
                 wt(2, max_panels)
             real(dp) :: x6(6), w6(6), x12(12), w12(12), total(3), t, scale, a1, a2, &
                 pv(3, 2), pe(2), pw(2, 2)
+            ! Deposits of the panels' 12-point sums with weights 1 and x.
+            real(dp), allocatable :: dv(:, :, :), pd(:, :, :)
             integer :: np, k, ks, nev
             st = DEVICE_SOLVE
             call gauss_legendre(6, x6, w6)
@@ -697,8 +777,10 @@ contains
             np = size(start) - 1
             lo(1:np) = start(1:np)
             hi(1:np) = start(2:)
+            allocate (dv(nb, 2, max_panels), pd(nb, 2, 2))
+            dv = 0
             call panel_eval(i, a, lo(1:np), hi(1:np), x6, w6, x12, w12, val(:, 1:np), &
-                err(1:np), ks, wt(:, 1:np))
+                err(1:np), ks, wt(:, 1:np), dv(:, :, 1:np))
             if (ks /= NTV_OK) return
             nev = 18*np
             do
@@ -711,8 +793,10 @@ contains
                 hi(np) = hi(k)
                 hi(k) = lo(np)
                 call panel_eval(i, a, [lo(k), lo(np)], [hi(k), hi(np)], x6, w6, x12, w12, &
-                    pv, pe, ks, pw)
+                    pv, pe, ks, pw, pd)
                 if (ks /= NTV_OK) return
+                dv(:, :, k) = pd(:, :, 1)
+                dv(:, :, np) = pd(:, :, 2)
                 val(:, k) = pv(:, 1)
                 val(:, np) = pv(:, 2)
                 err(k) = pe(1)
@@ -736,6 +820,8 @@ contains
             result(i, a)%heat_flux = -prof%density(i, a)*t*(result(i, a)%k21*a1 &
                 + result(i, a)%k22*a2)
             result(i, a)%torque = species(a)%z*elementary*result(i, a)%gamma_psi
+            if (depositing) result(i, a)%deposit = -species(a)%z*elementary &
+                *prof%density(i, a)*scale*(sum(dv(:, 1, 1:np), 2)*a1 + sum(dv(:, 2, 1:np), 2)*a2)
             result(i, a)%offset_rotation = prof%omega_te(i) + result(i, a)%gamma_psi &
                 /(prof%density(i, a)*result(i, a)%k11*species(a)%z*elementary/t)
             result(i, a)%factorisations = nev
@@ -961,14 +1047,17 @@ contains
 
         !> 6- and 12-point Gauss-Legendre values of int x^(5/2) e^-x (1, x) R
         !> on the panels [lo, hi] and their differences.
-        subroutine panel_eval(i, a, lo, hi, x6, w6, x12, w12, fine, err, ks, weight)
+        subroutine panel_eval(i, a, lo, hi, x6, w6, x12, w12, fine, err, ks, weight, dfine)
             integer, intent(in) :: i, a
             real(dp), intent(in) :: lo(:), hi(:), x6(:), w6(:), x12(:), w12(:)
             real(dp), intent(out) :: fine(:, :), err(:)
             integer, intent(out) :: ks
             ! K_11 weight of each panel and its part on lost orbits.
             real(dp), intent(out) :: weight(:, :)
-            real(dp) :: xs(size(x6) + size(x12), size(lo)), rs(size(xs, 1), size(lo))
+            ! When depositing: the 12-point deposits with weights 1 and x.
+            real(dp), intent(out) :: dfine(:, :, :)
+            real(dp) :: xs(size(x6) + size(x12), size(lo)), rs(size(xs, 1), size(lo)), &
+                ds(nb, size(xs, 1), size(lo))
             integer :: q, j, nq, sts(size(xs, 1), size(lo))
             nq = size(xs, 1)
             do j = 1, size(lo)
@@ -982,10 +1071,11 @@ contains
                 if (nband(i, a) > 0) then
                     rs(q - (j - 1)*nq, j) = kernel_r(i, a, xs(q - (j - 1)*nq, j), &
                         sts(q - (j - 1)*nq, j), &
-                        start=band(band_of(i, a, xs(q - (j - 1)*nq, j)), i, a))
+                        start=band(band_of(i, a, xs(q - (j - 1)*nq, j)), i, a), &
+                        dep=ds(:, q - (j - 1)*nq, j))
                 else
                     rs(q - (j - 1)*nq, j) = kernel_r(i, a, xs(q - (j - 1)*nq, j), &
-                        sts(q - (j - 1)*nq, j))
+                        sts(q - (j - 1)*nq, j), dep=ds(:, q - (j - 1)*nq, j))
                 end if
             end do
             !$omp end parallel do
@@ -993,6 +1083,15 @@ contains
                 call panel_sum(lo(j), hi(j), xs(:, j), rs(:, j), sts(:, j), w6, w12, &
                     fine(:, j), err(j), ks, weight(:, j))
                 if (ks /= NTV_OK) return
+                dfine(:, :, j) = 0
+                if (.not. depositing) cycle
+                do q = size(x6) + 1, nq
+                    if (sts(q, j) == DEVICE_ORBIT_LOST) cycle
+                    dfine(:, 1, j) = dfine(:, 1, j) + (hi(j) - lo(j))/2*w12(q - size(x6)) &
+                        *xs(q, j)**2.5_dp*exp(-xs(q, j))*ds(:, q, j)
+                    dfine(:, 2, j) = dfine(:, 2, j) + (hi(j) - lo(j))/2*w12(q - size(x6)) &
+                        *xs(q, j)**3.5_dp*exp(-xs(q, j))*ds(:, q, j)
+                end do
             end do
         end subroutine panel_eval
 
@@ -1047,6 +1146,8 @@ contains
             result(i, a)%heat_flux = -prof%density(i, a)*t*(result(i, a)%k21*a1 &
                 + result(i, a)%k22*a2)
             result(i, a)%torque = species(a)%z*elementary*result(i, a)%gamma_psi
+            if (depositing) result(i, a)%deposit = -species(a)%z*elementary &
+                *prof%density(i, a)*scale*matmul(dk(:, i, :, a), w*(a1 + x*a2))
             result(i, a)%offset_rotation = prof%omega_te(i) + result(i, a)%gamma_psi &
                 /(prof%density(i, a)*result(i, a)%k11*species(a)%z*elementary/t)
             result(i, a)%lost_weight = sum(w, mask=lost(i, :, a))/sum(w)
@@ -1061,7 +1162,8 @@ contains
     !> line 'orbit_width [order columns rows delta adapt]' for the finite-width
     !> kernel, 'hp [order columns rows delta adapt]' for the mesh of the thin kernel
     !> (the default) or 'legendre' for the Legendre thin kernel (n_leg applies
-    !> to it only), an optional
+    !> to it only), an optional line 'deposit N' followed by N increasing flux
+    !> labels, the edges of the bins of the deposited torque, an optional
     !> line collision model x_max elements order [x_tol], the species (Z,
     !> mass [kg]) and per surface s Omega_tE [rad/s] with one line per
     !> species: density [m^-3] T [J] dn/ds dT/ds kappa [1/m].
@@ -1073,7 +1175,7 @@ contains
         type(ntv_profile_t), intent(out) :: prof
         type(ntv_resolution_t), intent(out) :: res
         character(1024) :: line
-        integer :: u, nsp, ns, i, a, status, sources
+        integer :: u, nsp, ns, i, a, status, sources, nb
         open (newunit=u, file=path, status='old', action='read')
         read (u, '(a)') eq_path
         read (u, '(a)') pert_path
@@ -1090,6 +1192,12 @@ contains
             read (u, '(a)') line
         else if (index(adjustl(line), 'legendre') == 1) then
             res%thin_legendre = .true.
+            read (u, '(a)') line
+        end if
+        if (index(adjustl(line), 'deposit') == 1) then
+            read (line(index(line, 'deposit') + 7:), *) nb
+            allocate (res%deposit_edges(nb))
+            read (u, *) res%deposit_edges
             read (u, '(a)') line
         end if
         read (line, *, iostat=status) res%collisions, res%x_max, res%nelem, res%order, &
@@ -1441,7 +1549,7 @@ contains
     !> harmonics of toroidal number n_tor resolved by the theta grid, and the
     !> flux-function factors of the torque.
     subroutine surface(eq, pert, n_tor, s, res, sf, j0, dpsi_dr, psi_pol_s, status, g_cov, &
-            b2_avg, g_phi, eps, b_ref)
+            b2_avg, g_phi, eps, b_ref, vprime)
         type(boozer_file_t), intent(in) :: eq, pert
         integer, intent(in) :: n_tor
         real(dp), intent(in) :: s
@@ -1450,6 +1558,9 @@ contains
         real(dp), intent(out) :: j0, dpsi_dr, psi_pol_s
         integer, intent(out) :: status
         real(dp), intent(out), optional :: g_cov, b2_avg, g_phi, eps, b_ref
+        ! dV/ds up to a constant: dpsi_tor/ds (G + iota I) int dtheta/B^2,
+        ! the Boozer Jacobian integrated over the surface.
+        real(dp), intent(out), optional :: vprime
         type(boozer_surface_t) :: es, ps
         type(ntv_boozer_line_t) :: line
         real(dp) :: theta, bmod, grad_s, b2, bmin, bmax
@@ -1512,6 +1623,8 @@ contains
         if (present(g_phi)) g_phi = -es%g_cov
         if (present(b2_avg)) b2_avg = b2
         if (present(b_ref)) b_ref = line%bref
+        if (present(vprime)) vprime = abs(es%psi_prime*(es%g_cov + es%iota*es%i_cov)) &
+            *j0/line%bref**2
         status = DEVICE_OK
     end subroutine surface
 

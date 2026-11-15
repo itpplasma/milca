@@ -162,6 +162,17 @@ and the drive pairs with the torque density in psi*,
 T(psi*) = Re sum_sigma int dH dmu dtheta/|theta_dot| (i n delta_H)^* f. In the thin-orbit limit
 1/|theta_dot| becomes the Boozer measure 1/(b^2 |xi|) of the kernel, which is the first check.
 
+Torque in real space. The orbit spends dt = dtheta/|theta_dot| at each point (theta, xi) of the
+mesh, so the integrand of T(psi*) at a quadrature point belongs to the flux surface s of the orbit
+point there, not to psi*. Binning the quadrature-point contributions by s (`hp_ntv_kernel` with
+`edges`, the same tensor Gauss rule as the torque functional) splits the torque of each psi*
+surface into flux bins whose sum is the torque to rounding. The real-space torque density of
+bin b is sum_j T_j(b) V'(s*_j) ds*_j/(V'(s_b) ds_b), with V' = dpsi_tor/ds (G + iota I) int
+dtheta/B^2 the Boozer volume element: this is the time-weighted deposit POTATO uses, and it equals
+the psi* profile when the orbits are thin. `ntv_profile` prints it on bins centred on the profile
+surfaces, or, with an input line `deposit N` and N edges, the split of each surface for runs
+that are combined afterwards.
+
 Mesh. Orbits are labelled by lambda = mu B_ref/(H - Z e Phi(psi*)); the hp rows follow lambda
 levels as now, with the pitch coordinate eta = sigma sqrt(1 - lambda beta(theta, lambda)) and beta
 = B(psi(theta), theta)/B_ref the field the orbit sees, so eta = xi for thin orbits. Turning points

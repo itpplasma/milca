@@ -7,7 +7,9 @@
 !! the orbit-width indicators match the concentric-circle geometry of the file,
 !! the thin kernel refined from a coarse mesh by its error estimate reaches the
 !! converged Legendre kernel, and the finite-width kernel reproduces the thin
-!! kernel for thin orbits and counts the energies whose orbits leave the file.
+!! kernel for thin orbits and counts the energies whose orbits leave the file,
+!! and its torque deposited where the orbits are sums to the torque of each
+!! surface and returns to the psi* profile as the orbits become thin.
 program test_ntv_device
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, load_boozer_file, BOOZER_OK
@@ -36,6 +38,7 @@ program test_ntv_device
     call hp_adaptive()
     call orbit_width_thin()
     call orbit_width_lost()
+    call orbit_width_deposit()
     if (failures > 0) error stop 'FAIL'
     print '(a)', 'All tests passed!'
 
@@ -600,6 +603,85 @@ contains
             call check('lost orbits detected', .not. hp_orbit_confined(g, 32, 32))
         end block
     end subroutine orbit_width_lost
+
+    !> The deposit splits the torque functional of each energy by the flux
+    !> label of its quadrature points, so it sums to the torque of the surface
+    !> on fixed nodes and on adaptive panels alike. Thin orbits (temperature
+    !> scaled down) stay on their surface: the real-space profile is then the
+    !> psi* profile; physical orbits leave a narrow bin around it.
+    subroutine orbit_width_deposit()
+        character(*), parameter :: eq_name = 'ntv_dep_eq.bc', pert_name = 'ntv_dep_pert.bc'
+        type(boozer_file_t), target :: eq, pert
+        type(ntv_species_t) :: sp(1)
+        type(ntv_profile_t) :: prof
+        type(ntv_resolution_t) :: res
+        type(ntv_species_result_t), allocatable :: out(:, :)
+        integer :: status, i
+        call write_file(eq_name, .false.)
+        call write_file(pert_name, .true.)
+        call load_boozer_file(eq_name, eq, status)
+        call load_boozer_file(pert_name, pert, status)
+        sp(1) = ntv_species_t(1.0_dp, 3.3435837768e-27_dp)
+        prof%s = [0.45_dp, 0.5_dp, 0.55_dp]
+        allocate (prof%density(3, 1), prof%temperature(3, 1), prof%density_s(3, 1), &
+            prof%temperature_s(3, 1), prof%kappa(3, 1))
+        res%x_tol = 0
+        res%n_theta = 65
+        res%n_leg = 300
+        res%n_x = 2
+        res%sources = .false.
+        res%orbit_width = .true.
+        res%hp_columns = 16
+        res%hp_rows = 6
+        call deposit_profile(prof, 1e-4_dp)
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+        call check('thin deposit profile', status == DEVICE_OK)
+        if (failures > 0) return
+        do i = 1, 3
+            call check('deposit has a bin per surface', allocated(out(i, 1)%deposit))
+            if (failures > 0) return
+            call close_to('deposit sums to the torque', sum(out(i, 1)%deposit), &
+                out(i, 1)%torque, 1e-12_dp)
+            call close_to('thin orbits deposit on their surface', out(i, 1)%deposit(i), &
+                out(i, 1)%torque, 1e-12_dp)
+            call close_to('thin orbits: real space is psi*', out(i, 1)%torque_real, &
+                out(i, 1)%torque, 1e-12_dp)
+        end do
+        ! Adaptive energy panels deposit the same way.
+        res%x_tol = 0.3_dp
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+        call check('adaptive deposit profile', status == DEVICE_OK)
+        if (failures > 0) return
+        do i = 1, 3
+            call close_to('adaptive deposit sums to the torque', sum(out(i, 1)%deposit), &
+                out(i, 1)%torque, 1e-12_dp)
+        end do
+        ! Physical orbits of the middle surface in bins of +-1e-3 around it.
+        res%x_tol = 0
+        prof%s = [0.5_dp]
+        call deposit_profile(prof, 1.0_dp)
+        res%deposit_edges = [0.499_dp, 0.501_dp]
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+        call check('narrow-bin profile', status == DEVICE_OK)
+        if (failures > 0) return
+        call close_to('narrow bins sum to the torque', sum(out(1, 1)%deposit), &
+            out(1, 1)%torque, 1e-12_dp)
+        call check('physical orbits leave the narrow bin', &
+            abs(out(1, 1)%deposit(1)) + abs(out(1, 1)%deposit(3)) > 1e-2_dp*abs(out(1, 1)%torque))
+    end subroutine orbit_width_deposit
+
+    !> Plasma of orbit_width_deposit with temperature and rotation scaled by f.
+    subroutine deposit_profile(prof, f)
+        type(ntv_profile_t), intent(inout) :: prof
+        real(dp), intent(in) :: f
+        prof%omega_te = [3e4_dp, 2.5e4_dp, 2e4_dp]*f
+        if (size(prof%s) == 1) prof%omega_te = [2.5e4_dp]*f
+        prof%density = 3e19_dp
+        prof%temperature = 2*kev*f
+        prof%density_s = -1e19_dp
+        prof%temperature_s = -1*kev*f
+        prof%kappa = 3e-4_dp
+    end subroutine deposit_profile
 
     subroutine write_file(name, perturbation)
         character(*), intent(in) :: name
