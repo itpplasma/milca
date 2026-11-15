@@ -1,6 +1,9 @@
 # QED, radiation collisions and pair plasmas
 
-Status: designed, first slice active (ROADMAP P1g), 2026-11-15. QED is inside
+Status: first slice active (ROADMAP P1g), 2026-11-15. Running: the Q1 two-body
+processes (Møller, Bhabha, Compton, annihilation, Breit-Wheeler, Mott) from
+Feynman-rule amplitudes and generated closed forms, cross-checked in
+`test_qed_tree`. QED is inside
 MILCA's scope from this date; the former boundary ("the fundamentals branch
 stops at QED") is lifted.
 

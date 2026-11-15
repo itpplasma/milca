@@ -193,6 +193,60 @@ uniform validity of an asymptotic series, existence of solutions, secular
 growth and remainder estimates need either a formal proof or an explicit
 "unproved assumption" entry.
 
+
+## Overlap checks of the QED, nuclear and gravity branches
+
+Every pair of models that describes the same physics in a common regime is
+checked against each other there: the reduction's small parameter goes to
+zero, the two must agree to that order, and the measured defect is recorded.
+Validation against measurements follows where published data exist. Status as
+in the ladder above; "planned" means the edge is stated but not yet computed.
+
+QED and radiation ([QED and radiation](qed-radiation.md)):
+
+| Edge (parent -> child) | Small parameter | Check | Status |
+|---|---|---|---|
+| Feynman-rule amplitudes <-> closed-form cross sections (Q1) | none, identity | Møller, Bhabha, Compton, annihilation, Breit-Wheeler and Mott agree at scattered kinematics; spinor completeness; Ward identity; crossing annihilation <-> Breit-Wheeler (`qed_tree_level`) | limit-checked |
+| Q1 -> Thomson, Rutherford, Mott | photon energy/m c², v/c | Klein-Nishina total -> 8π/3 r_e²; Mott -> Rutherford; totals by quadrature against the Klein-Nishina, Breit-Wheeler and Dirac formulas | limit-checked |
+| Q1 bremsstrahlung -> Kramers | Born parameter Z α c/v, v/c | Bethe-Heitler nonrelativistic Born limit = Kramers times the Born Gaunt factor; validated against measured thin-target spectra | planned |
+| Q2 -> relativistic Landau/Beliaev-Budker -> Landau | 1/ln Λ, momentum transfer | small-angle limit of the Møller/Bhabha/Mott kernels gives the existing operators' coefficients (Braams-Karney) | planned |
+| Q0 -> Q1 | coupling α, box size | tree-level and one-loop amplitudes recovered in a box at increasing size and cutoff | planned |
+| Q0 -> many-electron quantum mechanics | v/c, photon modes | Coulomb-gauge QED with photons removed gives the electrostatic Hamiltonian of the quantum branch | planned |
+| strong-field QED -> Q3 Landau-Lifshitz | quantum parameter χ | emitted power and recoil of the quantum synchrotron rate -> classical radiation reaction as χ -> 0 | planned |
+| Q4 full radiation collision operator -> friction only | ratio of radiative to Coulomb scattering | defect of the friction-only reduction across temperature, density and field | planned |
+| Q2/Q4 + Q5 -> Q6 loss rates | optical depth, gradient length | emissivities of the kinetic model against published bremsstrahlung and synchrotron loss fits; Trubnikov's reflection formula against angular transport | planned |
+| pair balance (Q2) | T_e/m c², optical depth | Svensson (1982) equilibria | planned |
+
+Nuclear reactions ([nuclear reactions](nuclear-reactions.md)):
+
+| Edge | Small parameter | Check | Status |
+|---|---|---|---|
+| pionless EFT <-> Reid potential for pp | momentum/pion mass | S_pp(0) and Λ² agree within the EFT order ([pp fusion](pp-fusion.md), [EFT](pp-fusion-eft.md)) | limit-checked |
+| N0/N1 -> N2 R-matrix -> N3 S factor | energy range of the fit | S(E) of the microscopic model against R-matrix fits and measured cross sections (D-T, D-³He, p-¹¹B) | planned |
+| N3 -> Maxwellian reactivity | none, quadrature | Bosch-Hale (1992); p-¹¹B against Nevins-Swain (2000) and Sikora-Weller (2016) | planned |
+| N4 non-Maxwellian kernels -> N3 | distance of f from a Maxwellian | kernel applied to a Maxwellian returns the N3 reactivity; beam-target limit | planned |
+| N5 nuclear elastic -> Coulomb | nuclear/Coulomb amplitude ratio | interference-free Rutherford limit at low energy and large impact parameter | planned |
+| plasma screening -> quantum plasma | coupling Γ, degeneracy | Salpeter weak-screening enhancement from the screening hierarchy | planned |
+
+Gravity ([gravity](gravity.md)):
+
+| Edge | Small parameter | Check | Status |
+|---|---|---|---|
+| G0 general relativity -> G1 post-Newtonian | v²/c², G M/(r c²) | binary orbits and perihelion advance; 3+1 against Einstein-Infeld-Hoffmann | planned |
+| G1 -> G2 Newtonian | v²/c² | 1PN corrections vanish at the stated order | planned |
+| G2 N-body -> G3 Vlasov-Poisson | 1/N | Plummer-sphere equilibrium, Jeans growth rate, cold collapse; two-body relaxation time against the Chandrasekhar operator | planned |
+| gravity <-> plasma many-body code | sign of the coupling | the same fast-multipole and Ewald sums with reversed sign reproduce the Coulomb results with charges of one sign | planned |
+| fuzzy dark matter -> cold dark matter | ħ/(m L v) | Schrödinger-Poisson -> Vlasov-Poisson through the Wigner map (as the quantum branch's Wigner -> Vlasov edge) | planned |
+| self-interacting -> cold dark matter | σ/m | collision operator off reproduces collisionless dynamics | planned |
+| QUMOND/AQUAL -> Newtonian | a₀/g | high-acceleration limit is Newtonian gravity | planned |
+| G4 fluids -> G3 kinetic | Knudsen number | Jeans instability of the fluid against the kinetic growth rate | planned |
+
+Cross-branch overlaps: the relativistic collision operators sit in both the QED
+and the classical collision hierarchy; reaction products of N4 are sources of
+the kinetic models whose radiation losses come from Q6; cooling (Q6) enters
+self-gravitating fluids (G4). Each coupling is checked by conservation of
+energy and particle number across it.
+
 ## Tools: FortSym first, Lean selectively
 
 **FortSym is the primary engine.** It already drives several algebra engines
