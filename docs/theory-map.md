@@ -208,11 +208,12 @@ QED and radiation ([QED and radiation](qed-radiation.md)):
 |---|---|---|---|
 | Feynman-rule amplitudes <-> closed-form cross sections (Q1) | none, identity | Møller, Bhabha, Compton, annihilation, Breit-Wheeler and Mott agree at scattered kinematics; spinor completeness; Ward identity; crossing annihilation <-> Breit-Wheeler (`qed_tree_level`) | limit-checked |
 | Q1 -> Thomson, Rutherford, Mott | photon energy/m c², v/c | Klein-Nishina total -> 8π/3 r_e²; Mott -> Rutherford; totals by quadrature against the Klein-Nishina, Breit-Wheeler and Dirac formulas | limit-checked |
-| Q1 bremsstrahlung -> Kramers | Born parameter Z α c/v, v/c | Bethe-Heitler nonrelativistic Born limit = Kramers times the Born Gaunt factor; validated against measured thin-target spectra | planned |
+| Q1 bremsstrahlung -> Kramers | Born parameter Z α c/v, v/c | gauge invariance and soft-photon theorem (`qed_bremsstrahlung`); nonrelativistic Born spectrum and thermal power with Gaunt factor 2√3/π, defects ∝ p² and θ; ultrarelativistic Bethe-Heitler approached as E grows (`qed_bremsstrahlung_rates`); measured thin-target spectra to come | limit-checked |
 | Q2 -> relativistic Landau/Beliaev-Budker -> Landau | 1/ln Λ, momentum transfer | small-angle limit of the Møller/Bhabha/Mott kernels gives the existing operators' coefficients (Braams-Karney) | planned |
 | Q0 -> Q1 | coupling α, box size | tree-level and one-loop amplitudes recovered in a box at increasing size and cutoff | planned |
 | Q0 -> many-electron quantum mechanics | v/c, photon modes | Coulomb-gauge QED with photons removed gives the electrostatic Hamiltonian of the quantum branch | planned |
 | strong-field QED -> Q3 Landau-Lifshitz | quantum parameter χ | emitted power and recoil of the quantum synchrotron rate -> classical radiation reaction as χ -> 0 | planned |
+| Q3 Landau-Lifshitz -> synchrotron friction | radiation rate / gyrofrequency | electron pushed through many gyrations drifts at the gyro-averaged rates (`radiation_reaction`) | limit-checked |
 | Q4 full radiation collision operator -> friction only | ratio of radiative to Coulomb scattering | defect of the friction-only reduction across temperature, density and field | planned |
 | Q2/Q4 + Q5 -> Q6 loss rates | optical depth, gradient length | emissivities of the kinetic model against published bremsstrahlung and synchrotron loss fits; Trubnikov's reflection formula against angular transport | planned |
 | pair balance (Q2) | T_e/m c², optical depth | Svensson (1982) equilibria | planned |

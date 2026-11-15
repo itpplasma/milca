@@ -13,6 +13,8 @@ module milca_qed_tree
     public :: transverse_polarizations, moller_spin_sum, bhabha_spin_sum
     public :: compton_spin_sum, annihilation_spin_sum, breit_wheeler_spin_sum
     public :: mott_spin_sum, ward_compton, spinor_completeness
+    public :: nucleus_bremsstrahlung_spin_sum, electron_bremsstrahlung_spin_sum
+    public :: ward_nucleus_bremsstrahlung, ward_electron_bremsstrahlung
 
     complex(dp), parameter :: zero = (0.0_dp, 0.0_dp), one = (1.0_dp, 0.0_dp), &
         iu = (0.0_dp, 1.0_dp)
@@ -360,6 +362,139 @@ contains
         end do
         total = total/(2*q2**2)
     end function mott_spin_sum
+
+    ! u-bar(a) [eps-slash S(a+k) gamma^0 + gamma^0 S(b-k) eps-slash] u(b)
+    pure complex(dp) function nucleus_vertex(m, a, ua, b, ub, k, eps)
+        real(dp), intent(in) :: m
+        type(four_vector_t), intent(in) :: a, b, k
+        complex(dp), intent(in) :: ua(4), ub(4), eps(0:3)
+        complex(dp) :: op(4, 4), g0(4, 4)
+        g0 = gamma_matrix(0)
+        op = matmul(slash(eps), matmul(propagator(m, add(a, k)), g0)) + &
+            matmul(g0, matmul(propagator(m, sub(b, k)), slash(eps)))
+        nucleus_vertex = dot_product(conjg(bar(ua)), matmul(op, ub))
+    end function nucleus_vertex
+
+    !> Bremsstrahlung of an electron p -> pp + photon k on a static point
+    !> charge Z = 1 in Born approximation (Bethe-Heitler): (1/2) sum over
+    !> spins and photon polarizations of |M|^2/e^6; energy conservation
+    !> E = E' + omega is the caller's.
+    pure real(dp) function nucleus_bremsstrahlung_spin_sum(m, p, pp, k) result(total)
+        real(dp), intent(in) :: m
+        type(four_vector_t), intent(in) :: p, pp, k
+        complex(dp) :: eps(0:3, 2)
+        real(dp) :: q2
+        integer :: s, sp, l
+        eps = transverse_polarizations(k)
+        q2 = sum((pp%c(1:3) + k%c(1:3) - p%c(1:3))**2)
+        total = 0
+        do s = 1, 2
+            do sp = 1, 2
+                do l = 1, 2
+                    total = total + abs(nucleus_vertex(m, pp, dirac_u(m, pp, sp), p, &
+                        dirac_u(m, p, s), k, conjg(eps(:, l))))**2
+                end do
+            end do
+        end do
+        total = total/(2*q2**2)
+    end function nucleus_bremsstrahlung_spin_sum
+
+    !> The nucleus bremsstrahlung amplitude with the polarization replaced
+    !> by k: zero by gauge invariance; largest modulus over spins.
+    pure real(dp) function ward_nucleus_bremsstrahlung(m, p, pp, k) result(worst)
+        real(dp), intent(in) :: m
+        type(four_vector_t), intent(in) :: p, pp, k
+        integer :: s, sp
+        worst = 0
+        do s = 1, 2
+            do sp = 1, 2
+                worst = max(worst, abs(nucleus_vertex(m, pp, dirac_u(m, pp, sp), p, &
+                    dirac_u(m, p, s), k, cmplx(k%c, 0.0_dp, dp))))
+            end do
+        end do
+    end function ward_nucleus_bremsstrahlung
+
+    ! one exchange channel of e(a) e(b) -> e(c) e(d) gamma(k): the photon
+    ! from each of the four legs, line a -> c and line b -> d
+    pure complex(dp) function exchange_channel(m, a, ua, b, ub, c, uc, d, ud, k, eps)
+        real(dp), intent(in) :: m
+        type(four_vector_t), intent(in) :: a, b, c, d, k
+        complex(dp), intent(in) :: ua(4), ub(4), uc(4), ud(4), eps(0:3)
+        complex(dp) :: j1(0:3), j2(0:3), e1(0:3), e2(0:3), op(4, 4)
+        type(four_vector_t) :: q
+        integer :: mu
+        j1 = current(uc, ua)
+        j2 = current(ud, ub)
+        do mu = 0, 3
+            op = matmul(gamma_matrix(mu), matmul(propagator(m, sub(a, k)), slash(eps))) + &
+                matmul(slash(eps), matmul(propagator(m, add(c, k)), gamma_matrix(mu)))
+            e1(mu) = dot_product(conjg(bar(uc)), matmul(op, ua))
+            op = matmul(gamma_matrix(mu), matmul(propagator(m, sub(b, k)), slash(eps))) + &
+                matmul(slash(eps), matmul(propagator(m, add(d, k)), gamma_matrix(mu)))
+            e2(mu) = dot_product(conjg(bar(ud)), matmul(op, ub))
+        end do
+        q = sub(b, d)
+        exchange_channel = contract(e1, j2)/minkowski(q, q)
+        q = sub(a, c)
+        exchange_channel = exchange_channel + contract(j1, e2)/minkowski(q, q)
+    end function exchange_channel
+
+    pure complex(dp) function electron_bremsstrahlung_amplitude(m, p1, u1, p2, u2, p3, u3, &
+            p4, u4, k, eps)
+        real(dp), intent(in) :: m
+        type(four_vector_t), intent(in) :: p1, p2, p3, p4, k
+        complex(dp), intent(in) :: u1(4), u2(4), u3(4), u4(4), eps(0:3)
+        electron_bremsstrahlung_amplitude = &
+            exchange_channel(m, p1, u1, p2, u2, p3, u3, p4, u4, k, eps) - &
+            exchange_channel(m, p1, u1, p2, u2, p4, u4, p3, u3, k, eps)
+    end function electron_bremsstrahlung_amplitude
+
+    !> Electron-electron bremsstrahlung e(p1) e(p2) -> e(p3) e(p4) gamma(k),
+    !> eight diagrams with the exchange sign: (1/4) sum over spins and
+    !> polarizations of |M|^2/e^6.
+    pure real(dp) function electron_bremsstrahlung_spin_sum(m, p1, p2, p3, p4, k) result(total)
+        real(dp), intent(in) :: m
+        type(four_vector_t), intent(in) :: p1, p2, p3, p4, k
+        complex(dp) :: eps(0:3, 2), u1(4), u2(4), u3(4), u4(4)
+        integer :: s1, s2, s3, s4, l
+        eps = transverse_polarizations(k)
+        total = 0
+        do s1 = 1, 2
+            u1 = dirac_u(m, p1, s1)
+            do s2 = 1, 2
+                u2 = dirac_u(m, p2, s2)
+                do s3 = 1, 2
+                    u3 = dirac_u(m, p3, s3)
+                    do s4 = 1, 2
+                        u4 = dirac_u(m, p4, s4)
+                        do l = 1, 2
+                            total = total + abs(electron_bremsstrahlung_amplitude(m, p1, u1, &
+                                p2, u2, p3, u3, p4, u4, k, conjg(eps(:, l))))**2
+                        end do
+                    end do
+                end do
+            end do
+        end do
+        total = total/4
+    end function electron_bremsstrahlung_spin_sum
+
+    pure real(dp) function ward_electron_bremsstrahlung(m, p1, p2, p3, p4, k) result(worst)
+        real(dp), intent(in) :: m
+        type(four_vector_t), intent(in) :: p1, p2, p3, p4, k
+        integer :: s1, s2, s3, s4
+        worst = 0
+        do s1 = 1, 2
+            do s2 = 1, 2
+                do s3 = 1, 2
+                    do s4 = 1, 2
+                        worst = max(worst, abs(electron_bremsstrahlung_amplitude(m, p1, &
+                            dirac_u(m, p1, s1), p2, dirac_u(m, p2, s2), p3, dirac_u(m, p3, s3), &
+                            p4, dirac_u(m, p4, s4), k, cmplx(k%c, 0.0_dp, dp))))
+                    end do
+                end do
+            end do
+        end do
+    end function ward_electron_bremsstrahlung
 
     !> Largest deviation of sum_s u u-bar from p-slash + m and of
     !> sum_s v v-bar from p-slash - m.
