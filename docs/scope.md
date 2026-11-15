@@ -18,7 +18,9 @@ of the remaining error.
 The deepest classical reference is the relativistic Maxwell–Lorentz
 many-particle system; relativistic Vlasov–Maxwell/Fokker–Planck kinetics is
 the highest continuum reference. A quantum branch covers degeneracy, exchange
-and quantum kinetic models for dense plasmas, but stops short of QED. Fusion
+and quantum kinetic models for dense plasmas and reaches QED, with radiation
+collisions and pair plasmas; nuclear reactions, gravity, general relativity
+and dark matter are further branches (since 2026-11-15). Fusion
 plasmas are the main application; space, low-temperature, beam and laser
 plasmas are in the intended envelope where a classical or nonideal model
 applies. The full list is in the
@@ -101,9 +103,11 @@ nullspace and entropy structure; see [collisions](collisions.md).
 
 ## Boundaries
 
-QED processes, general relativity, reactor neutronics, detailed material
-mechanics and line-by-line non-LTE radiation transfer are outside the scope
-and are left to external codes. Reconstruction and diagnostic inference
+Reactor neutronics, detailed material mechanics and line-by-line non-LTE
+radiation transfer are outside the scope and are left to external codes. QED,
+nuclear reactions, gravity and general relativity moved inside on 2026-11-15
+([QED and radiation](qed-radiation.md), [nuclear reactions](nuclear-reactions.md),
+[gravity](gravity.md)). Reconstruction and diagnostic inference
 belong to the separate TIAGO project, which is to consume milca models.
 
 ## Software stack

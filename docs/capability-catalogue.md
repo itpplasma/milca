@@ -6,9 +6,10 @@ and not a promise that every Cartesian product is meaningful.
 
 ## Product goal
 
-MILCA aims to be a one-stop shop for **plasma physics below the QED
-boundary**, with a classical production hierarchy and quantum-fundamentals/
-dense-plasma extensions, across
+MILCA aims to be a one-stop shop for **plasma physics up to QED and
+self-gravitating matter**, with a classical production hierarchy,
+quantum-fundamentals/dense-plasma extensions, QED and radiation collisions,
+nuclear reactions, and gravity, general relativity and dark matter, across
 
 - magnetic and inertial/magnetized fusion regimes;
 - Solar, heliospheric, magnetospheric and planetary plasmas;
@@ -435,9 +436,9 @@ These examples test coverage; they do not receive dedicated core modes.
 
 MILCA may couple to but does not initially own:
 
-- general QED: quantized-radiation dynamics, pair creation/annihilation,
-  strong-field QED cascades and radiative QED corrections;
-- general-relativistic gravity/plasma and neutron-star/nuclear-density matter;
+- the dense matter of neutron-star interiors (compact-object plasmas such as
+  pulsar magnetospheres and accretion flows are inside, through the QED and
+  gravity branches);
 - complete reactor neutronics and nuclear engineering;
 - detailed bulk solid mechanics/material microstructure;
 - comprehensive liquid/solid chemistry;
@@ -445,7 +446,10 @@ MILCA may couple to but does not initially own:
   radiative transfer.
 
 Narrow reusable interfaces may be added when a concrete plasma application
-needs them.
+needs them. General QED (quantized radiation, pair creation and annihilation,
+strong-field QED, radiative corrections) and gravity with general relativity
+were on this list until 2026-11-15 and are now native branches:
+[QED and radiation](qed-radiation.md), [gravity](gravity.md).
 
 ## Catalogue versus priorities
 

@@ -134,6 +134,8 @@ overview and [scope and design principles](scope.md) for the long-term aims.
   [real-device applicability](devices.md)
 - [Edge physics](edge-physics.md),
   [reacting and partially ionized plasmas](reacting-partially-ionized.md),
-  [radiation](radiation.md), [quantum plasma](quantum-plasma.md),
+  [radiation](radiation.md), [QED and radiation collisions](qed-radiation.md),
+  [nuclear reactions](nuclear-reactions.md), [gravity and dark matter](gravity.md),
+  [quantum plasma](quantum-plasma.md),
   [space plasmas](space-plasmas.md), [extensions](extensions.md)
 - [Programme estimates](programme-estimates.md)
