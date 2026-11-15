@@ -214,7 +214,7 @@ QED and radiation ([QED and radiation](qed-radiation.md)):
 | Q2 -> relativistic Landau/Beliaev-Budker -> Landau | 1/ln Λ, momentum transfer | small-angle limit of the Møller/Bhabha/Mott kernels gives the existing operators' coefficients (Braams-Karney) | planned |
 | Q0 -> Q1 | coupling α, box size | tree-level and one-loop amplitudes recovered in a box at increasing size and cutoff | planned |
 | Q0 -> many-electron quantum mechanics | v/c, photon modes | Coulomb-gauge QED with photons removed gives the electrostatic Hamiltonian of the quantum branch | planned |
-| strong-field QED -> Q3 Landau-Lifshitz | quantum parameter χ | emitted power and recoil of the quantum synchrotron rate -> classical radiation reaction as χ -> 0 | planned |
+| strong-field QED -> Q3 Landau-Lifshitz | quantum parameter χ | emitted power of the quantum synchrotron rate (locally constant field) -> classical radiation reaction as χ -> 0: Gaunt factor 1 - (55√3/16)χ + 48χ² (`strong_field_emission`); recoil and pair creation planned | emission limit-checked |
 | Q3 Landau-Lifshitz -> synchrotron friction | radiation rate / gyrofrequency | electron pushed through many gyrations drifts at the gyro-averaged rates (`radiation_reaction`) | limit-checked |
 | Q4 full radiation collision operator -> friction only | ratio of radiative to Coulomb scattering | defect of the friction-only reduction across temperature, density and field | planned |
 | Q2/Q4 + Q5 -> Q6 loss rates | optical depth, gradient length | emissivities of the kinetic model against published bremsstrahlung and synchrotron loss fits; Trubnikov's reflection formula against angular transport | planned |

@@ -1729,7 +1729,7 @@ target_link_libraries(test_fusion_beam_target PRIVATE milca)
 add_test(NAME fusion_beam_target COMMAND test_fusion_beam_target)
 target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
     src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90
-    src/quantum/pair_equilibrium.f90)
+    src/quantum/pair_equilibrium.f90 src/quantum/strong_field.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 set_source_files_properties(src/generated/milca_beliaev_budker_leaves.f90
@@ -1761,6 +1761,9 @@ add_test(NAME pair_equilibrium COMMAND test_pair_equilibrium)
 add_executable(test_qed_elwert test/test_qed_elwert.f90)
 target_link_libraries(test_qed_elwert PRIVATE milca)
 add_test(NAME qed_elwert COMMAND test_qed_elwert)
+add_executable(test_strong_field test/test_strong_field.f90)
+target_link_libraries(test_strong_field PRIVATE milca)
+add_test(NAME strong_field_emission COMMAND test_strong_field)
 add_executable(test_qed_ee_power test/test_qed_ee_power.f90)
 target_link_libraries(test_qed_ee_power PRIVATE milca)
 add_test(NAME qed_ee_power COMMAND test_qed_ee_power)
