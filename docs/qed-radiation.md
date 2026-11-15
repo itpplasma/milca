@@ -90,7 +90,10 @@ couples to radiation transport instead of closing locally.
 
 **Q5. Photon transport.** Reduced from Q2 and Q4 for the photons: the R0-R4 ladder of [radiation](radiation.md) for
 bremsstrahlung, synchrotron emission with wall reflection (Trubnikov 1979) and
-Compton scattering.
+Compton scattering. The emission side runs: cyclotron and synchrotron emission
+harmonic by harmonic (Schott) and the thermal emissivity j(ω, θ) of a Juttner
+plasma (`milca_cyclotron_emission`), both reproducing the Larmor power; the
+absorption by Kirchhoff's law and the transport with reflecting walls follow.
 
 **Q6. Losses in fluid and transport models.** Emissivities and loss rates for
 relativistic Maxwellian and non-Maxwellian electrons, reduced from Q2, Q4 and
