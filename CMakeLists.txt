@@ -1732,7 +1732,7 @@ target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
     src/quantum/pair_equilibrium.f90 src/quantum/strong_field.f90
     src/quantum/hydrogenic_recombination.f90 src/quantum/cyclotron_emission.f90
     src/quantum/synchrotron_transport.f90
-    src/quantum/thermal_compton.f90)
+    src/quantum/thermal_compton.f90 src/quantum/fuzzy_dark_matter.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 set_source_files_properties(src/generated/milca_beliaev_budker_leaves.f90
@@ -1782,6 +1782,9 @@ add_test(NAME thermal_compton COMMAND test_thermal_compton)
 add_executable(test_plummer test/test_plummer.f90)
 target_link_libraries(test_plummer PRIVATE milca)
 add_test(NAME plummer_equilibrium COMMAND test_plummer)
+add_executable(test_fuzzy_soliton test/test_fuzzy_soliton.f90)
+target_link_libraries(test_fuzzy_soliton PRIVATE milca)
+add_test(NAME fuzzy_dark_matter_soliton COMMAND test_fuzzy_soliton)
 add_executable(test_qed_ee_power test/test_qed_ee_power.f90)
 target_link_libraries(test_qed_ee_power PRIVATE milca)
 add_test(NAME qed_ee_power COMMAND test_qed_ee_power)

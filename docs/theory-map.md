@@ -244,6 +244,7 @@ Gravity ([gravity](gravity.md)):
 | G2 N-body -> G3 Vlasov-Poisson | 1/N | Plummer-sphere equilibrium (energies 3π/64 and -3π/32, virial ratio and half-mass radius over five time units, `plummer_equilibrium`); Jeans growth rate, cold collapse; two-body relaxation time against the Chandrasekhar operator | Plummer equilibrium runs; rest planned |
 | gravity <-> plasma many-body code | sign of the coupling | the same fast-multipole and Ewald sums with reversed sign reproduce the Coulomb results with charges of one sign | planned |
 | fuzzy dark matter -> cold dark matter | ħ/(m L v) | Schrödinger-Poisson -> Vlasov-Poisson through the Wigner map (as the quantum branch's Wigner -> Vlasov edge) | planned |
+| fuzzy-dark-matter soliton (Schrödinger-Poisson ground state) | none, identities | virial theorem 2K + W = 0, ε M = K + 2W, scaling ψ -> λ²ψ(λr), r_1/2 M = 3.925 (`fuzzy_dark_matter_soliton`) | limit-checked |
 | self-interacting -> cold dark matter | σ/m | collision operator off reproduces collisionless dynamics | planned |
 | QUMOND/AQUAL -> Newtonian | a₀/g | high-acceleration limit is Newtonian gravity | planned |
 | G4 fluids -> G3 kinetic | Knudsen number | Jeans instability of the fluid against the kinetic growth rate: the kinetic root reaches the cold-fluid limit γ = 1 − (3/2)k² and vanishes as √(2/π)(1 − k²) at the Jeans length (`test_jeans`) | kinetic side runs; fluid side planned |
