@@ -1068,3 +1068,4 @@ milca_test_labels(ideal_flux_exact_identities_and_regeneration fast CLASSES mhd
     TARGETS gen_ideal_flux)
 milca_test_labels(ideal_flux_tokamak_field fast CLASSES mhd TARGETS test_ideal_flux_tokamak)
 milca_test_labels(ideal_flux_tokamak_invariance fast CLASSES mhd TARGETS test_ideal_flux_tokamak)
+milca_test_labels(ideal_flux_tokamak_mercier fast CLASSES mhd TARGETS test_ideal_flux_tokamak)

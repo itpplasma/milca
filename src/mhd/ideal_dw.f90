@@ -3,12 +3,17 @@ module milca_ideal_dw
     ! (docs/stability.md, P1e). g(i,j) = d_j B_i, a(i,j) = d_j xi_i. Values are
     ! twice the delta-W density; complex versions conjugate the test field.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use milca_ideal_dw_leaves, only: dw_bernstein, dw_lagrange
+    use milca_ideal_dw_leaves, only: dw_bernstein, dw_lagrange, dw_intuitive
     implicit none
     private
-    public :: dw_bernstein_form, dw_lagrange_form
+    public :: dw_bernstein_form, dw_lagrange_form, dw_intuitive_terms
+    integer, parameter, public :: DW_BEND = 1, DW_COMPRESSION = 2, DW_SOUND = 3, &
+        DW_CURRENT = 4, DW_CURVATURE = 5
     interface dw_bernstein_form
         module procedure bernstein_real, bernstein_complex
+    end interface
+    interface dw_intuitive_terms
+        module procedure intuitive_real, intuitive_complex
     end interface
     interface dw_lagrange_form
         module procedure lagrange_real, lagrange_complex
@@ -61,5 +66,29 @@ contains
         ri = lagrange_real(b, p, gam, mu, real(a), aimag(c))
         value = cmplx(rr + ii, ir - ri, dp)
     end function lagrange_complex
+
+    pure function intuitive_real(b, g, p, gp, gam, mu, xi, a, eta, c) result(terms)
+        ! Bending, magnetic compression, sound, parallel current and
+        ! pressure-curvature terms of the intuitive form (index DW_*).
+        real(dp), intent(in) :: b(3), g(3, 3), p, gp(3), gam, mu
+        real(dp), intent(in) :: xi(3), a(3, 3), eta(3), c(3, 3)
+        real(dp) :: terms(5)
+        call dw_intuitive(b(1), b(2), b(3), g(1,1), g(2,1), g(3,1), g(1,2), &
+            g(2,2), g(3,2), g(1,3), g(2,3), g(3,3), p, gp(1), gp(2), gp(3), gam, &
+            mu, xi(1), xi(2), xi(3), a(1,1), a(2,1), a(3,1), a(1,2), a(2,2), &
+            a(3,2), a(1,3), a(2,3), a(3,3), eta(1), eta(2), eta(3), c(1,1), &
+            c(2,1), c(3,1), c(1,2), c(2,2), c(3,2), c(1,3), c(2,3), c(3,3), &
+            terms(1), terms(2), terms(3), terms(4), terms(5))
+    end function intuitive_real
+
+    pure function intuitive_complex(b, g, p, gp, gam, mu, xi, a) result(terms)
+        ! Diagonal terms of a complex field, xi^* conjugated.
+        real(dp), intent(in) :: b(3), g(3, 3), p, gp(3), gam, mu
+        complex(dp), intent(in) :: xi(3), a(3, 3)
+        real(dp) :: terms(5)
+        terms = intuitive_real(b, g, p, gp, gam, mu, real(xi), real(a), &
+            real(xi), real(a)) + intuitive_real(b, g, p, gp, gam, mu, aimag(xi), &
+            aimag(a), aimag(xi), aimag(a))
+    end function intuitive_complex
 
 end module milca_ideal_dw

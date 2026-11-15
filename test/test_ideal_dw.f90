@@ -5,36 +5,47 @@ program test_ideal_dw
     ! the independent xi form, Hermitian symmetry and JVP/VJP pairing.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortnum_quadrature, only: gauss_legendre
-    use milca_ideal_dw, only: dw_bernstein_form, dw_lagrange_form
+    use milca_ideal_dw, only: dw_bernstein_form, dw_lagrange_form, &
+        dw_intuitive_terms
     use milca_ideal_dw_leaves, only: dw_bernstein, dw_bernstein_jvp, &
         dw_bernstein_vjp
     use milca_ideal_xi, only: xi_bilinear
     implicit none
     real(dp), parameter :: mu = 1.25_dp, cur = 0.7_dp, bz0 = 1.3_dp, &
         p0 = 2.0_dp, kz = 1.5_dp, gam = 5.0_dp/3
-    real(dp) :: balanced, unbalanced, scale
-    call integrals(.true., balanced, scale)
+    real(dp) :: balanced, unbalanced, scale, intuitive, off_intuitive, terms(5)
+    call integrals(.true., balanced, scale, intuitive, terms)
     print '(a,es10.2)', 'force-balanced pinch: (L-E)/|L| = ', balanced/scale
     if (abs(balanced) > 1e-12_dp*scale) error stop 'Eulerian/Lagrangian forms differ'
-    call integrals(.false., unbalanced, scale)
+    print '(a,es10.2)', 'force-balanced pinch: (I-E)/|L| = ', intuitive/scale
+    print '(a,5es11.3)', 'intuitive terms (bend, comp, sound, current, curv):', terms
+    if (abs(intuitive) > 1e-12_dp*scale) error stop 'intuitive/Eulerian forms differ'
+    ! A sign error in any term would exceed the 1e-12 gate by far.
+    if (any(abs(terms) < 1e-6_dp*scale)) error stop 'an intuitive term is not exercised'
+    call integrals(.false., unbalanced, scale, off_intuitive, terms)
     print '(a,es10.2)', 'uniform pressure (no balance): (L-E)/|L| = ', unbalanced/scale
     if (abs(unbalanced) < 1e-3_dp*scale) error stop 'off-equilibrium test is blind'
+    print '(a,es10.2)', 'uniform pressure (no balance): (I-E)/|L| = ', off_intuitive/scale
+    if (abs(off_intuitive) < 1e-3_dp*scale) error stop 'off-equilibrium intuitive test is blind'
     call gamma_zero_limit()
     call hermitian_symmetry()
     call derivative_pairing()
     print '(a)', 'PASS ideal delta-W leaves'
 contains
-    subroutine integrals(equilibrium, difference, magnitude)
+    subroutine integrals(equilibrium, difference, magnitude, intuitive, terms)
         ! B = (-c y, c x, B0), J = 2c/mu e_z, p = p0 - c^2 r^2/mu balances J x B.
+        ! The intuitive form differs from the Eulerian one pointwise by a
+        ! divergence that integrates to zero only on an equilibrium.
         logical, intent(in) :: equilibrium
-        real(dp), intent(out) :: difference, magnitude
+        real(dp), intent(out) :: difference, magnitude, intuitive, terms(5)
+        real(dp) :: parts(5)
         integer, parameter :: nq = 24, nz = 8
         real(dp) :: t(nq), wt(nq), b(3), g(3, 3), p, gp(3), xi(3), a(3, 3), &
             eta(3), c(3, 3), x, y, z, w, lag, eul
         real(dp), parameter :: twopi = 2*acos(-1.0_dp)
         integer :: i, j, l
         call gauss_legendre(nq, t, wt)
-        difference = 0; magnitude = 0
+        difference = 0; magnitude = 0; intuitive = 0; terms = 0
         g = 0; g(1, 2) = -cur; g(2, 1) = cur
         do l = 1, nz
             z = twopi/kz*(l - 1)/nz
@@ -58,6 +69,9 @@ contains
                     lag = dw_lagrange_form(b, p, gam, mu, a, c)
                     eul = dw_bernstein_form(b, g, p, gp, gam, mu, xi, a, eta, c)
                     difference = difference + w*(lag - eul)
+                    parts = dw_intuitive_terms(b, g, p, gp, gam, mu, xi, a, eta, c)
+                    terms = terms + w*parts
+                    intuitive = intuitive + w*(sum(parts) - eul)
                     magnitude = magnitude + w*abs(lag)
                 end do
             end do

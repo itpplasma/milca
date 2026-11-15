@@ -42,6 +42,7 @@ program gen_ideal_dw
     call emit_point_adiabatic()
     call emit_point_inertia()
     call emit_screw_pinch()
+    call emit_intuitive()
     call writer%line('end module milca_ideal_dw_leaves')
     call writer%close()
     print '(a,i0,a)', 'PASS: ', checks, ' exact delta-W identities (no probes)'
@@ -240,6 +241,75 @@ contains
         call prove(mu**2*(det - (lam - kb**2/mu) &
             *(lam**2 - lam*k2*(b2/mu + cs) + k2*kb**2*cs/mu)))
     end subroutine prove_dispersion
+
+    subroutine emit_intuitive()
+        ! Intuitive form of the potential energy (Freidberg, Ideal MHD, 2014,
+        ! ch. 8): field-line bending |Q_perp|^2/mu, magnetic compression
+        ! B^2/mu |div xi_perp + 2 xi_perp.kappa|^2, sound gamma p |div xi|^2,
+        ! parallel current -J_par (xi_perp x b).Q_perp and pressure-curvature
+        ! -2 (xi_perp.grad p)(xi_perp.kappa), each symmetrized in (xi, eta).
+        ! The sum equals dw_bernstein only after integration by parts on an
+        ! equilibrium, which test_ideal_dw checks. B^2 replaces |B| throughout.
+        type(expr_t) :: b2, kap(3), cur(3), jb, terms(5), kb(3), bkb
+        type(expr_t) :: px(3), py(3), qpx(3), qpy(3), dx, dy, ex(3), ey(3)
+        integer :: k, l
+        b2 = b(1)**2 + b(2)**2 + b(3)**2
+        do k = 1, 3
+            kb(k) = zero
+            do l = 1, 3
+                kb(k) = kb(k) + b(l)*g(k, l)
+            end do
+        end do
+        bkb = b(1)*kb(1) + b(2)*kb(2) + b(3)*kb(3)
+        do k = 1, 3
+            kap(k) = kb(k)/b2 - b(k)*bkb/b2**2
+        end do
+        cur(1) = (g(3, 2) - g(2, 3))/mu
+        cur(2) = (g(1, 3) - g(3, 1))/mu
+        cur(3) = (g(2, 1) - g(1, 2))/mu
+        jb = cur(1)*b(1) + cur(2)*b(2) + cur(3)*b(3)
+        call perp_parts(x, a, b2, bkb, kap, px, qpx, dx)
+        call perp_parts(y, c, b2, bkb, kap, py, qpy, dy)
+        terms(1) = (qpx(1)*qpy(1) + qpx(2)*qpy(2) + qpx(3)*qpy(3))/mu
+        terms(2) = b2/mu*dx*dy
+        terms(3) = gam*p*(a(1, 1) + a(2, 2) + a(3, 3))*(c(1, 1) + c(2, 2) + c(3, 3))
+        ex = cross(px, b); ey = cross(py, b)
+        terms(4) = -jb/b2*(ex(1)*qpy(1) + ex(2)*qpy(2) + ex(3)*qpy(3) &
+            + ey(1)*qpx(1) + ey(2)*qpx(2) + ey(3)*qpx(3))/2
+        terms(5) = -((px(1)*q(1) + px(2)*q(2) + px(3)*q(3)) &
+            *(py(1)*kap(1) + py(2)*kap(2) + py(3)*kap(3)) &
+            + (py(1)*q(1) + py(2)*q(2) + py(3)*q(3)) &
+            *(px(1)*kap(1) + px(2)*kap(2) + px(3)*kap(3)))
+        call writer%emit('dw_intuitive', bnames, [character(8) :: 'bend', &
+            'comp', 'sound', 'current', 'curv'], terms)
+    end subroutine emit_intuitive
+
+    subroutine perp_parts(xv, av, b2, bkb, kap, pv, qp, dv)
+        ! xi_perp = xi - B s with s = B.xi/B^2, Q_perp, and
+        ! div xi_perp + 2 xi_perp.kappa. Q(xi_perp) = Q(xi).
+        type(expr_t), intent(in) :: xv(3), av(3, 3), b2, bkb, kap(3)
+        type(expr_t), intent(out) :: pv(3), qp(3), dv
+        type(expr_t) :: s, bs, bq, qv(3)
+        integer :: kk, ll
+        s = (b(1)*xv(1) + b(2)*xv(2) + b(3)*xv(3))/b2
+        bs = zero
+        do ll = 1, 3
+            do kk = 1, 3
+                bs = bs + b(ll)*(g(kk, ll)*xv(kk) + b(kk)*av(kk, ll))/b2
+            end do
+        end do
+        bs = bs - 2*s*bkb/b2
+        do kk = 1, 3
+            pv(kk) = xv(kk) - b(kk)*s
+        end do
+        qv = qfield(xv, av, g)
+        bq = (b(1)*qv(1) + b(2)*qv(2) + b(3)*qv(3))/b2
+        do kk = 1, 3
+            qp(kk) = qv(kk) - b(kk)*bq
+        end do
+        dv = av(1, 1) + av(2, 2) + av(3, 3) - s*(g(1, 1) + g(2, 2) + g(3, 3)) - bs &
+            + 2*(pv(1)*kap(1) + pv(2)*kap(2) + pv(3)*kap(3))
+    end subroutine perp_parts
 
     subroutine emit_boundary()
         ! Free boundary: vacuum density |grad phi|^2/mu for delta B = grad phi,

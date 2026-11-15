@@ -113,6 +113,9 @@ program gen_ideal_flux
         end do
     end do
     call writer%emit('flux_jets', inames, onames, outs)
+    ! Surface metric for local criteria: d_rho sqrt(g), grad rho, grad zeta.
+    call writer%emit('flux_metric', inames(1:27), [character(8) :: 'jacr', &
+        'gr1', 'gr2', 'gr3', 'gz1', 'gz2', 'gz3'], [jacu(1), dual(:, 1), dual(:, 3)])
     call emit_form_matrix()
     call emit_toroidal_chart()
     call emit_wrappers()
@@ -346,6 +349,28 @@ contains
         call writer%line('    real(dp), intent(out) :: c(12,12)')
         call wrapped_call('flux_form_matrix', args)
         call writer%line('end subroutine flux_form_matrix_array')
+        args = ''
+        do uu = 1, 3
+            do i = 1, 3
+                write(item, '(a,i1,a,i1,a)') 'xu(', i, ',', uu, ')'
+                args = args//trim(item)//','
+            end do
+        end do
+        do vv = 1, 3
+            do uu = 1, vv
+                do i = 1, 3
+                    write(item, '(a,i1,a,i1,a,i1,a)') 'xuu(', i, ',', uu, ',', vv, ')'
+                    args = args//trim(item)//','
+                end do
+            end do
+        end do
+        args = args//'jacr,grho(1),grho(2),grho(3),gzeta(1),gzeta(2),gzeta(3)'
+        call writer%line('pure subroutine flux_metric_array(xu, xuu, jacr, grho, gzeta)')
+        call writer%line('    use, intrinsic :: iso_fortran_env, only: dp => real64')
+        call writer%line('    real(dp), intent(in) :: xu(3,3), xuu(3,3,3)')
+        call writer%line('    real(dp), intent(out) :: jacr, grho(3), gzeta(3)')
+        call wrapped_call('flux_metric', args)
+        call writer%line('end subroutine flux_metric_array')
     end subroutine emit_wrappers
 
     subroutine wrapped_call(name, args)
