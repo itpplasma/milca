@@ -76,6 +76,10 @@ as first principles.
   field (Hu, Barkana and Gruzinov 2000; Schive, Chiueh and Broadhurst 2014),
   which reuse the [quantum branch](quantum-plasma.md) and reduce to
   Vlasov-Poisson through the Wigner representation (Widrow and Kaiser 1993).
+  The solitonic core, the Schrödinger-Poisson ground state, runs
+  (`milca_fuzzy_dark_matter`): it satisfies the virial theorem and the
+  eigenvalue relation to 1e-12, its scaling symmetry, and r_1/2 M = 3.925
+  ħ²/(G m²) of the literature.
 - Modified gravity: MOND (Milgrom 1983) as an alternative to dark matter, not
   a reduction of general relativity. In its quasi-linear formulation QUMOND
   (Milgrom 2010) it is two linear Poisson problems with an algebraic step
