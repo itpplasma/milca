@@ -6,8 +6,9 @@ program test_ideal_flux
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortsparse, only: csc_z_t, fortsparse_status_t, FORTSPARSE_OK
     use milca_ideal_flux, only: flux_space_t, flux_space_init, flux_assemble, &
-        flux_point_t
-    use ideal_flux_charts, only: cylinder_t
+        flux_point_t, flux_energy_terms, flux_normal_spectrum
+    use milca_ideal_mercier, only: mercier_t, flux_mercier
+    use ideal_flux_charts, only: cylinder_t, relabeled_t, rippled_t
     use milca_ideal_flux_leaves, only: flux_jets_array
     implicit none
     interface
@@ -35,6 +36,10 @@ program test_ideal_flux
     if (mode == 'all' .or. mode == 'leaves') call leaves()
     if (mode == 'all' .or. mode == 'kink') call cylinder_kink()
     if (mode == 'all' .or. mode == 'uniform') call uniform_harmonics()
+    if (mode == 'all' .or. mode == 'family') call mode_family()
+    if (mode == 'all' .or. mode == 'energy') call energy_terms()
+    if (mode == 'all' .or. mode == 'spectrum') call normal_spectrum()
+    if (mode == 'all' .or. mode == 'mercier') call mercier_suydam()
     print '(a)', 'PASS ideal flux ('//trim(mode)//')'
 contains
     subroutine leaves()
@@ -204,6 +209,182 @@ contains
             maxval(abs(lam - union)/max(1.0_dp, abs(union)))
     end subroutine uniform_harmonics
 
+
+    subroutine mode_family()
+        ! Harmonics of two families are rejected. For one family, one field
+        ! period with nfp = 2 gives half the full-torus matrix; over the full
+        ! torus, harmonics of different families do not couple on a
+        ! two-period chart, which a one-period quadrature would alias.
+        type(flux_space_t) :: half, full, mixed
+        type(csc_z_t) :: k2, m2, k1, m1, km, mm
+        type(fortsparse_status_t) :: st
+        type(rippled_t) :: ripple
+        real(dp), allocatable :: edges(:)
+        complex(dp), allocatable :: dense(:, :)
+        real(dp) :: dev, cross_max
+        integer :: ok, j, k, kk, i1, i2
+        edges = [(real(j, dp)/6, j = 0, 6)]
+        call flux_space_init(mixed, edges, 2, [1, 1], [1, 2], 2, 8, 6, ok)
+        if (ok == 0) error stop 'two mode families accepted'
+        ! n = 3 and -3 coincide on a single toroidal point.
+        call flux_space_init(mixed, edges, 2, [1, 1], [3, -3], 1, 8, 1, ok)
+        if (ok == 0) error stop 'aliased harmonics accepted'
+        call flux_space_init(half, edges, 2, [0, 1, 2], [-1, 1, 3], 2, 8, 6, ok)
+        if (ok /= 0) error stop 'antiperiodic family rejected'
+        call flux_space_init(full, edges, 2, [0, 1, 2], [-1, 1, 3], 1, 8, 12, ok)
+        if (ok /= 0) error stop 'full-torus space'
+        call flux_assemble(half, ripple, 0.0_dp, 1.0_dp, k2, m2, st)
+        if (st%code /= FORTSPARSE_OK) error stop 'half assembly'
+        call flux_assemble(full, ripple, 0.0_dp, 1.0_dp, k1, m1, st)
+        if (st%code /= FORTSPARSE_OK) error stop 'full assembly'
+        dev = max(maxval(abs(k1%val - 2*k2%val))/maxval(abs(k1%val)), &
+            maxval(abs(m1%val - 2*m2%val))/maxval(abs(m1%val)))
+        print '(a,es10.2)', 'family: full torus vs 2 x one period, odd n:', dev
+        if (dev > 1e-12_dp) error stop 'one-period assembly of the odd family'
+        call flux_space_init(mixed, edges, 2, [1, 1], [1, 2], 1, 8, 12, ok)
+        if (ok /= 0) error stop 'full-torus mixed space'
+        call flux_assemble(mixed, ripple, 0.0_dp, 1.0_dp, km, mm, st)
+        if (st%code /= FORTSPARSE_OK) error stop 'mixed assembly'
+        allocate(dense(mixed%ndof, mixed%ndof)); dense = 0
+        do j = 1, mixed%ndof
+            do kk = km%col_ptr(j), km%col_ptr(j + 1) - 1
+                dense(km%row_idx(kk), j) = km%val(kk)
+            end do
+        end do
+        cross_max = 0
+        do k = 2, mixed%nr - 1
+            do j = 2, mixed%nr - 1
+                i1 = mixed%radial_dof(k, 1); i2 = mixed%radial_dof(j, 2)
+                cross_max = max(cross_max, abs(dense(i1, i2)))
+            end do
+        end do
+        print '(a,es10.2)', 'family: full-torus coupling of n = 1 and n = 2:', &
+            cross_max/maxval(abs(km%val))
+        if (cross_max > 1e-12_dp*maxval(abs(km%val))) &
+            error stop 'families couple over the full torus'
+    end subroutine mode_family
+
+    subroutine energy_terms()
+        ! Intuitive-form split of the m = 1 kink eigenvector at two meshes. The
+        ! Eulerian value is x^H K x, the eigenvalue, and the five terms sum to
+        ! it (here gamma = 0, so the sound term vanishes).
+        real(dp) :: terms(5), total, lam1, gap(2)
+        integer :: level, ne
+        cyl = cylinder_t(a=2.0_dp, r0=2.5_dp, profile=1)
+        do level = 1, 2
+            ne = 16*level
+            call lowest_terms(ne, lam1, terms, total)
+            gap(level) = abs(sum(terms) - total)/sum(abs(terms))
+            print '(a,i3,a,es12.4,a,5es11.3,a,es9.2)', 'energy: ne', ne, &
+                ' x^H K x', total, ' terms', terms, ' |sum - total|/sum|.|', &
+                gap(level)
+            if (abs(total - lam1) > 1e-10_dp*abs(lam1)) &
+                error stop 'Eulerian value differs from x^H K x'
+        end do
+        if (maxval(gap) > 1e-8_dp) error stop 'intuitive terms do not sum to delta W'
+    end subroutine energy_terms
+
+    subroutine lowest_terms(ne, lam1, terms, total)
+        integer, intent(in) :: ne
+        real(dp), intent(out) :: lam1, terms(5), total
+        type(flux_space_t) :: space
+        type(csc_z_t) :: stiffness, mass
+        type(fortsparse_status_t) :: status
+        complex(dp), allocatable :: ka(:, :), ma(:, :), work(:)
+        real(dp), allocatable :: rwork(:), edges(:), lam(:)
+        integer :: ok, j, k, info
+        edges = [(real(j, dp)/ne, j = 0, ne)]
+        call flux_space_init(space, edges, 3, [1], [-1], 1, 8, 1, ok)
+        if (ok /= 0) error stop 'space'
+        call flux_assemble(space, cyl, 0.0_dp, 1.0_dp, stiffness, mass, status)
+        if (status%code /= FORTSPARSE_OK) error stop 'assembly'
+        allocate(ka(space%ndof, space%ndof), ma(space%ndof, space%ndof))
+        ka = 0; ma = 0
+        do j = 1, space%ndof
+            do k = stiffness%col_ptr(j), stiffness%col_ptr(j + 1) - 1
+                ka(stiffness%row_idx(k), j) = stiffness%val(k)
+                ma(mass%row_idx(k), j) = mass%val(k)
+            end do
+        end do
+        allocate(lam(space%ndof), work(4*space%ndof), rwork(3*space%ndof))
+        call zhegv(1, 'V', 'U', space%ndof, ka, space%ndof, ma, space%ndof, lam, &
+            work, size(work), rwork, info)
+        if (info /= 0) error stop 'dense generalized eigensolve'
+        lam1 = lam(1)
+        call flux_energy_terms(space, cyl, 0.0_dp, 1.0_dp, ka(:, 1), terms, &
+            total, ok)
+        if (ok /= 0) error stop 'energy terms'
+    end subroutine lowest_terms
+
+    subroutine normal_spectrum()
+        ! D^rho = f(rho) exp(i(theta - zeta)) on the relabeled cylinder, whose
+        ! straight angle is phi = theta + k rho^2 sin theta: the coefficient of
+        ! exp(i m phi) is J_(1-m)(m k rho^2) times a surface constant, and the
+        ! mean power is that constant squared over sqrt(1 - (k rho^2)^2).
+        type(relabeled_t) :: chart
+        type(flux_space_t) :: space
+        complex(dp), allocatable :: x(:)
+        real(dp) :: power(-4:4, -1:1), z, expected, dev
+        real(dp), parameter :: rho = 0.6_dp
+        integer :: ok, m, j
+        chart = relabeled_t(a=2.0_dp, r0=2.5_dp, profile=1, k=0.5_dp)
+        call flux_space_init(space, [(real(j, dp)/8, j = 0, 8)], 3, [1], [-1], 1, &
+            8, 1, ok)
+        if (ok /= 0) error stop 'space'
+        allocate(x(space%ndof)); x = 0
+        x(pack(space%radial_dof(:, 1), space%radial_dof(:, 1) > 0)) = 1
+        call flux_normal_spectrum(space, chart, x, rho, 64, 4, 4, 1, power, ok)
+        if (ok /= 0) error stop 'spectrum'
+        z = chart%k*rho**2
+        dev = 0
+        do m = -4, 4
+            expected = bessel_jn(abs(1 - m), m*z)**2*sqrt(1 - z*z)
+            dev = max(dev, abs(power(m, -1) - expected))
+        end do
+        print '(a,f9.6,a,es10.2)', 'spectrum: power in m = 1', power(1, -1), &
+            ', max deviation from Bessel', dev
+        if (dev > 1e-12_dp) error stop 'normal-displacement spectrum'
+        if (maxval(abs(power(:, 0:1))) > 1e-14_dp) error stop 'spurious n'
+    end subroutine normal_spectrum
+
+    subroutine mercier_suydam()
+        ! Screw pinch of length 2 pi R0, psi the toroidal flux per radian:
+        ! D_Merc = R0^2 Btheta^2/(2 pi^2 r^5 Bz^6) [r Bz^2 (q'/q)^2/8 + p'],
+        ! Suydam's criterion times a positive factor, and d2V/dpsi2 =
+        ! -4 pi^2 R0 Bz'/(r Bz^3) (derivation in docs/stability.md). Here
+        ! Btheta = r, Bz = sqrt(1/4 + r^2), p' = -3 r and mu0 = 1. The same
+        ! cylinder in a non-straight angle must give the same values.
+        type(mercier_t) :: mc, ml
+        type(relabeled_t) :: chart
+        real(dp), parameter :: r0 = 3.0_dp
+        real(dp) :: r, bz, suydam, d_ref, v_ref
+        integer :: i, ok
+        cyl = cylinder_t(a=1.0_dp, r0=r0, profile=1)
+        chart = relabeled_t(a=1.0_dp, r0=r0, profile=1, k=0.5_dp)
+        do i = 1, 4
+            r = 0.2_dp*i
+            call flux_mercier(cyl, r, 1, 16, 4, 1.0_dp, mc, ok)
+            if (ok /= 0) error stop 'mercier'
+            call flux_mercier(chart, r, 1, 64, 4, 1.0_dp, ml, ok)
+            if (ok /= 0) error stop 'mercier, relabeled'
+            bz = sqrt(0.25_dp + r*r)
+            suydam = r*bz**2*(r/bz**2)**2/8 - 3*r
+            d_ref = r0**2*r**2/(2*pi**2*r**5*bz**6)*suydam
+            v_ref = -4*pi**2*r0*(r/bz)/(r*bz**3)
+            print '(a,f4.1,a,4es13.5)', 'mercier r', r, &
+                ': D, form (4.1), Suydam form, d2V/dpsi2', mc%total, &
+                mc%total_alt, d_ref, mc%vpp
+            if (abs(mc%total - d_ref) > 1e-10_dp*abs(d_ref)) &
+                error stop 'Mercier differs from the Suydam form'
+            if (abs(mc%total_alt - d_ref) > 1e-10_dp*abs(d_ref)) &
+                error stop 'form (4.1) differs from the Suydam form'
+            if (abs(mc%vpp - v_ref) > 1e-10_dp*abs(v_ref)) &
+                error stop 'magnetic well differs'
+            if (abs(ml%total - d_ref) > 1e-10_dp*abs(d_ref) .or. &
+                abs(ml%vpp - v_ref) > 1e-10_dp*abs(v_ref)) &
+                error stop 'Mercier depends on the poloidal angle'
+        end do
+    end subroutine mercier_suydam
 
     subroutine spectrum(m, n, ne, deg, ntheta, gam, lam)
         integer, intent(in) :: m(:), n(:), ne, deg, ntheta

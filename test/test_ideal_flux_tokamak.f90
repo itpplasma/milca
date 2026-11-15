@@ -14,6 +14,8 @@ program test_ideal_flux_tokamak
     use fortnum_eigen, only: eigen_options_t, EIGEN_OK, EIGEN_NEAREST
     use milca_ideal_flux_tokamak, only: tokamak_chart_t, tokamak_chart_init, &
         tokamak_position
+    use milca_ideal_mercier, only: mercier_t, flux_mercier
+    use fortnum_quadrature, only: gauss_legendre_ab
     implicit none
     real(dp), parameter :: r0 = 3, s0 = 1, kappa = 1.5_dp, psib = 3, &
         psin_wall = 0.8_dp
@@ -44,6 +46,7 @@ program test_ideal_flux_tokamak
         call field_and_balance(geometric, 'geom. ')
     end if
     if (mode == 'all' .or. mode == 'invariance') call invariance()
+    if (mode == 'all' .or. mode == 'mercier') call mercier_large_aspect()
     print '(a)', 'PASS ideal flux tokamak ('//trim(mode)//')'
 contains
     subroutine solovev_grid(g)
@@ -194,5 +197,82 @@ contains
         lowest = real(omega2(1))
         if (report%status /= EIGEN_OK) lowest = huge(1.0_dp)
     end subroutine lowest_mode
+
+    subroutine mercier_large_aspect()
+        ! Circular Solov'ev tori (kappa = 1, F = F0) at R0/a = 10 and 20
+        ! against the large-aspect-ratio Mercier criterion of Shafranov and
+        ! Yurchenko (1968), r B0^2 (q'/q)^2/8 + p'(1 - q^2) > 0, written as
+        ! D_Merc with the factor of the screw pinch, R0^2 Btheta^2/(2 pi^2
+        ! r^5 B0^6). r is the radius of the toroidal flux, psi = B0 r^2/2.
+        ! The toroidal term flips the sign between q = 0.6 and q = 1.6, and the
+        ! relative deviation falls as (a/R0)^2.
+        real(dp) :: dev(2, 2), ratio(2)
+        integer :: iq, ia
+        do iq = 1, 2
+            do ia = 1, 2
+                call compare(10.0_dp*ia, merge(0.6_dp, 1.6_dp, iq == 1), dev(ia, iq))
+            end do
+            ratio(iq) = dev(2, iq)/dev(1, iq)
+        end do
+        print '(a,4es10.2)', 'mercier: relative deviations (q, R0/a)', dev
+        if (any(dev(2, :) > 5e-3_dp)) error stop 'Mercier off the large-aspect limit'
+        if (any(ratio > 0.35_dp)) error stop 'Mercier does not approach the limit'
+    end subroutine mercier_large_aspect
+
+    subroutine compare(rmaj, qa, dev)
+        real(dp), intent(in) :: rmaj, qa
+        real(dp), intent(out) :: dev
+        integer, parameter :: nr = 401, nf = 101
+        real(dp), parameter :: pi = acos(-1.0_dp), half = 1.5_dp
+        type(psi_grid_t) :: g
+        type(tokamak_chart_t) :: chart
+        type(mercier_t) :: mc
+        type(flux_point_t) :: pt
+        real(dp) :: psirz(nr, nr), fpol(nf), pres(nf), r, z, edge, f, b0, rho, &
+            tor, xq(16), wq(16), reff, q, dq, dp_, bth, d_ref
+        integer :: i, j, status
+        edge = rmaj**2/1.6_dp
+        f = qa*rmaj**3; b0 = f/rmaj
+        do j = 1, nr
+            z = -half + 2*half*(j - 1)/(nr - 1)
+            do i = 1, nr
+                r = rmaj - half + 2*half*(i - 1)/(nr - 1)
+                psirz(i, j) = (r*r - rmaj**2)**2/8 + r*r*z*z/2
+            end do
+        end do
+        fpol = f
+        do i = 1, nf
+            pres(i) = 2*edge*(1 - real(i - 1, dp)/(nf - 1))
+        end do
+        call psi_grid_init(g, psirz, rmaj - half, 2*half, 0.0_dp, 2*half, rmaj, &
+            0.0_dp, edge, 1.0_dp, fpol, status, pres)
+        if (status /= 0) error stop 'circular Solovev grid'
+        call tokamak_chart_init(chart, g, 0.8_dp, angle_pest, 16, 24, 96, 512, &
+            1.0_dp, status)
+        if (status /= 0) error stop 'circular chart'
+        rho = 0.5_dp
+        call flux_mercier(chart, rho, 1, 128, 1, 1.0_dp, mc, status)
+        if (status /= 0) error stop 'mercier on the torus'
+        call gauss_legendre_ab(16, 0.0_dp, rho, xq, wq)
+        tor = 0
+        do i = 1, 16
+            call chart%evaluate(xq(i), 0.0_dp, 0.0_dp, pt)
+            tor = tor + wq(i)*pt%psi1
+        end do
+        reff = sqrt(2*abs(tor)/b0)
+        q = 1/mc%iota
+        ! d/dr = (2 psi/r) d/dpsi keeps the sign of the toroidal flux.
+        dq = -mc%shear*(2*tor/reff)/mc%iota
+        dp_ = mc%dpdpsi*(2*tor/reff)
+        bth = reff*b0/(q*rmaj)
+        d_ref = rmaj**2*bth**2/(2*pi**2*reff**5*b0**6) &
+            *(reff*b0**2*dq**2/8 + dp_*(1 - q*q))
+        dev = abs(mc%total/d_ref - 1)
+        print '(a,f5.1,a,f6.3,a,2es13.5,a,es10.2)', 'mercier R0/a', rmaj, ' q', abs(q), &
+            ': D, large-aspect limit', mc%total, d_ref, ', (4.1) - D', &
+            mc%total_alt - mc%total
+        if (sign(1.0_dp, mc%total) /= sign(1.0_dp, d_ref)) &
+            error stop 'Mercier sign differs from the large-aspect limit'
+    end subroutine compare
 
 end program test_ideal_flux_tokamak

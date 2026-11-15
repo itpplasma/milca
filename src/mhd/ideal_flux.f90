@@ -15,10 +15,11 @@ module milca_ideal_flux
     use fortsparse, only: csc_z_t, csc_from_triplet, fortsparse_status_t, &
         FORTSPARSE_OK, status_set, FORTSPARSE_INVALID_MATRIX
     use milca_ideal_flux_leaves, only: flux_jets_array, flux_form_matrix_array
+    use milca_ideal_dw, only: dw_intuitive_terms
     implicit none
     private
     public :: flux_space_t, flux_space_init, flux_assemble, flux_equilibrium_t
-    public :: flux_point_t, flux_point
+    public :: flux_point_t, flux_point, flux_energy_terms, flux_normal_spectrum
 
     type :: flux_space_t
         integer :: degree = 0, nh = 0, nr = 0, ndof = 0, ntheta = 0, nzeta = 0
@@ -57,7 +58,12 @@ contains
     subroutine flux_space_init(space, edges, degree, m, n, nfp, ntheta, nzeta, &
             status)
         ! D^rho vanishes on the axis and the wall, D^zeta on the axis, D^theta
-        ! on the axis unless |m| = 1, as for the cylinder densities.
+        ! on the axis unless |m| = 1, as for the cylinder densities. All n must
+        ! lie in one mode family, n = n0 mod nfp: the one-period quadrature
+        ! aliases couplings between families. With nfp = 2, even n are periodic
+        ! and odd n antiperiodic over a field period; a stability statement
+        ! needs every family n0 = 0, ..., nfp/2. Two n that differ by a
+        ! multiple of nfp*nzeta alias on the angle grid and are rejected.
         type(flux_space_t), intent(out) :: space
         real(dp), intent(in) :: edges(0:)
         integer, intent(in) :: degree, m(:), n(:), nfp, ntheta, nzeta
@@ -67,6 +73,11 @@ contains
         ne = size(edges) - 1
         if (degree < 1 .or. ne < 1 .or. size(m) < 1) return
         if (size(n) /= size(m) .or. nfp < 1 .or. ntheta < 1 .or. nzeta < 1) return
+        if (any(modulo(n - n(1), nfp) /= 0)) return
+        ! Distinct n must stay distinct on the nzeta points of one period.
+        do k = 1, size(n)
+            if (any(n /= n(k) .and. modulo(n - n(k), nfp*nzeta) == 0)) return
+        end do
         if (.not. same_real_value(edges(0), 0.0_dp)) return
         if (.not. same_real_value(edges(ne), 1.0_dp)) return
         if (any(edges(1:) <= edges(:ne-1))) return
@@ -305,4 +316,186 @@ contains
                 cmplx(0, space%m(h)*value, dp), cmplx(0, space%n(h)*value, dp)]
         end subroutine set_jet
     end subroutine flux_assemble
+    subroutine flux_energy_terms(space, equilibrium, gam, mu, x, terms, total, status)
+        ! Twice the potential energy of the field x per field period, on the
+        ! quadrature of flux_assemble: the intuitive-form terms (index DW_* of
+        ! milca_ideal_dw) and the Eulerian value, which equals x^H K x. The
+        ! terms sum to it only up to the discretization: the identity needs
+        ! integration by parts, and the tangential densities are discontinuous
+        ! between elements.
+        type(flux_space_t), intent(in) :: space
+        class(flux_equilibrium_t), intent(in) :: equilibrium
+        real(dp), intent(in) :: gam, mu
+        complex(dp), intent(in) :: x(:)
+        real(dp), intent(out) :: terms(5), total
+        integer, intent(out) :: status
+        real(dp), parameter :: twopi = 2*acos(-1.0_dp)
+        type(flux_point_t) :: e
+        real(dp) :: xq(space%degree + 3), wq(space%degree + 3), wa, theta, zeta, &
+            jac, b(3), g(3, 3), q(3), t(12, 12), wf(12, 12), wm(3, 3), jw
+        complex(dp) :: jets(12), xi(3), a(3, 3)
+        integer :: el, iq, i, j, ok
+        status = 1; terms = 0; total = 0
+        if (size(x) /= space%ndof) return
+        wa = (twopi/space%ntheta)*(twopi/(space%nfp*space%nzeta))
+        do el = 1, size(space%edges) - 1
+            call gauss_legendre_ab(space%degree + 3, space%edges(el - 1), &
+                space%edges(el), xq, wq)
+            do iq = 1, size(xq)
+                do j = 1, space%nzeta
+                    do i = 1, space%ntheta
+                        theta = twopi*(i - 1)/space%ntheta
+                        zeta = twopi*(j - 1)/(space%nfp*space%nzeta)
+                        call density_jets(space, x, xq(iq), theta, zeta, jets, ok)
+                        if (ok /= 0) return
+                        call flux_point(equilibrium, xq(iq), theta, zeta, gam, mu, &
+                            wf, wm, jw, ok)
+                        if (ok /= 0) return
+                        call equilibrium%evaluate(xq(iq), theta, zeta, e)
+                        call flux_jets_array(e%xu, e%xuu, e%psi1, e%psi2, e%iota, &
+                            e%iota1, e%pp, e%lam, jac, b, g, q, t)
+                        xi = matmul(t(1:3, :), jets)
+                        a = reshape(matmul(t(4:12, :), jets), [3, 3])
+                        terms = terms + wq(iq)*wa*abs(jac) &
+                            *dw_intuitive_terms(b, g, e%p, q, gam, mu, xi, a)
+                        total = total + wq(iq)*wa*abs(jw) &
+                            *real(dot_product(jets, matmul(wf, jets)))
+                    end do
+                end do
+            end do
+        end do
+        if (.not. all(ieee_is_finite(terms)) .or. .not. ieee_is_finite(total)) return
+        status = 0
+    end subroutine flux_energy_terms
+
+    subroutine flux_normal_spectrum(space, equilibrium, x, rho, ntheta, nzeta, &
+            mmax, nmax, power, status)
+        ! Fourier power of delta psi = xi.grad psi = psi' D^rho / sqrt(g) on
+        ! the surface rho in the straight-field-line angle theta* = theta +
+        ! lambda and zeta over the whole torus, delta psi = sum c_mn
+        ! exp(i(m theta* + n zeta)). power(m, n) = |c_mn|^2 divided by the
+        ! surface mean of |delta psi|^2 in (theta*, zeta), so the entries sum
+        ! to one when the window holds the whole spectrum. lambda is
+        ! integrated spectrally from lambda_theta and lambda_zeta.
+        type(flux_space_t), intent(in) :: space
+        class(flux_equilibrium_t), intent(in) :: equilibrium
+        complex(dp), intent(in) :: x(:)
+        real(dp), intent(in) :: rho
+        integer, intent(in) :: ntheta, nzeta, mmax, nmax
+        real(dp), intent(out) :: power(-mmax:mmax, -nmax:nmax)
+        integer, intent(out) :: status
+        real(dp), parameter :: twopi = 2*acos(-1.0_dp)
+        type(flux_point_t) :: e
+        complex(dp) :: dpsi(ntheta, nzeta), jets(12), lt(ntheta, nzeta), &
+            lz(ntheta, nzeta), lamc(ntheta, nzeta), c, ph
+        real(dp) :: lam(ntheta, nzeta), dth(ntheta, nzeta), th(ntheta), ze(nzeta), &
+            jac, total
+        integer :: i, j, k, l, m, n, ok
+        status = 1; power = 0
+        if (size(x) /= space%ndof .or. ntheta < 2*mmax + 1 .or. nzeta < 2*nmax + 1) &
+            return
+        if (rho <= 0 .or. rho >= 1) return
+        th = [(twopi*(i - 1)/ntheta, i = 1, ntheta)]
+        ze = [(twopi*(j - 1)/nzeta, j = 1, nzeta)]
+        do j = 1, nzeta
+            do i = 1, ntheta
+                call density_jets(space, x, rho, th(i), ze(j), jets, ok)
+                if (ok /= 0) return
+                call equilibrium%evaluate(rho, th(i), ze(j), e)
+                jac = dot_product(e%xu(:, 1), [e%xu(2, 2)*e%xu(3, 3) &
+                    - e%xu(3, 2)*e%xu(2, 3), e%xu(3, 2)*e%xu(1, 3) &
+                    - e%xu(1, 2)*e%xu(3, 3), e%xu(1, 2)*e%xu(2, 3) - e%xu(2, 2)*e%xu(1, 3)])
+                dpsi(i, j) = e%psi1*jets(1)/jac
+                dth(i, j) = e%lam(1)
+                lt(i, j) = e%lam(1); lz(i, j) = e%lam(2)
+            end do
+        end do
+        ! lambda_mn = (lambda_theta)_mn/(i m), or (lambda_zeta)_0n/(i n) at m = 0.
+        lamc = 0
+        do l = 1, nzeta
+            n = wrap(l - 1, nzeta)
+            do k = 1, ntheta
+                m = wrap(k - 1, ntheta)
+                if (m == 0 .and. n == 0) cycle
+                c = 0
+                do j = 1, nzeta
+                    do i = 1, ntheta
+                        ph = exp(cmplx(0, -(m*th(i) + n*ze(j)), dp))
+                        if (m /= 0) then
+                            c = c + lt(i, j)*ph
+                        else
+                            c = c + lz(i, j)*ph
+                        end if
+                    end do
+                end do
+                c = c/(ntheta*nzeta)/cmplx(0, merge(m, n, m /= 0), dp)
+                do j = 1, nzeta
+                    do i = 1, ntheta
+                        lamc(i, j) = lamc(i, j) + c*exp(cmplx(0, m*th(i) + n*ze(j), dp))
+                    end do
+                end do
+            end do
+        end do
+        lam = real(lamc)
+        total = sum(abs(dpsi)**2*(1 + dth))/(ntheta*nzeta)
+        if (.not. ieee_is_finite(total) .or. total <= 0) return
+        do n = -nmax, nmax
+            do m = -mmax, mmax
+                c = sum(dpsi*(1 + dth)*exp(cmplx(0, -(m*(spread(th, 2, nzeta) + lam) &
+                    + n*spread(ze, 1, ntheta)), dp)))/(ntheta*nzeta)
+                power(m, n) = abs(c)**2/total
+            end do
+        end do
+        status = 0
+    contains
+        pure integer function wrap(k, nk)
+            integer, intent(in) :: k, nk
+            wrap = k
+            if (k > nk/2) wrap = k - nk
+        end function wrap
+    end subroutine flux_normal_spectrum
+
+    subroutine density_jets(space, x, rho, theta, zeta, jets, status)
+        ! (D, D_rho, D_theta, D_zeta) of the field x at one point.
+        type(flux_space_t), intent(in) :: space
+        complex(dp), intent(in) :: x(:)
+        real(dp), intent(in) :: rho, theta, zeta
+        complex(dp), intent(out) :: jets(12)
+        integer, intent(out) :: status
+        real(dp), allocatable :: sv(:), sd(:), tv(:), td(:)
+        complex(dp) :: ph, v, s
+        integer :: h, k, c, dof
+        jets = 0
+        call evaluate_bspline_basis(space%knots, space%degree, rho, sv, sd, status)
+        if (status /= 0) return
+        call evaluate_bspline_basis(space%knots(2:size(space%knots) - 1), &
+            space%degree - 1, rho, tv, td, status)
+        if (status /= 0) return
+        do h = 1, space%nh
+            ph = exp(cmplx(0, space%m(h)*theta + space%n(h)*zeta, dp))
+            do c = 1, 3
+                v = 0; s = 0
+                do k = 1, merge(space%nr, space%nr - 1, c == 1)
+                    select case (c)
+                    case (1)
+                        dof = space%radial_dof(k, h)
+                    case (2)
+                        dof = space%theta_dof(k, h)
+                    case default
+                        dof = space%zeta_dof(k, h)
+                    end select
+                    if (dof == 0) cycle
+                    if (c == 1) then
+                        v = v + x(dof)*sv(k); s = s + x(dof)*sd(k)
+                    else
+                        v = v + x(dof)*tv(k); s = s + x(dof)*td(k)
+                    end if
+                end do
+                jets(c) = jets(c) + v*ph
+                jets(3 + c) = jets(3 + c) + s*ph
+                jets(6 + c) = jets(6 + c) + cmplx(0, space%m(h), dp)*v*ph
+                jets(9 + c) = jets(9 + c) + cmplx(0, space%n(h), dp)*v*ph
+            end do
+        end do
+    end subroutine density_jets
 end module milca_ideal_flux

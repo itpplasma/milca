@@ -338,7 +338,7 @@ kinetic energy), and A x = lambda M x.
    option, because published growth rates use either norm; the norm changes
    growth rates, not the unstable count or marginal points. Toroidal
    harmonics couple within one mode family (n fixed modulo the number of
-   field periods).
+   field periods); every family must be searched (S7 below).
 2. **M1 free boundary.** M0 plus the vacuum energy
    \(\delta W_v=\int|\delta B_v|^2/(2\mu_0)\,dV\) outside the plasma and the
    surface term on the plasma boundary [11,12], with either no wall (exterior
@@ -460,9 +460,9 @@ for compactly supported fields on a force-balanced screw pinch with uniform
 current: they agree to 2e-16 relative, differ by 1.5 % when the pressure
 gradient is removed, and differ by 8 % when the sign of the current term is
 flipped. The same test checks the gamma = 0 limit against the xi form,
-Hermitian symmetry and the tangent and adjoint leaves. Still open from the
-energy-source plan: the equivalence with the intuitive form of delta W, the
-repetition of the identities in SymPy and the
+Hermitian symmetry and the tangent and adjoint leaves, and the equivalence
+with the intuitive form of delta W (S7 below). Still open from the
+energy-source plan: the repetition of the identities in SymPy and the
 reduction to Newcomb's Lagrangian, which rung R2 tests numerically.
 
 **P1e.2 (done).** `milca_ideal_cylinder` assembles the stiffness (Eulerian
@@ -572,6 +572,65 @@ R0 = 640, is 0.6 % (gamma = 0) and 0.4 % (gamma = 5/3) off the cylinder
 oracle, converging as (a/R0)^2. Still open: 3D map states and the
 comparison with GLISS on the same states.
 
+**S7 (in progress): local criteria and energy diagnostics.** On any
+flux-coordinate equilibrium of `milca_ideal_flux`:
+
+- `flux_mercier` (`milca_ideal_mercier`) evaluates the finite-radius Mercier
+  criterion D_Merc = D_shear + D_curr + D_well + D_geod > 0 in the form of
+  [20], eqs. (4.16)-(4.20), with psi the toroidal flux per radian, and
+  independently the equivalent form (4.1) of [20], which agrees with it only
+  on an equilibrium because it uses |J|^2 instead of the force-balance split.
+  It also returns the magnetic well d2V/dpsi2, stable for d2V/dpsi2 < 0, and
+  dp/dpsi. Surface integrals use the generated metric leaf `flux_metric`.
+- `flux_energy_terms` splits 2 delta W of a discrete displacement into the
+  five terms of the intuitive form [12]: field-line bending |Q_perp|^2/mu0,
+  magnetic compression B^2/mu0 |div xi_perp + 2 xi_perp.kappa|^2, sound
+  gamma p |div xi|^2, parallel current -J_par (xi_perp x b).Q_perp and
+  pressure-curvature -2 (xi_perp.grad p)(xi_perp.kappa), kappa = (b.grad) b,
+  and returns the Eulerian value x^H K x beside them. The pointwise leaf is
+  `dw_intuitive` of `gen_ideal_dw`.
+- `flux_normal_spectrum` gives the Fourier power of delta psi = xi.grad psi
+  on one surface in the straight-field-line angle theta* = theta + lambda,
+  with lambda integrated spectrally from the chart's lambda_theta and
+  lambda_zeta.
+
+Checks, each against a derived limit or identity:
+
+| Test | Comparison | Result |
+|---|---|---|
+| `ideal_dw_pinch_equivalence_and_derivatives` | intuitive terms against the Eulerian form, integrated over compactly supported fields on the force-balanced pinch | sum agrees to 2e-17 relative; 1.1 % apart without force balance; each term far above the 1e-12 gate |
+| `ideal_flux_energy` | the five terms of the m = 1 kink eigenvector of rung R2 against x^H K x = omega^2 | 1e-15 at 16 and 32 cells |
+| `ideal_flux_mercier` | screw pinch against Suydam's criterion times the factor below, both Mercier forms; the same pinch in a non-straight angle | 1e-10 at r = 0.2 to 0.8 |
+| `ideal_flux_tokamak_mercier` | circular Solov'ev tori against the large-aspect-ratio criterion [21] | relative deviation 1.3e-2 and 3.3e-3 (q = 0.6), 3.2e-3 and 8.7e-4 (q = 1.6) at R0/a = 10 and 20, falling as (a/R0)^2; the sign flips between q < 1 and q > 1 as the factor 1 - q^2 requires |
+| `ideal_flux_spectrum` | D^rho = f(rho) exp(i theta) in an angle theta with theta* = theta + k rho^2 sin theta: power in m is J_(1-m)(m k rho^2)^2 sqrt(1 - k^2 rho^4) | 1e-15 |
+| `ideal_flux_family` | one field period with nfp = 2 against the full torus for odd n; zero coupling of n = 1 and 2 over the full torus; rejection of mixed families and aliased n | 4e-16, 1e-16 |
+
+The cylinder factor follows from the definitions of [20]. For a screw pinch
+of length 2 pi R0 with psi = toroidal flux/(2 pi), dpsi/dr = r Bz,
+dV/dpsi = 4 pi^2 R0/Bz, |grad psi| = r Bz and dS = 4 pi^2 r R0 per surface.
+Force balance gives Xi.B = mu0 p' Btheta/Bz and |Xi|^2 = (mu0 p'/Bz)^2 with
+Xi = mu0 J - I'(psi) B, so D_geod = 0 and
+
+  D_Merc = mu0 R0^2 Btheta^2/(2 pi^2 r^5 Bz^6) [r Bz^2 (q'/q)^2/(8 mu0) + p'],
+  d2V/dpsi2 = -4 pi^2 R0 Bz'/(r Bz^3),
+
+with primes d/dr: Suydam's criterion times a positive factor. On the torus
+the same factor with Btheta = r B0/(q R0) multiplies r B0^2 (q'/q)^2/(8 mu0)
++ p'(1 - q^2) [21]; the radius there is that of the toroidal flux,
+psi = B0 r^2/2.
+
+The flux space enforces the mode-family structure of M0: all n of one
+space must satisfy n = n0 mod nfp, and two n that coincide on the toroidal
+angle grid are rejected, because the one-period quadrature would alias their
+coupling. With nfp = 2 the even n are periodic and the odd n antiperiodic
+over a field period. A stability statement needs every family n0 = 0, ...,
+nfp/2 (n0 and -n0 are complex conjugates). The map lane of S1 carries only
+n in nfp Z, the periodic family, so its Hessian cannot see an antiperiodic
+mode.
+
+Still open in S7: ballooning, the global-to-local limit (O7 on R2 to R4) and
+the comparison with published Mercier profiles.
+
 ### Verification ladder
 
 Each rung is a frozen gate; a later rung does not start before the earlier
@@ -595,7 +654,8 @@ not reconstructed from figures by fitting.
 
 Done: the MILCA-owned energy and delta-W leaves (P1e.1), and the
 flux-coordinate oracles P1e.2 (cylinder), P1e.3 (toroidal charts) and P1e.5
-part 1 (cylinder free boundary), with their gates below.
+part 1 (cylinder free boundary), with their gates below; of S7 the Mercier
+criterion, the magnetic well and the energy and mode diagnostics.
 
 | Stage | Content | Exit gate | Needs |
 |---|---|---|---|
@@ -648,6 +708,12 @@ Publications (S and ? entries above are still to be read in full):
 19. D. V. Anderson, W. A. Cooper, R. Gruber, S. Merazzi and U. Schwenn,
     in *Scientific Computing on Supercomputers II*, Springer (1990),
     doi:10.1007/978-1-4613-0659-7_8.
+20. M. Landreman and R. Jorge, J. Plasma Phys. 86, 905860510 (2020),
+    doi:10.1017/S002237782000121X, arXiv:2006.14881.
+21. V. D. Shafranov and E. I. Yurchenko (1968), large-aspect-ratio form
+    r B0^2 (q'/q)^2/(8 mu0) + p'(1 - q^2) > 0 as given in C. B. Forest,
+    *Classic Problems in MHD*, lecture 23, eq. (23.37),
+    https://magnetohydrodynamics.physics.wisc.edu/lecture23.html.
 
 Open-source comparators, to be studied and run, no code taken from them. The
 commit is the one inspected on 2026-11-12; each comparison run replaces it
