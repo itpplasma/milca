@@ -171,9 +171,26 @@ through the densities, n_p = n_e/(1 + 5x) and n_B = x n_p, so the optimum
 follows from the computed rates: it is x = 1/√125 ≈ 0.089 when only
 electron-ion bremsstrahlung counts and moves to 0.10-0.12 with the
 electron-electron part. The Coulomb correction raises electron-ion
-bremsstrahlung by 5.6 % at 50 keV and 1.7 % at 200 keV against Born. Not yet
-included: synchrotron losses and electron temperatures below the ion
-temperature.
+bremsstrahlung by 5.6 % at 50 keV and 1.7 % at 200 keV against Born.
+
+Synchrotron losses (`app/pb11_synchrotron`) for a slab of half-thickness
+1 m with the field in its plane, n_e = 10²⁰ m⁻³ and B = 5 T (plasma β ≈ 0.55
+at 200 keV), x = 0.1, as escaping power over fusion power for wall
+reflectivities R:
+
+| T (keV) | R = 0 | 0.5 | 0.9 | 0.95 | 0.99 | P_brems/P_fus |
+|---|---|---|---|---|---|---|
+| 100 | 47 | 33 | 15 | 10 | 4.4 | 4.7 |
+| 200 | 92 | 69 | 36 | 27 | 14 | 2.4 |
+| 300 | 203 | 162 | 94 | 74 | 40 | 2.6 |
+| 500 | 635 | 540 | 364 | 302 | | 3.9 |
+
+At 200 keV and R = 0.9 the escaping power, 5.6 MW/m³, agrees with Trubnikov's
+formula (6.2 MW/m³). At this field synchrotron radiation exceeds the fusion
+power by one to two orders of magnitude, far more than bremsstrahlung; the
+balance requires β near one, a lower field at the same pressure, since the
+synchrotron power grows as B^(5/2) at fixed density. Not yet included:
+electron temperatures below the ion temperature.
 
 ## Sources
 
