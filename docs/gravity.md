@@ -49,7 +49,12 @@ point charges.
 
 **G3. Vlasov-Poisson and kinetic models.** Collisionless dynamics in physical
 and comoving coordinates, and collision operators for two-body relaxation in
-star clusters.
+star clusters. The linear kinetic response of a homogeneous self-gravitating
+Maxwellian is the plasma response with the coupling reversed; its purely
+growing Jeans root solves k² = 1 − √π y e^{y²} erfc(y), y = γ/(√2 k), in units
+of ω_J = √(4πGρ) and the Jeans length v_th/ω_J, and runs in
+`jeans_root` and `vlasov_density_response(..., coupling=-1)`
+(`test_jeans`).
 
 **G4. Self-gravitating fluids.** Hydrodynamics and MHD with gravity, with
 cooling from the [radiation](radiation.md) and [QED](qed-radiation.md)

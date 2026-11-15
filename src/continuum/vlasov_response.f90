@@ -14,11 +14,17 @@
 !>   solved by the trapezoidal product rule with Richardson extrapolation
 !>   (h, h/2). This is the full finite-k response including the ballistic
 !>   transient; its late time is the Landau root.
+!> - Self-gravitating matter is the same response with the coupling reversed
+!>   (coupling = -1; units omega_J = sqrt(4 pi G rho), v_th, Jeans length
+!>   v_th/omega_J): epsilon = 1 - (1 + zeta Z)/k^2. The Jeans root is purely
+!>   growing, omega = i gamma, and with zeta = i y, Z(i y) = i sqrt(pi)
+!>   exp(y^2) erfc(y), it solves k^2 = 1 - sqrt(pi) y erfcx(y),
+!>   y = gamma/(sqrt(2) k), for k < 1.
 module milca_vlasov_response
     use, intrinsic :: iso_fortran_env, only: dp => real64, qp => real128
     implicit none
     private
-    public :: plasma_dispersion, landau_root, vlasov_density_response
+    public :: plasma_dispersion, landau_root, vlasov_density_response, jeans_root
     public :: fit_damped_cosine
 
     real(qp), parameter :: pi_q = 3.14159265358979323846264338327950288_qp
@@ -65,23 +71,58 @@ contains
         end do
     end subroutine
 
-    !> N(t_j) on t_j = (j-1) h, j = 1..size(n): normalized density response.
-    subroutine vlasov_density_response(k, h, n)
+    !> Growth rate gamma of the Jeans root at 0 < k < 1 (bisection on y to
+    !> rounding); ok false outside that range.
+    subroutine jeans_root(k, gamma, ok)
+        real(dp), intent(in) :: k
+        real(dp), intent(out) :: gamma
+        logical, intent(out) :: ok
+        real(dp), parameter :: sqrt_pi = 1.7724538509055160273_dp
+        real(dp) :: lo, hi, y
+        integer :: it
+        gamma = 0
+        ok = k > 0 .and. k < 1
+        if (.not. ok) return
+        ! 1 - sqrt(pi) y erfcx(y) falls from 1 at y = 0 to 0 as y -> infinity
+        lo = 0
+        hi = 1
+        do while (1 - sqrt_pi*hi*erfc_scaled(hi) > k**2)
+            hi = 2*hi
+        end do
+        do it = 1, 200
+            y = (lo + hi)/2
+            if (1 - sqrt_pi*y*erfc_scaled(y) > k**2) then
+                lo = y
+            else
+                hi = y
+            end if
+            if (hi - lo <= 4*epsilon(1.0_dp)*hi) exit
+        end do
+        gamma = sqrt(2.0_dp)*k*(lo + hi)/2
+    end subroutine
+
+    !> N(t_j) on t_j = (j-1) h, j = 1..size(n): normalized density response;
+    !> coupling +1 for a plasma (default), -1 for self-gravitating matter.
+    subroutine vlasov_density_response(k, h, n, coupling)
         real(dp), intent(in) :: k, h
         real(dp), intent(out) :: n(:)
+        real(dp), intent(in), optional :: coupling
         real(dp), allocatable :: coarse(:), fine(:)
+        real(dp) :: c
         integer :: m, j
+        c = 1
+        if (present(coupling)) c = coupling
         m = size(n)
         allocate (coarse(m), fine(2*m - 1))
-        call trapezoid(k, h, coarse)
-        call trapezoid(k, h/2, fine)
+        call trapezoid(k, h, coarse, c)
+        call trapezoid(k, h/2, fine, c)
         do j = 1, m
             n(j) = (4*fine(2*j - 1) - coarse(j))/3
         end do
     end subroutine
 
-    subroutine trapezoid(k, h, n)
-        real(dp), intent(in) :: k, h
+    subroutine trapezoid(k, h, n, c)
+        real(dp), intent(in) :: k, h, c
         real(dp), intent(out) :: n(:)
         real(dp), allocatable :: kernel(:)
         real(dp) :: s
@@ -98,7 +139,7 @@ contains
                 s = s + kernel(i - j)*n(j)
             end do
             ! kernel(0) = 0: the scheme is explicit.
-            n(i) = exp(-(k*(i - 1)*h)**2/2) - h*s
+            n(i) = exp(-(k*(i - 1)*h)**2/2) - c*h*s
         end do
     end subroutine
 
