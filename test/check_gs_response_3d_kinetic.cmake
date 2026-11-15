@@ -1,6 +1,7 @@
 # Kinetic closure of the rational surface q = 2/1 of the A = 10 circular
 # torus from synthetic profiles: the layer response is computed and the
-# solution meets the matching condition jump of d Phi/d psin = Delta A.
+# solution meets the matching condition jump of d Phi/d psin = Delta A; a
+# rational outside the profiles stays ideal (almost no reconnected flux).
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}/prof")
 file(WRITE "${WORK}/coils.txt"
@@ -23,4 +24,27 @@ if(NOT out MATCHES "kinetic layer q  -2.0000: r_s\\[cm\\]    9.7000")
 endif()
 if(NOT out MATCHES "matching \\|jump - Delta A\\|/\\|jump\\| +[0-9.]+E-(0[89]|1[0-9])")
     message(FATAL_ERROR "matching condition not met: ${out}")
+endif()
+
+# profiles beyond the rational only (|q| >= 2.1)
+file(MAKE_DIRECTORY "${WORK}/far")
+foreach(f n Te Ti q Er)
+    file(STRINGS "${WORK}/prof/${f}.dat" rows)
+    list(SUBLIST rows 10 5 rows)
+    list(JOIN rows "\n" body)
+    file(WRITE "${WORK}/far/${f}.dat" "${body}\n")
+endforeach()
+file(READ "${WORK}/input.nml" nml)
+string(REPLACE "kinetic_profiles='prof'" "kinetic_profiles='far'" nml "${nml}")
+file(WRITE "${WORK}/far.nml" "${nml}")
+execute_process(COMMAND "${APP}" far.nml WORKING_DIRECTORY "${WORK}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 200)
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "kinetic closure outside the profiles failed: ${out}${err}")
+endif()
+if(NOT out MATCHES "outside the kinetic profiles, ideal")
+    message(FATAL_ERROR "rational outside the profiles not reported: ${out}")
+endif()
+if(NOT out MATCHES "\\|A/Phi_vac\\| +[0-9.]+E-(0[5-9]|1[0-9])")
+    message(FATAL_ERROR "rational outside the profiles not shielded: ${out}")
 endif()

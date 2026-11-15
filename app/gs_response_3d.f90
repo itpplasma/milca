@@ -58,7 +58,8 @@ program gs_response_3d
     !! kinetic_mmax Fourier modes and conservation model kinetic_model. The
     !! rational sits where |q| of the profiles equals |q_s|, and Delta per
     !! psin is Delta_r |dq/dpsin|/|dq/dr|, so the local shear matches. The
-    !! right-handed cylinder (r, theta_s, z) has its axis along -phi, hence
+    !! A rational outside the profiles keeps ideal shielding (Delta = 1e12).
+    !! The right-handed cylinder (r, theta_s, z) has its axis along -phi, hence
     !! harmonic (-m, -n), q = -q_s and B_z = -F/R (docs/kinetic-layer-
     !! response.md). prefix_resist.dat is written as for 'resistive', with
     !! L the core half-width in psin, Q = 0 and b(0)/b0 = 1 (constant psi).
@@ -856,7 +857,14 @@ contains
         gpsi = 0.0_dp
         do l = 1, nrat
             call kl_resonance(kin_prof, abs(q_rat(l)), rs, dqdr, st)
-            if (st /= KL_OK) error stop 'kinetic closure: rational outside the profiles'
+            if (st /= KL_OK) then
+                ! no profiles there: ideal shielding, as for the sheet closure
+                dlayer(l) = (1.0e12_dp, 0.0_dp)
+                lscale(l) = 0.0_dp
+                write (*, '(a,f8.4,a)') 'kinetic layer q ', q_rat(l), &
+                    ': outside the kinetic profiles, ideal'
+                cycle
+            end if
             kp = kin_prof
             kp%q = -sign(1.0_dp, q_rat(l))*abs(kin_prof%q)
             kp%btor = -sign(1.0_dp, f_of_psin(g, psin_rat(l)))*abs(kinetic_btor)
