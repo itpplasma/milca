@@ -132,6 +132,24 @@ Gate: the kernels of step 1 agree with their closed forms to rounding; the loss
 rates of step 2 agree with the published fits within the accuracy those fits
 state; every later step reports its defect against its parent.
 
+## First result: p-¹¹B at equal temperatures
+
+`app/pb11_power_balance` (sCluster, 2026-11-15) compares the p-¹¹B fusion
+power with electron-ion and electron-electron bremsstrahlung at equal
+electron and ion temperature, boron fractions x = n_B/n_p of 0.1 to 0.3:
+
+| T (keV) | 50 | 100 | 150 | 200 | 300 | 500 | 800 |
+|---|---|---|---|---|---|---|---|
+| best P_fus/P_brems | 0.034 | 0.22 | 0.38 | 0.43 | 0.38 | 0.26 | 0.17 |
+| P_ee/P_ei | 0.09 | 0.18 | 0.26 | 0.34 | 0.44 | 0.51 | 0.49 |
+
+Bremsstrahlung alone exceeds the fusion power at every temperature, as
+Putvinski, Ryutov and Yushmanov (2019) found; the best fraction is the
+smallest one scanned, so the optimum lies at x <= 0.1. Not yet included:
+synchrotron losses, the Coulomb correction to electron-ion bremsstrahlung for
+boron (Born approximation scaled with Z^2), and electron temperatures below
+the ion temperature.
+
 ## Sources
 
 - H. Bethe and W. Heitler, Proc. R. Soc. A 146, 83 (1934).
