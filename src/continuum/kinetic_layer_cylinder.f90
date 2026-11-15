@@ -34,7 +34,7 @@
 !! harmonics are j = K^jPhi Phi + B_r K^jB(:, 0).
 module milca_kinetic_layer_cylinder
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use fortnum_special_bessel, only: bessel_in
+    use fortnum_special_bessel, only: bessel_in_scaled
     use milca_ou_susceptibility, only: ou_susceptibility, ou_conserving, OU_OK, OU_ENERGY
     implicit none
     private
@@ -128,24 +128,12 @@ contains
     end function kl_core
 
     !> s0 = exp(-bplus) I_0(bcross), s1 = exp(-bplus) I_1(bcross), with
-    !> 0 <= bcross <= bplus; overflow-free through exp(-x) I_n(x).
+    !> 0 <= bcross <= bplus, overflow-free through exp(-x) I_n(x).
     elemental subroutine scaled_bessel(bplus, bcross, s0, s1)
         real(dp), intent(in) :: bplus, bcross
         real(dp), intent(out) :: s0, s1
-        real(dp) :: e0, e1, w
-        if (bcross < 600) then
-            e0 = exp(-bcross)*bessel_in(0, bcross)
-            e1 = exp(-bcross)*bessel_in(1, bcross)
-        else
-            ! Hankel's series exp(-x) I_n(x) = (2 pi x)^(-1/2) sum_k (-1)^k a_k(n)/x^k,
-            ! a_k = prod_{i<=k} (4 n^2 - (2 i - 1)^2)/(k! 8^k), to k = 4; the next term
-            ! is below 3e-15 for x >= 600.
-            w = 1/(8*bcross)
-            e0 = (1 + w + 4.5_dp*w*w + 37.5_dp*w**3 + 459.375_dp*w**4)/sqrt(2*pi*bcross)
-            e1 = (1 - 3*w - 7.5_dp*w*w - 52.5_dp*w**3 - 590.625_dp*w**4)/sqrt(2*pi*bcross)
-        end if
-        s0 = exp(-(bplus - bcross))*e0
-        s1 = exp(-(bplus - bcross))*e1
+        s0 = exp(-(bplus - bcross))*bessel_in_scaled(0, bcross)
+        s1 = exp(-(bplus - bcross))*bessel_in_scaled(1, bcross)
     end subroutine scaled_bessel
 
     !> Kernel matrices (rows l, columns l', index l + mmax + 1) on the window.

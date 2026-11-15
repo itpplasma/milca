@@ -34,8 +34,8 @@ contains
         do i = 1, 3
             x = xs(i)
             call scaled_bessel(x, x, s0, s1)
-            call close_to('Hankel I0', s0, exp(-x)*bessel_in(0, x), 1e-13_dp)
-            call close_to('Hankel I1', s1, exp(-x)*bessel_in(1, x), 1e-13_dp)
+            call close_to('large-argument I0', s0, exp(-x)*bessel_in(0, x), 1e-13_dp)
+            call close_to('large-argument I1', s1, exp(-x)*bessel_in(1, x), 1e-13_dp)
         end do
         call scaled_bessel(5.0_dp, 3.0_dp, s0, s1)
         call close_to('product I0', s0, exp(-5.0_dp)*bessel_in(0, 3.0_dp), 1e-14_dp)
