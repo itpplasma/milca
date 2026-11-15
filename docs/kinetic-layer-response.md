@@ -118,3 +118,50 @@ and collision frequencies, and Phi, j_par and the integrated shielding
 current from the profiles agree with KIM to 2e-5. Next: the kinetic layer
 closure of the per-n torus response and an ITER case.
 
+## KL closure: the kinetic layer in the per-n torus response (plan)
+
+The per-n FEEC response (`mhd_ampere_n`, `mhd_response_n`) represents each
+rational surface by two edge sheets whose amplitudes follow from linear
+constraints (`layer_closure_t`); the resistive closure L5 sets the net layer
+current to Delta_layer times the reconnected flux A (`resistive_closure`).
+The kinetic closure uses the same constraints with Delta from the cylinder
+response of the rational surface, built from the flux-surface profiles mapped
+to the effective radius (KL1). In MILCA's conventions a sheet of amplitude
+lambda carries the surface current K = -i m lambda/r_s along the toroidal
+direction, and the resonant flux of B^r_m is Phi_m = 2 R0 r_s B^r_m (peak
+amplitude). With div B = 0 and the jump of B_theta across the sheet,
+
+    Delta_r = [dPhi_m/dr]/Phi_m = i m mu0 K/(r_s B^r_m),
+    Delta_psin = Delta_r dr/dpsin,
+
+where K = I_par/(2 pi r_s) is the shielding current per unit length of the
+cylinder response for the resonant B^r_m (constant psi), converted to SI.
+The orientation of the toroidal field and of the poloidal harmonic enter the
+sign of Delta. The ideal limit (|Delta| large) does not fix it; the energy
+balance does: the electromagnetic torque on the layer, proportional to
+Im(Delta) |A|^2, must brake the plasma rotation relative to the static field,
+with the sign that L5's resistive-inertial layer has at the same rotation.
+Checks before landing, in this order:
+
+1. Cylinder, end to end (done): KIM's electromagnetic run type solves
+   Poisson's and Ampere's laws together with the kinetic current for a
+   prescribed B^r at the outer boundary. On a device case, (m, n) =
+   (6, 2), the jump of d(r B^r)/dr across the layer in that run equals
+   -2 i k_s I_par/(c r_s B^r) from its own current to 0.3 %, which fixes sign
+   and normalisation of Delta without orientation conventions (it required
+   the fix of KIM's Ampere operator, itpplasma/KAMEL#414). The constant-psi
+   Delta from the electrostatic current (B^r uniform across the layer) agrees
+   with the electromagnetic one to 2 % in the real and 18 % in the imaginary
+   part: that layer is strongly shielded (B^r(r_s) is 4 % of its edge value),
+   so psi changes by a factor of about 2 within 0.5 cm. A response to the
+   slope of psi as well as to its value would remove this limitation of the
+   constant-psi matching, which KIM's own coupling to QL-Balance shares.
+   `milca_kinetic_layer_delta` (`kl_delta`) returns Delta and I_par per gauss
+   for the profiles of one rational surface.
+2. Cylinder to torus: the FEEC closure against the cylinder boundary-value
+   problem at large aspect ratio, as for L5 (agreement to a few 1e-3 there),
+   with the orientation of B_tor, q, m and n mapped explicitly between the
+   cylinder and the torus.
+3. Ideal limit (shielding grows with |Delta|) and the comparison with
+   MEPHIT's kinetic hybrid on a device case.
+
