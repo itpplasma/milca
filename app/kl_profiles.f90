@@ -10,7 +10,7 @@
 !> current density [statA/cm^2].
 program kl_profiles
     use, intrinsic :: iso_fortran_env, only: dp => real64, error_unit
-    use milca_kinetic_layer_window, only: kl_profiles_t, kl_window, KLW_OK
+    use milca_kinetic_layer_window, only: kl_profiles_t, kl_window, kl_profiles_read, KLW_OK
     use milca_kinetic_layer_cylinder, only: kl_background_t, kl_kernels, kl_solve, &
         kl_series, kl_current, KL_OK
     implicit none
@@ -30,11 +30,8 @@ program kl_profiles
     read (u, *) rres, a, w, nwin
     read (u, *) mmax, model, gyro, re, im
     close (u)
-    call load(trim(dir)//'/n.dat', p%r, p%ne)
-    call load(trim(dir)//'/Te.dat', p%r, p%te)
-    call load(trim(dir)//'/Ti.dat', p%r, p%ti)
-    call load(trim(dir)//'/q.dat', p%r, p%q)
-    call load(trim(dir)//'/Er.dat', p%r, p%er)
+    call kl_profiles_read(trim(dir), p, st)
+    if (st /= KLW_OK) error stop 'profile files missing, short or with different radii'
     call kl_window(p, rres, a, w, nwin, bg, st)
     if (st /= KLW_OK) then
         write (error_unit, '(a,i0)') 'kl_window failed with status ', st
@@ -51,37 +48,5 @@ program kl_profiles
     do j = 1, size(bg%r)
         print '(f14.8,4es20.11)', bg%r(j), pr(j), jr(j)
     end do
-
-contains
-
-    !> Two columns r, y; profiles share the radii of the first file read.
-    subroutine load(f, r, y)
-        character(*), intent(in) :: f
-        real(dp), allocatable, intent(inout) :: r(:)
-        real(dp), allocatable, intent(out) :: y(:)
-        real(dp), allocatable :: rr(:)
-        real(dp) :: x1, x2
-        integer :: v, n, ios, k
-        open (newunit=v, file=f, status='old', action='read')
-        n = 0
-        do
-            read (v, *, iostat=ios) x1, x2
-            if (ios /= 0) exit
-            n = n + 1
-        end do
-        rewind (v)
-        allocate (rr(n), y(n))
-        do k = 1, n
-            read (v, *) rr(k), y(k)
-        end do
-        close (v)
-        if (.not. allocated(r)) then
-            r = rr
-        else if (size(r) /= n) then
-            error stop 'profile files differ in their radii'
-        else if (maxval(abs(r - rr)) > 1e-9_dp*maxval(abs(r))) then
-            error stop 'profile files differ in their radii'
-        end if
-    end subroutine load
 
 end program kl_profiles
