@@ -1678,6 +1678,14 @@ endforeach()
 # P1g: tree-level QED, Feynman-rule amplitudes against generated closed forms
 # (docs/qed-radiation.md).
 if(MILCA_FORTSYM_BUILD)
+    add_executable(gen_radiation_reaction gen/gen_radiation_reaction.f90)
+    target_link_libraries(gen_radiation_reaction PRIVATE milca_gen_support)
+    add_test(NAME radiation_reaction_leaf_regeneration COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:gen_radiation_reaction>
+        -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_radiation_reaction_leaves.f90
+        -DWORK=${CMAKE_BINARY_DIR}/radiation-reaction-regeneration
+        -DLEAF=milca_radiation_reaction_leaves.f90
+        -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
     add_executable(gen_qed gen/gen_qed.f90)
     target_link_libraries(gen_qed PRIVATE milca_gen_support)
     add_test(NAME qed_leaf_regeneration COMMAND ${CMAKE_COMMAND}
@@ -1687,13 +1695,28 @@ if(MILCA_FORTSYM_BUILD)
         -DLEAF=milca_qed_leaves.f90
         -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
 endif()
+target_sources(milca_quantum PRIVATE src/generated/milca_radiation_reaction_leaves.f90)
+set_source_files_properties(src/generated/milca_radiation_reaction_leaves.f90
+    PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 target_sources(milca_quantum PRIVATE src/generated/milca_qed_leaves.f90
-    src/quantum/qed_tree.f90)
+    src/quantum/qed_tree.f90 src/quantum/qed_bremsstrahlung.f90 src/quantum/qed_thermal.f90)
 set_source_files_properties(src/generated/milca_qed_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 add_executable(test_qed_tree test/test_qed_tree.f90)
 target_link_libraries(test_qed_tree PRIVATE milca)
 add_test(NAME qed_tree_level COMMAND test_qed_tree)
+add_executable(test_qed_bremsstrahlung test/test_qed_bremsstrahlung.f90)
+target_link_libraries(test_qed_bremsstrahlung PRIVATE milca)
+add_test(NAME qed_bremsstrahlung COMMAND test_qed_bremsstrahlung)
+add_executable(test_qed_bremsstrahlung_rates test/test_qed_bremsstrahlung_rates.f90)
+target_link_libraries(test_qed_bremsstrahlung_rates PRIVATE milca)
+add_test(NAME qed_bremsstrahlung_rates COMMAND test_qed_bremsstrahlung_rates)
+add_executable(test_radiation_reaction test/test_radiation_reaction.f90)
+target_link_libraries(test_radiation_reaction PRIVATE milca)
+add_test(NAME radiation_reaction COMMAND test_radiation_reaction)
+add_executable(test_qed_thermal test/test_qed_thermal.f90)
+target_link_libraries(test_qed_thermal PRIVATE milca)
+add_test(NAME qed_thermal COMMAND test_qed_thermal)
 
 # Campaign Q3/Q8: finite-N ideal fermion ensembles and relativistic Fermi EOS.
 if(MILCA_FORTSYM_BUILD)

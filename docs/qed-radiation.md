@@ -3,7 +3,11 @@
 Status: first slice active (ROADMAP P1g), 2026-11-15. Running: the Q1 two-body
 processes (Møller, Bhabha, Compton, annihilation, Breit-Wheeler, Mott) from
 Feynman-rule amplitudes and generated closed forms, cross-checked in
-`test_qed_tree`. QED is inside
+`test_qed_tree`; electron-nucleus and electron-electron bremsstrahlung from
+the Feynman rules, with electron-nucleus spectra and the radiated power of a
+Juttner plasma (`test_qed_bremsstrahlung`, `test_qed_bremsstrahlung_rates`);
+the Landau-Lifshitz force and its gyro-average, the synchrotron friction
+(`test_radiation_reaction`). QED is inside
 MILCA's scope from this date; the former boundary ("the fundamentals branch
 stops at QED") is lifted.
 
