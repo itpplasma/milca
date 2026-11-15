@@ -86,9 +86,8 @@ context.
   material enters a session, stop, say so in the pull request or issue, and
   do not submit that session's output; Chris decides about material that is
   already merged.
-- **Declaration:** every pull request states in one line that no non-public
-  code of others was used or in context. Reviewers check that line and that the
-  sources list of the capability names no non-public code.
+- **Sources list:** the sources list of each capability names no non-public
+  code. Changes, commit messages and issues do not restate this rule.
 - **Comparisons** with closed or non-public codes in this repository, its
   docs and tests use published results and published input data only,
   never runs of those codes. Private project repositories (for example
