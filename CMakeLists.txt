@@ -1226,6 +1226,8 @@ foreach(quantum_family fermi_gas quantum_fock quantum_evolution quantum_correlat
 endforeach()
 add_executable(pb11_power_balance app/pb11_power_balance.f90)
 target_link_libraries(pb11_power_balance PRIVATE milca)
+add_executable(pb11_synchrotron app/pb11_synchrotron.f90)
+target_link_libraries(pb11_synchrotron PRIVATE milca)
 add_executable(pp_fusion_export app/pp_fusion_export.f90)
 add_dependencies(pp_fusion_export milca_build_info)
 target_include_directories(pp_fusion_export PRIVATE ${CMAKE_BINARY_DIR}/result_include)
