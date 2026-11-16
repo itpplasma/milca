@@ -3,6 +3,8 @@
 !! averaging the same equation (as in test_dk_mono): collisionless, banana
 !! and Pfirsch-Schlueter, at collisionalities below the reach of the
 !! reference. Field b = 1/(1 + eps cos theta), kappa = 1.
+!! The pitch partitions of the NTV kernel sum to R, and its collisional
+!! dissipation equals R without the NEO-2-QL sources.
 !! The modes scan, adapt and mono are timing drivers, not registered tests:
 !!   test_dk_hp scan nu p n_col n_bulk delta   uniform mesh
 !!   test_dk_hp adapt nu p tol                 adaptive D31 to relative tol
@@ -29,6 +31,7 @@ program test_dk_hp
     case ('ntv_superbanana_plateau'); ok = ntv_superbanana_plateau()
     case ('ntv_one_over_nu'); ok = ntv_one_over_nu()
     case ('ntv_rotation'); ok = ntv_rotation()
+    case ('ntv_partition'); ok = ntv_partition()
     case ('ntv_scan'); ok = ntv_scan()
     case ('ntv_legendre'); ok = ntv_legendre()
     case ('scan'); ok = scan()
@@ -267,6 +270,53 @@ contains
         if (status /= HP_OK) error stop 'hp_ntv_kernel failed'
         ok = close_to('R boozer', r, k1%r, 1e-6_dp) .and. ok
     end function ntv_reference
+
+    !> Pitch partitions of the NTV kernel with Boozer streaming and the full
+    !> drift weight in the 1/nu regime: drive bins in lambda/lambda_c and in
+    !> theta - theta_x sum to R, the dissipation 2 k v int collide |d_xi f|^2
+    !> equals R without the sources (the Hermitian part of the weak form), and
+    !> asking for the partition leaves R unchanged. With both NEO-2-QL sources
+    !> the drive bins still sum to R; the dissipation is printed against it.
+    logical function ntv_partition() result(ok)
+        use milca_dk_hp, only: hp_operator_t, hp_ntv_kernel
+        real(dp), parameter :: lam(7) = [0.5_dp, 0.9_dp, 0.99_dp, 0.999_dp, 1.0_dp, &
+            1.001_dp, 1.01_dp], th(5) = [-1.0_dp, -0.1_dp, 0.0_dp, 0.1_dp, 1.0_dp]
+        integer, parameter :: nl = size(lam), nt = size(th)
+        type(hp_operator_t) :: op
+        type(hp_field_t) :: f
+        type(hp_mesh_t) :: mesh
+        real(dp) :: r, r_plain, part(2*(nl + nt) + 4), diss
+        integer :: status, j
+        call hp_field([(1/(1 + 0.05_dp*cos(2*pi*(j - 1)/33)), j=1, 33)], 1.0_dp, f, status)
+        if (status /= HP_OK) error stop 'hp_field failed'
+        op = stage1(1e-4_dp, 1e-5_dp, 0.0_dp)
+        op%k_power = 1; op%wsign = 1; op%v = 2
+        call hp_default_mesh(f, 5, 16, 8, 1e-2_dp, 0.3_dp, mesh)
+        call hp_ntv_kernel(f, mesh, op, r_plain, status)
+        if (status /= HP_OK) error stop 'hp_ntv_kernel failed'
+        call hp_ntv_kernel(f, mesh, op, r, status, lam_edges=lam, th_edges=th, part=part)
+        if (status /= HP_OK) error stop 'hp_ntv_kernel partition failed'
+        ok = r == r_plain
+        print '(a,l2)', 'R unchanged by the partition', ok
+        ok = close_to('drive in lambda bins', sum(part(1:nl + 1)), r, 1e-12_dp) .and. ok
+        ok = close_to('drive in theta bins', sum(part(2*nl + 3:2*nl + nt + 3)), r, 1e-12_dp) &
+            .and. ok
+        diss = sum(part(nl + 2:2*nl + 2))
+        ok = close_to('dissipation in theta bins', sum(part(2*nl + nt + 4:)), diss, 1e-12_dp) &
+            .and. ok
+        ok = close_to('dissipation equals R without sources', diss, r, 1e-8_dp) .and. ok
+        ok = all(part(nl + 2:2*nl + 2) >= 0) .and. ok
+        print '(a,*(es11.3))', 'drive bins / R ', part(1:nl + 1)/r
+        print '(a,*(es11.3))', 'dissipation bins / R ', part(nl + 2:2*nl + 2)/r
+        op%source_dpar = .true.; op%source_dlf10 = .true.
+        call hp_ntv_kernel(f, mesh, op, r, status, lam_edges=lam, th_edges=th, part=part)
+        if (status /= HP_OK) error stop 'hp_ntv_kernel with sources failed'
+        ok = close_to('drive in lambda bins with sources', sum(part(1:nl + 1)), r, 1e-12_dp) &
+            .and. ok
+        diss = sum(part(nl + 2:2*nl + 2))
+        print '(a,2es22.13,es11.3)', 'with sources R, dissipation, rel ', r, diss, &
+            (diss - r)/r
+    end function ntv_partition
 
     !> The stage-1 harmonic (eps 0.05, q 2.2, n 3, m 6) with the operator of
     !> collisionality nu, precession pre and rotation omega_E.

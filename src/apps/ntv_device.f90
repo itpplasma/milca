@@ -128,6 +128,11 @@ module milca_ntv_device
         ! is deposited where the orbits are (input line 'deposit'); unset, the
         ! midpoints between the profile surfaces (more than one surface).
         real(dp), allocatable :: deposit_edges(:)
+        ! Thin spectral-element kernel on adaptive panels or Gauss-Laguerre
+        ! nodes: increasing edges of the bins of lambda/lambda_c and of
+        ! theta - theta_x in [-pi, pi) for the pitch partition of the torque
+        ! (input line 'partition'); unset, no partition.
+        real(dp), allocatable :: partition_lambda(:), partition_theta(:)
     end type
 
     !> Per surface and species: K_1j and K_2j [m^2/s Wb^2/m^2], dpsi_pol/dr [Wb/m],
@@ -160,6 +165,14 @@ module milca_ntv_device
         ! real space on the bin of this surface: sum over surfaces j of
         ! deposit_j(b) V'_j ds_j/(V'_b ds_b), ds the bin widths.
         real(dp), allocatable :: deposit(:)
+        ! With partition edges, nl lambda and nt theta edges: the torque density
+        ! [N m/m^3] in the bins of hp_ntv_kernel's partition, energy-integrated
+        ! with the weights of the torque, laid out as [drive over the nl + 1
+        ! bins of lambda/lambda_c, dissipation over them, drive over the
+        ! nt + 1 bins of theta - theta_x, dissipation over them]. Each drive
+        ! partition sums to the torque; the dissipation partitions sum to it
+        ! too, up to the solves, when the NEO-2-QL sources are off.
+        real(dp), allocatable :: partition(:)
         real(dp) :: vprime = 0, torque_real = 0
     end type
 
@@ -261,7 +274,7 @@ contains
         ! Finite orbit width: deposit bin edges, per (bin, surface, energy,
         ! species) the kernel's deposit at the nodes, and dV/ds per surface.
         real(dp), allocatable :: de(:), dk(:, :, :, :), vp(:)
-        logical :: depositing
+        logical :: depositing, partitioning
         integer :: ns, nsp, nchunk, nunit, nb, i, a, k, c, u
 
         ns = size(prof%s)
@@ -269,6 +282,12 @@ contains
         status = DEVICE_BAD_INPUT
         if (ns < 1 .or. nsp < 1 .or. res%n_x < 1 .or. res%chunk < 1) return
         if (res%orbit_width .and. res%collisions /= 0) return
+        ! The pitch partition needs the thin spectral-element kernel with
+        ! monoenergetic energy quadrature.
+        partitioning = allocated(res%partition_lambda) .or. allocated(res%partition_theta)
+        if (partitioning .and. (.not. allocated(res%partition_lambda) &
+            .or. .not. allocated(res%partition_theta) .or. res%orbit_width &
+            .or. thin_legendre(res) .or. res%collisions /= 0)) return
         allocate (sf(ns), j0(ns), dpsi_dr(ns), psi_pol_s(ns), b_ref(ns), phi(ns), vp(ns))
         do i = 1, ns
             call surface(eq, pert, n_tor, prof%s(i), res, sf(i), j0(i), dpsi_dr(i), &
@@ -283,6 +302,7 @@ contains
         depositing = res%orbit_width .and. allocated(de)
         nb = 0
         if (depositing) nb = size(de) + 1
+        if (partitioning) nb = 2*(size(res%partition_lambda) + size(res%partition_theta)) + 4
         ! Potential of the profile, dPhi/dpsi_pol = Omega_tE along NEO-2's
         ! toroidal direction (-phi of the file), by the trapezoidal rule.
         phi(1) = 0
@@ -453,9 +473,9 @@ contains
                 do i = first, last
                     if (nband(i, a) > 0) then
                         r(i, k, a) = thin_r(i, a, x(k), ks, &
-                            start=band(band_of(i, a, x(k)), i, a))
+                            start=band(band_of(i, a, x(k)), i, a), dep=dk(:, i, k, a))
                     else
-                        r(i, k, a) = thin_r(i, a, x(k), ks)
+                        r(i, k, a) = thin_r(i, a, x(k), ks, dep=dk(:, i, k, a))
                     end if
                     if (ks /= HP_OK) return
                     nfac(i, k, a) = 1
@@ -493,7 +513,7 @@ contains
 
         !> R of species a on surface i at x = v^2/v_th^2, thin orbits, on the
         !> spectral elements of the Boozer line.
-        real(dp) function thin_r(i, a, xv, st, start, used, mode, info) result(rv)
+        real(dp) function thin_r(i, a, xv, st, start, used, mode, info, dep) result(rv)
             integer, intent(in) :: i, a
             real(dp), intent(in) :: xv
             integer, intent(out) :: st
@@ -501,6 +521,8 @@ contains
             type(hp_mesh_t), intent(out), optional :: used
             integer, intent(in), optional :: mode
             type(adapt_info_t), intent(out), optional :: info
+            ! The pitch partition of rv, when partitioning.
+            real(dp), intent(out), optional :: dep(:)
             type(hp_line_field_t) :: g
             type(hp_operator_t) :: op
             type(hp_mesh_t) :: mesh
@@ -524,7 +546,11 @@ contains
             op%source_dpar = res%sources
             op%source_dlf10 = res%sources
             call start_mesh(g, mesh, start)
-            call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
+            if (present(dep) .and. partitioning) then
+                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info, dep)
+            else
+                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
+            end if
             if (present(used)) call normalised(g, mesh, used)
         end function thin_r
 
@@ -582,7 +608,8 @@ contains
             type(hp_operator_t), intent(in) :: op
             real(dp), intent(out) :: rv
             integer, intent(out) :: st
-            ! The deposit of rv in the bins de (hp_ntv_kernel).
+            ! The deposit of rv in the bins de, or its pitch partition when
+            ! partitioning (hp_ntv_kernel).
             real(dp), intent(out), optional :: dep(:)
             ! MESH_FIXED: solve on mesh. MESH_CHECK: refine until eta is
             ! within hp_adapt of R + eta, so that R on the mesh is.
@@ -595,7 +622,10 @@ contains
             type(hp_mesh_t) :: next
             integer :: it, n_dof
             if (mode == MESH_FIXED .or. .not. res%hp_adapt > 0) then
-                if (present(dep)) then
+                if (present(dep) .and. partitioning) then
+                    call hp_ntv_kernel(g, mesh, op, rv, st, n_dof, lam_edges=res%partition_lambda, &
+                        th_edges=res%partition_theta, part=dep)
+                else if (present(dep)) then
                     call hp_ntv_kernel(g, mesh, op, rv, st, n_dof, de, dep)
                 else
                     call hp_ntv_kernel(g, mesh, op, rv, st, n_dof)
@@ -632,8 +662,14 @@ contains
             if (present(info)) info = adapt_info_t(abs(eta)/max(abs(val), tiny(val)), &
                 n_dof, settled)
             if (present(dep)) then
-                ! The deposit on the final mesh, carried to R + eta in proportion.
-                call hp_ntv_kernel(g, mesh, op, prev, st, edges=de, dep=dep)
+                ! The deposit or partition on the final mesh, carried to R + eta
+                ! in proportion.
+                if (partitioning) then
+                    call hp_ntv_kernel(g, mesh, op, prev, st, lam_edges=res%partition_lambda, &
+                        th_edges=res%partition_theta, part=dep)
+                else
+                    call hp_ntv_kernel(g, mesh, op, prev, st, edges=de, dep=dep)
+                end if
                 if (st == HP_OK .and. prev /= 0) dep = dep*(val/prev)
             end if
         end subroutine adapt_kernel
@@ -725,7 +761,7 @@ contains
                 return
             end if
             if (.not. thin_legendre(res)) then
-                rv = thin_r(i, a, xv, st, start, used, mode, inf)
+                rv = thin_r(i, a, xv, st, start, used, mode, inf, dep)
                 call note_unknowns(i, a, st, inf)
                 if (present(info)) info = inf
                 if (st == HP_OK) st = NTV_OK
@@ -821,6 +857,8 @@ contains
                 + result(i, a)%k22*a2)
             result(i, a)%torque = species(a)%z*elementary*result(i, a)%gamma_psi
             if (depositing) result(i, a)%deposit = -species(a)%z*elementary &
+                *prof%density(i, a)*scale*(sum(dv(:, 1, 1:np), 2)*a1 + sum(dv(:, 2, 1:np), 2)*a2)
+            if (partitioning) result(i, a)%partition = -species(a)%z*elementary &
                 *prof%density(i, a)*scale*(sum(dv(:, 1, 1:np), 2)*a1 + sum(dv(:, 2, 1:np), 2)*a2)
             result(i, a)%offset_rotation = prof%omega_te(i) + result(i, a)%gamma_psi &
                 /(prof%density(i, a)*result(i, a)%k11*species(a)%z*elementary/t)
@@ -1084,7 +1122,7 @@ contains
                     fine(:, j), err(j), ks, weight(:, j))
                 if (ks /= NTV_OK) return
                 dfine(:, :, j) = 0
-                if (.not. depositing) cycle
+                if (.not. (depositing .or. partitioning)) cycle
                 do q = size(x6) + 1, nq
                     if (sts(q, j) == DEVICE_ORBIT_LOST) cycle
                     dfine(:, 1, j) = dfine(:, 1, j) + (hi(j) - lo(j))/2*w12(q - size(x6)) &
@@ -1148,6 +1186,8 @@ contains
             result(i, a)%torque = species(a)%z*elementary*result(i, a)%gamma_psi
             if (depositing) result(i, a)%deposit = -species(a)%z*elementary &
                 *prof%density(i, a)*scale*matmul(dk(:, i, :, a), w*(a1 + x*a2))
+            if (partitioning) result(i, a)%partition = -species(a)%z*elementary &
+                *prof%density(i, a)*scale*matmul(dk(:, i, :, a), w*(a1 + x*a2))
             result(i, a)%offset_rotation = prof%omega_te(i) + result(i, a)%gamma_psi &
                 /(prof%density(i, a)*result(i, a)%k11*species(a)%z*elementary/t)
             result(i, a)%lost_weight = sum(w, mask=lost(i, :, a))/sum(w)
@@ -1164,6 +1204,9 @@ contains
     !> (the default) or 'legendre' for the Legendre thin kernel (n_leg applies
     !> to it only), an optional line 'deposit N' followed by N increasing flux
     !> labels, the edges of the bins of the deposited torque, an optional
+    !> line 'partition NL NT' followed by NL increasing edges of lambda/lambda_c
+    !> and, from the next line, NT increasing edges of theta - theta_x [rad]
+    !> in [-pi, pi) (thin spectral-element kernel only), an optional
     !> line collision model x_max elements order [x_tol], the species (Z,
     !> mass [kg]) and per surface s Omega_tE [rad/s] with one line per
     !> species: density [m^-3] T [J] dn/ds dT/ds kappa [1/m].
@@ -1175,7 +1218,7 @@ contains
         type(ntv_profile_t), intent(out) :: prof
         type(ntv_resolution_t), intent(out) :: res
         character(1024) :: line
-        integer :: u, nsp, ns, i, a, status, sources, nb
+        integer :: u, nsp, ns, i, a, status, sources, nb, nt
         open (newunit=u, file=path, status='old', action='read')
         read (u, '(a)') eq_path
         read (u, '(a)') pert_path
@@ -1200,11 +1243,23 @@ contains
             read (u, *) res%deposit_edges
             read (u, '(a)') line
         end if
+        if (index(adjustl(line), 'partition') == 1) then
+            read (line(index(line, 'partition') + 9:), *) nb, nt
+            if (nb < 1 .or. nt < 0) error stop 'partition: need NL >= 1 and NT >= 0 edges'
+            allocate (res%partition_lambda(nb), res%partition_theta(nt))
+            read (u, *) res%partition_lambda
+            if (nt > 0) read (u, *) res%partition_theta
+            if (res%orbit_width .or. res%thin_legendre) error stop &
+                'partition: only the thin spectral-element kernel (no orbit_width, legendre)'
+            read (u, '(a)') line
+        end if
         read (line, *, iostat=status) res%collisions, res%x_max, res%nelem, res%order, &
             res%x_tol
         if (status /= 0) read (line, *, iostat=status) res%collisions, res%x_max, &
             res%nelem, res%order
         if (status == 0) then
+            if (allocated(res%partition_lambda)) error stop &
+                'partition: not with the energy-coupled collision model'
             read (u, *) nsp
         else
             res%collisions = 0

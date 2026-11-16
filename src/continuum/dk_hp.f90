@@ -688,19 +688,33 @@ contains
     !! the complex system is solved directly. With edges (increasing flux
     !! labels), dep(b) is the part of R whose quadrature points lie at f%position
     !! in bin b (below edges(1), between edges, above the last); sum(dep) = R.
-    subroutine hp_ntv_kernel(f, mesh, op, r, status, n_dof, edges, dep)
+    !! With lam_edges and th_edges (increasing; thin fields only), part holds
+    !! the pitch partitions of hp_ntv_partition.
+    subroutine hp_ntv_kernel(f, mesh, op, r, status, n_dof, edges, dep, lam_edges, &
+            th_edges, part)
         class(hp_geometry_t), intent(in) :: f
         type(hp_mesh_t), intent(in) :: mesh
         type(hp_operator_t), intent(in) :: op
         real(dp), intent(out) :: r
         integer, intent(out) :: status
         integer, intent(out), optional :: n_dof
-        real(dp), intent(in), optional :: edges(:)
-        real(dp), intent(out), optional :: dep(:)
+        real(dp), intent(in), optional :: edges(:), lam_edges(:), th_edges(:)
+        real(dp), intent(out), optional :: dep(:), part(:)
         type(hp_system_t) :: sys
         type(ntv_factor_t) :: fac
         complex(dp), allocatable :: mat(:, :), x(:)
+        logical :: split
 
+        split = present(lam_edges) .and. present(th_edges) .and. present(part)
+        if (split) then
+            status = HP_BAD_INPUT
+            select type (f)
+            class is (hp_field_t)
+            class default
+                return
+            end select
+            if (size(part) /= 2*(size(lam_edges) + size(th_edges)) + 4) return
+        end if
         call ntv_system(f, mesh, op, sys, mat, status)
         if (status /= HP_OK) return
         if (present(n_dof)) n_dof = sys%n
@@ -711,32 +725,61 @@ contains
         call ntv_free(fac)
         if (status /= HP_OK) return
         r = real(sum(sys%drive(:, 4)*x), dp)
-        if (present(edges) .and. present(dep)) call ntv_deposit(f, mesh, op, sys, x, edges, dep)
+        if (present(edges) .and. present(dep)) then
+            call ntv_bins(f, mesh, op, sys, x, edges=edges, dep=dep)
+        end if
+        if (split) call ntv_bins(f, mesh, op, sys, x, lam_edges=lam_edges, &
+            th_edges=th_edges, part=part)
     end subroutine hp_ntv_kernel
 
     !> The torque functional of hp_ntv_kernel split by where its quadrature
     !! points lie: the same tensor Gauss rule as the load of drive 4 in element,
-    !! so that the bins sum to Re sum(drive(:, 4) x) up to rounding. A finite
-    !! orbit spends time in proportion to the measure at each of its points, so
-    !! this is the torque deposited where the orbit is, not on its psi*.
-    subroutine ntv_deposit(f, mesh, op, sys, x, edges, dep)
+    !! so that the bins sum to Re sum(drive(:, 4) x) up to rounding.
+    !!
+    !! With edges, dep(b) is the part at flux labels f%position in bin b. A
+    !! finite orbit spends time in proportion to the measure at each of its
+    !! points, so this is the torque deposited where the orbit is, not on its
+    !! psi*.
+    !!
+    !! With lam_edges (of lambda/lambda_c) and th_edges (of theta - theta_x
+    !! wrapped to [-pi, pi)), part = [drive in the nl + 1 bins of
+    !! lambda/lambda_c, dissipation in them, drive in the nt + 1 bins of
+    !! theta - theta_x, dissipation in them], nl and nt the numbers of edges
+    !! (bin 1 below the first edge, the last above the last edge). The drive
+    !! partition splits R = Re sum(drive(:, 4) x); the dissipation partition
+    !! splits D = 2 k v Re sum_e int collide |d_xi x|^2, the Hermitian
+    !! (collision) part x^H C x of the system A x = drive(:, 3) on the same
+    !! rule. The loads satisfy drive(:, 4) = 2 k v conj(drive(:, 3)) pointwise
+    !! (dk_hp_ntv: torque = 2 k drive, after the surface measure) when neither
+    !! NEO-2-QL source is on, and streaming and the rotation and precession
+    !! term are skew-Hermitian, so then R = 2 k v Re(x^H A^H x) = D up to the
+    !! solve residual. The sources add to drive(:, 3) only and break the
+    !! identity; D keeps the same constant.
+    subroutine ntv_bins(f, mesh, op, sys, x, edges, dep, lam_edges, th_edges, part)
         class(hp_geometry_t), intent(in) :: f
         type(hp_mesh_t), intent(in) :: mesh
         type(hp_operator_t), intent(in) :: op
         type(hp_system_t), intent(in) :: sys
         complex(dp), intent(in) :: x(:)
-        real(dp), intent(in) :: edges(:)
-        real(dp), intent(out) :: dep(:)
-        integer :: p, nq, n_col, n_lev, n_row, ec, er, e, c, q1, q2, a1, a2
+        real(dp), intent(in), optional :: edges(:), lam_edges(:), th_edges(:)
+        real(dp), intent(out), optional :: dep(:), part(:)
+        integer :: p, nq, n_col, n_lev, n_row, ec, er, e, c, q1, q2, a1, a2, nl, nt
         integer, allocatable :: curve_kind(:)
         real(dp), allocatable :: curve_val(:), node(:), wn(:), xq(:), wq(:), phi(:, :), &
-            xi_q(:, :)
+            dphi(:, :), xi_q(:, :)
         real(dp) :: th_a, th, d, xi_lo, xi_hi, xi_b, xi, ww, col, dr, de, den, phase, &
-            precess, drive, torque, s
-        complex(dp) :: src, xh
+            precess, drive, torque, s, t, diss, bb, bb_t, lam
+        complex(dp) :: src, xh, xd
         complex(dp), allocatable :: xl(:, :)
+        logical :: split
 
-        dep = 0
+        split = present(lam_edges) .and. present(th_edges) .and. present(part)
+        if (present(dep)) dep = 0
+        if (split) then
+            part = 0
+            nl = size(lam_edges)
+            nt = size(th_edges)
+        end if
         p = mesh%p
         nq = 2*p + 3
         n_col = size(mesh%theta) - 1
@@ -744,12 +787,13 @@ contains
         curve_val = [mesh%lam(1:n_lev - 1), mesh%zeta, mesh%lam(n_lev - 1:1:-1)]
         curve_kind = [(-1, c=1, n_lev - 1), (0, c=1, size(mesh%zeta)), (1, c=1, n_lev - 1)]
         n_row = size(curve_val) - 1
-        allocate (node(p + 1), wn(p + 1), xq(nq), wq(nq), phi(p + 1, nq), &
+        allocate (node(p + 1), wn(p + 1), xq(nq), wq(nq), phi(p + 1, nq), dphi(p + 1, nq), &
             xi_q(n_row + 1, nq), xl(p + 1, p + 1))
         call gauss_lobatto_legendre(p + 1, node, wn)
         call gauss_legendre(nq, xq, wq)
         do q1 = 1, nq
             call lagrange_weights(p + 1, xq(q1), node, phi(:, q1))
+            call lagrange_deriv_weights(p + 1, xq(q1), node, dphi(:, q1))
         end do
         do ec = 1, n_col
             th_a = (mesh%theta(ec + 1) - mesh%theta(ec))/2
@@ -773,19 +817,35 @@ contains
                         call f%point_source(th, xi, op, src, col, dr, de, den, phase, &
                             precess, drive, torque)
                         xh = 0
+                        xd = 0
                         do a2 = 1, p + 1
                             do a1 = 1, p + 1
                                 xh = xh + phi(a1, q1)*phi(a2, q2)*xl(a1, a2)
+                                xd = xd + phi(a1, q1)*dphi(a2, q2)*xl(a1, a2)
                             end do
                         end do
-                        s = f%position(th, xi)
-                        c = 1 + count(edges <= s)
-                        dep(c) = dep(c) + real(ww*torque*conjg(src)*xh, dp)
+                        t = real(ww*torque*conjg(src)*xh, dp)
+                        if (present(dep)) then
+                            s = f%position(th, xi)
+                            c = 1 + count(edges <= s)
+                            dep(c) = dep(c) + t
+                        end if
+                        if (.not. split) cycle
+                        diss = 2*op%k*op%v*ww*col*(real(xd, dp)**2 + aimag(xd)**2)/xi_b**2
+                        call field_value(f, th, bb, bb_t)
+                        lam = (1 - xi*xi)/bb/f%lambda_c
+                        c = 1 + count(lam_edges <= lam)
+                        part(c) = part(c) + t
+                        part(nl + 1 + c) = part(nl + 1 + c) + diss
+                        s = modulo(th - f%theta_x + pi, 2*pi) - pi
+                        c = 2*(nl + 1) + 1 + count(th_edges <= s)
+                        part(c) = part(c) + t
+                        part(nt + 1 + c) = part(nt + 1 + c) + diss
                     end do
                 end do
             end do
         end do
-    end subroutine ntv_deposit
+    end subroutine ntv_bins
 
     !> hp_ntv_kernel with the dual-weighted residual estimate eta of the
     !! error of R: the primal and adjoint solutions of the mesh are

@@ -21,8 +21,25 @@
 !! (orbits deposit their torque where they are, in proportion to the time
 !! spent there). With a deposit line, each row ends with the torque density
 !! of its psi* surface split over the N + 1 bins (below the first edge,
-!! between edges, above the last), summing to the torque density. The
-!! program ends with an error when any status is not 0.
+!! between edges, above the last), summing to the torque density. With a
+!! line 'partition NL NT' after the optional deposit line, followed by NL
+!! increasing edges of lambda/lambda_c (lambda = (1 - xi^2)/b, lambda_c =
+!! 1/b_max the trapped-passing boundary) and, from the next line, NT
+!! increasing edges of theta - theta_x [rad] in [-pi, pi) (theta_x where b
+!! is largest), each row then ends with 2 (NL + 1) + 2 (NT + 1) torque
+!! densities [N m/m^3] in the bins (below the first edge, between edges,
+!! above the last): the drive partition over the lambda bins, the
+!! dissipation partition over them, the drive partition over the theta
+!! bins and the dissipation partition over them. The drive partition splits
+!! the torque functional Re sum(drive(:, 4) x) of the kernel by where its
+!! quadrature points lie and sums to the torque density; the dissipation
+!! partition splits 2 k v times the pitch-angle-scattering quadratic form
+!! int collide |d_xi f|^2 (milca_dk_hp hp_ntv_kernel), which equals the
+!! torque functional up to the solves when sources is 0 and differs from it
+!! with sources 1. Only the thin spectral-element kernel with monoenergetic
+!! energy quadrature (collision 0) partitions; orbit_width, legendre and the
+!! energy-coupled collision model with a partition line are input errors.
+!! The program ends with an error when any status is not 0.
 program ntv_profile
     use, intrinsic :: iso_fortran_env, only: dp => real64, error_unit
     use milca_boozer_file, only: boozer_file_t, load_boozer_file, BOOZER_OK
@@ -68,6 +85,8 @@ program ntv_profile
                 result(i, a)%vprime, result(i, a)%torque_real
             if (allocated(res%deposit_edges) .and. allocated(result(i, a)%deposit)) &
                 write (*, '(*(es18.9))', advance='no') result(i, a)%deposit
+            if (allocated(res%partition_lambda) .and. allocated(result(i, a)%partition)) &
+                write (*, '(*(es18.9))', advance='no') result(i, a)%partition
             write (*, '(a)') ''
         end do
     end do

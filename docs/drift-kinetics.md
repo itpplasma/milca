@@ -858,6 +858,26 @@ and refactors with the scalar LU, which costs up to tenfold at low nu. Row and
 column equilibration of the complex system halves that cost; the gate itself is
 a FortSparse setting.
 
+Pitch partition of the torque (`hp_ntv_kernel` with `lam_edges` and
+`th_edges`, `ntv_profile` input line `partition`). The weak form is A x = b
+with b = drive(:, 3), and R = Re d^T x with d = drive(:, 4). A = S + C + iL:
+the streaming bracket S is real and skew, the shift, rotation and precession
+term iL is imaginary and symmetric, and the pitch-angle scattering
+C = int collide d_xi w d_xi g is real, symmetric and positive. The drive
+partition splits R by the place (lambda/lambda_c and theta - theta_x) of the
+quadrature points of d, and its bins sum to R. The dissipation partition
+splits D = 2 k v x^H C x = 2 k v sum_e int collide |d_xi x_h|^2 on the same
+quadrature rule. Here k = op%k and v is the speed. The leaves of `dk_hp_ntv`
+give torque = 2 k drive pointwise once the torque carries the surface
+measure. So without the NEO-2-QL sources d = 2 k v conj(b), and with A x = b
+
+    R = 2 k v Re(b^H x) = 2 k v Re(x^H A^H x) = 2 k v x^H C x = D
+
+holds up to the solve residual. The two sources add to b only, so they break
+the identity. D then keeps the same constant and shows how large the mismatch
+is. `ntv_profile` integrates both partitions over energy with the weights of
+the torque density.
+
 Energy grid and test-particle operator (`src/continuum/dk_collop.f90`, #184):
 each species has the speed x = v/v_ta on continuous GLL elements of degree
 at least 2 on [0, x_max], and the perturbation is f_a = F_a h_a P_l(xi) with

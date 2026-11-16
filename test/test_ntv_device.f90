@@ -9,13 +9,16 @@
 !! converged Legendre kernel, and the finite-width kernel reproduces the thin
 !! kernel for thin orbits and counts the energies whose orbits leave the file,
 !! and its torque deposited where the orbits are sums to the torque of each
-!! surface and returns to the psi* profile as the orbits become thin.
+!! surface and returns to the psi* profile as the orbits become thin. The
+!! pitch partitions of the thin kernel sum to the torque on Gauss-Laguerre
+!! nodes and adaptive panels, leave every other output unchanged, and are
+!! rejected with finite orbit width and the Legendre kernel.
 program test_ntv_device
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, load_boozer_file, BOOZER_OK
     use milca_ntv_device, only: ntv_species_t, ntv_profile_t, ntv_resolution_t, &
         ntv_species_result_t, ntv_device_profile, deflection_frequency, DEVICE_OK, &
-        DEVICE_SOLVE, ntv_axisymmetric_result_t, ntv_device_axisymmetric, &
+        DEVICE_SOLVE, DEVICE_BAD_INPUT, ntv_axisymmetric_result_t, ntv_device_axisymmetric, &
         ntv_omega_te_from_rotation, ntv_indicator_t, ntv_device_indicators
     use milca_boozer_orbit, only: orbit_particle_t
     use milca_dk_hp, only: hp_operator_t
@@ -39,6 +42,7 @@ program test_ntv_device
     call orbit_width_thin()
     call orbit_width_lost()
     call orbit_width_deposit()
+    call pitch_partition()
     if (failures > 0) error stop 'FAIL'
     print '(a)', 'All tests passed!'
 
@@ -669,6 +673,83 @@ contains
         call check('physical orbits leave the narrow bin', &
             abs(out(1, 1)%deposit(1)) + abs(out(1, 1)%deposit(3)) > 1e-2_dp*abs(out(1, 1)%torque))
     end subroutine orbit_width_deposit
+
+    !> Electrons on one surface of the synthetic file, thin spectral-element
+    !> kernel, sources off: the drive partitions in lambda/lambda_c and in
+    !> theta - theta_x sum to the torque density, the dissipation partitions
+    !> equal it to solver accuracy, and the other outputs are those of the run
+    !> without the partition.
+    subroutine pitch_partition()
+        character(*), parameter :: eq_name = 'ntv_part_eq.bc', pert_name = 'ntv_part_pert.bc'
+        integer, parameter :: nl = 6, nt = 2, nb = 2*(nl + nt) + 4
+        type(boozer_file_t) :: eq, pert
+        type(ntv_species_t) :: sp(1)
+        type(ntv_profile_t) :: prof
+        type(ntv_resolution_t) :: res
+        type(ntv_species_result_t), allocatable :: plain(:, :), out(:, :)
+        integer :: status, pass
+        call write_file(eq_name, .false.)
+        call write_file(pert_name, .true.)
+        call load_boozer_file(eq_name, eq, status)
+        call load_boozer_file(pert_name, pert, status)
+        sp(1) = ntv_species_t(-1.0_dp, 9.1093837015e-31_dp)
+        prof%s = [0.45_dp]
+        prof%omega_te = [0.0_dp]
+        allocate (prof%density(1, 1), prof%temperature(1, 1), prof%density_s(1, 1), &
+            prof%temperature_s(1, 1), prof%kappa(1, 1))
+        prof%density = 3e19_dp
+        prof%temperature = 2*kev
+        prof%density_s = -1e19_dp
+        prof%temperature_s = -1*kev
+        prof%kappa = 3e-4_dp
+        res%n_theta = 33
+        res%sources = .false.
+        res%hp_columns = 12
+        res%hp_rows = 6
+        do pass = 1, 2
+            ! Gauss-Laguerre nodes, then adaptive energy panels.
+            if (pass == 1) then
+                res%x_tol = 0
+                res%n_x = 2
+            else
+                res%x_tol = 0.3_dp
+            end if
+            if (allocated(res%partition_lambda)) deallocate (res%partition_lambda, &
+                res%partition_theta)
+            call ntv_device_profile(eq, pert, 3, sp, prof, res, plain, status)
+            call check('partition: plain profile', status == DEVICE_OK)
+            res%partition_lambda = [0.5_dp, 0.99_dp, 0.9999_dp, 1.0_dp, 1.0001_dp, 1.01_dp]
+            res%partition_theta = [-0.1_dp, 0.1_dp]
+            call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+            call check('partition: profile', status == DEVICE_OK)
+            if (failures > 0) return
+            call check('partition: absent without edges', .not. allocated(plain(1, 1)%partition))
+            call check('partition: layout', allocated(out(1, 1)%partition))
+            if (failures > 0) return
+            call check('partition: layout', size(out(1, 1)%partition) == nb)
+            call check('partition: other outputs unchanged', out(1, 1)%torque == plain(1, 1)%torque &
+                .and. out(1, 1)%k11 == plain(1, 1)%k11 .and. out(1, 1)%k22 == plain(1, 1)%k22 &
+                .and. out(1, 1)%heat_flux == plain(1, 1)%heat_flux)
+            associate (p => out(1, 1)%partition, t => out(1, 1)%torque)
+                call close_to('partition: drive in lambda sums to the torque', &
+                    sum(p(1:nl + 1)), t, 1e-12_dp)
+                call close_to('partition: drive in theta sums to the torque', &
+                    sum(p(2*nl + 3:2*nl + nt + 3)), t, 1e-12_dp)
+                call close_to('partition: dissipation in lambda equals the torque', &
+                    sum(p(nl + 2:2*nl + 2)), t, 1e-8_dp)
+                call close_to('partition: dissipation in theta equals the torque', &
+                    sum(p(2*nl + nt + 4:nb)), t, 1e-8_dp)
+            end associate
+        end do
+        ! Only the thin spectral-element kernel partitions.
+        res%thin_legendre = .true.
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+        call check('partition: rejected with the Legendre kernel', status == DEVICE_BAD_INPUT)
+        res%thin_legendre = .false.
+        res%orbit_width = .true.
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+        call check('partition: rejected with orbit width', status == DEVICE_BAD_INPUT)
+    end subroutine pitch_partition
 
     !> Plasma of orbit_width_deposit with temperature and rotation scaled by f.
     subroutine deposit_profile(prof, f)
