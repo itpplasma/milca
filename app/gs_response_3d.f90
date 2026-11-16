@@ -879,7 +879,12 @@ contains
             kp%n = -n
             call kl_delta(kp, rs, kinetic_core, kinetic_band, kinetic_nwin, kinetic_mmax, &
                 kinetic_model, dk, ik, st)
-            if (st /= KL_OK) error stop 'kinetic layer'
+            if (st /= KL_OK) then
+                write (*, '(a,f8.4,a,f9.4,a,i0,a)') 'kinetic layer q ', q_rat(l), ' at r_s[cm] ', &
+                    rs, ': status ', st, ' (3: window r_s +- (kinetic_core + kinetic_band) '// &
+                    'leaves the profiles)'
+                error stop 'kinetic layer'
+            end if
             drdpsin = abs(dq_rat(l)/dqdr)
             dlayer(l) = dk*drdpsin
             lscale(l) = kinetic_core/drdpsin
