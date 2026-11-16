@@ -149,6 +149,34 @@ interchange in libneo as defined in [AGENTS.md](AGENTS.md). Maintain independent
 specialized reference implementations; do not require established codes to
 depend on MILCA.
 
+## Planned, not started: differentiable stellarator neoclassics (2026-11-16)
+
+A plan only; no work starts from this section until it is moved into the
+current table. It builds on the 3D monoenergetic coefficients, the
+Sugama-Nishimura thermal coefficients and the bootstrap coefficient in
+[drift-kinetics.md](docs/drift-kinetics.md).
+
+1. **Derivatives everywhere.** JVP and VJP for `mono_coefficients_3d`, the
+   thermal coefficients and the bootstrap current, with respect to the field
+   spectrum, iota, I/G, collisionality and the profiles, checked against finite
+   differences. Today only the axisymmetric `mono_coefficients_jvp` exists.
+2. **All benchmarks.** The published ICNTS values; collisionality below 1e-3;
+   MONKES and DKES on stellarator and further published configurations; NEO-2;
+   BOOTSJ, NCLASS and PENTA as the bootstrap models in use, so that the
+   differences from them are known.
+3. **A model equivalent to NEO** (effective ripple and 1/nu transport of the
+   TU Graz NEO code), with better numerics and full differentiability,
+   benchmarked against NEO.
+4. **A model equivalent to rabe** (Grassler et al. 2026, bootstrap current
+   in the long-mean-free-path limit), with better numerics and full
+   differentiability, benchmarked against rabe.
+5. **Drop-in use.** An optional bootstrap provider for THRIFT next to BOOTSJ,
+   DKES, NCLASS and PENTA, agreed with the THRIFT developers, so that THRIFT
+   users can switch models without writing code; values only on that path,
+   derivatives through TIAGO and optimisation.
+
+No upstream pull requests to NEO or rabe for now.
+
 ## Future, not active
 
 All other roadmap families (full NEO-2 parity, comprehensive 3D kinetic
