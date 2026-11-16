@@ -1,6 +1,6 @@
 # MILCA roadmap — active work first
 
-Status: 2026-11-13. **This is the only active priority list.** Issues not listed here are
+Status: 2026-11-16. **This is the only active priority list.** Issues not listed here are
 backlog, not instructions to implement. Physics specifications and long-range
 scope remain in [DESIGN.md](DESIGN.md), [the capability catalogue](docs/capability-catalogue.md),
 [the model graph](docs/model-graph.md), and the
