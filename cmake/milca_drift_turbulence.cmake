@@ -67,6 +67,16 @@ set_tests_properties(hasegawa_wakatani_result_contract PROPERTIES TIMEOUT 300
 milca_test_labels(hasegawa_wakatani_result_contract fast CLASSES continuum apps
     TARGETS hasegawa_wakatani test_turbulence_output)
 
+# Drift-Alfven application (stage DA, homogeneous step) on a small case near the
+# Hasegawa-Wakatani limit: positive flux and closed energy and enstrophy balances.
+add_executable(drift_alfven app/drift_alfven.f90)
+target_link_libraries(drift_alfven PRIVATE milca_io)
+add_test(NAME drift_alfven_result COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:drift_alfven> -DWORK=${CMAKE_BINARY_DIR}/drift-alfven-result
+    -P ${CMAKE_SOURCE_DIR}/test/check_drift_alfven_result.cmake)
+set_tests_properties(drift_alfven_result PROPERTIES TIMEOUT 300 ENVIRONMENT "OMP_NUM_THREADS=1")
+milca_test_labels(drift_alfven_result fast CLASSES continuum apps TARGETS drift_alfven)
+
 # Saturated flux against published values (benchmarks/drift-turbulence). The
 # modified model, whose zonal flows suppress the flux, and a 20 % error in the
 # adiabaticity, which lowers the flux by about 10 %, have to be rejected.
