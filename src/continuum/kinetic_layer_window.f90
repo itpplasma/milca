@@ -32,7 +32,7 @@ module milca_kinetic_layer_window
     implicit none
     private
     public :: kl_profiles_t, kl_window, kl_profiles_read
-    integer, parameter, public :: KLW_OK = 0, KLW_BAD_INPUT = 1, KLW_SPLINE = 2
+    integer, parameter, public :: KLW_OK = 0, KLW_BAD_INPUT = 1, KLW_SPLINE = 2, KLW_RANGE = 3
 
     real(dp), parameter :: pi = 4*atan(1.0_dp), ev = 1.602176634e-12_dp
     real(dp), parameter :: me = 9.1093837015e-28_dp, mp = 1.67262192369e-24_dp
@@ -49,7 +49,8 @@ module milca_kinetic_layer_window
 contains
 
     !> Window of nwin points centred on r_m with core half-width a and
-    !> transition width w.
+    !> transition width w. status is KLW_RANGE when r_m +- (a + w) leaves the
+    !> profiles, where the splines would extrapolate.
     subroutine kl_window(p, r_m, a, w, nwin, bg, status)
         type(kl_profiles_t), intent(in) :: p
         real(dp), intent(in) :: r_m, a, w
@@ -63,6 +64,8 @@ contains
 
         status = KLW_BAD_INPUT
         if (size(p%r) < 4 .or. nwin < 2 .or. a <= 0 .or. w <= 0 .or. p%r0 <= 0) return
+        status = KLW_RANGE
+        if (r_m - (a + w) < minval(p%r) .or. r_m + (a + w) > maxval(p%r)) return
         y = reshape([p%ne, p%te, p%ti, p%q, p%er], [size(p%r), 5])
         call cubic_spline_init(p%r, y, sp, st)
         status = KLW_SPLINE

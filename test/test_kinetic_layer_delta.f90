@@ -9,7 +9,7 @@ program test_kinetic_layer_delta
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_kinetic_layer_delta, only: kl_delta, kl_resonance
     use milca_kinetic_layer_cylinder, only: KL_OK
-    use milca_kinetic_layer_window, only: kl_profiles_t, kl_window
+    use milca_kinetic_layer_window, only: kl_profiles_t, kl_window, KLW_RANGE
     use milca_kinetic_layer_cylinder, only: kl_background_t
     use milca_mhd_layer_n, only: layer_params_t, layer_delta
     implicit none
@@ -35,6 +35,7 @@ program test_kinetic_layer_delta
     call close_to('window independence', d2, d1, 1e-2_dp)
 
     call resonance()
+    call window_range()
     call doppler_sign(0.3_dp)
     call doppler_sign(-0.3_dp)
 
@@ -61,6 +62,18 @@ contains
         p%er = -0.3_dp + 0.01_dp*(p%r - rm)
         p%btor = -18000; p%r0 = 165; p%m = m; p%n = n; p%zi = 1; p%ai = 2
     end subroutine profiles
+
+    !> A window that reaches beyond the profiles (40 to 70 cm) is refused
+    !> instead of solved on extrapolated profiles.
+    subroutine window_range()
+        complex(dp) :: d, i
+        integer :: s1
+        call profiles(p, 6, 2)
+        call kl_delta(p, 66.0_dp, 1.5_dp, 3.0_dp, 256, 96, 1, d, i, s1)
+        call check('window beyond the profiles refused', s1 == KLW_RANGE)
+        call kl_delta(p, rm, 1.5_dp, 3.0_dp, 256, 96, 1, d, i, s1)
+        call check('window inside the profiles solved', s1 == KL_OK)
+    end subroutine window_range
 
     !> q = -3 (1 + 0.01 (r - rm)): |q| = 3.03 at rm + 1, slope 0.03.
     subroutine resonance()
