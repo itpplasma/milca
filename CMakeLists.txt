@@ -277,6 +277,7 @@ target_sources(milca_classical PRIVATE src/classical/ocp.f90 src/classical/pair_
 target_sources(milca_continuum PRIVATE src/continuum/vlasov_response.f90
     src/continuum/ou_susceptibility.f90 src/continuum/kinetic_layer_cylinder.f90
     src/continuum/kinetic_layer_window.f90 src/continuum/kinetic_layer_delta.f90
+    src/continuum/kinetic_layer_torque.f90
     src/generated/milca_poisson_leaves.f90 src/continuum/poisson_laboratory.f90
     src/generated/milca_fp_leaves.f90 src/continuum/fp_laboratory.f90
     src/generated/milca_fp_relaxation_leaves.f90 src/continuum/fp_relaxation.f90
@@ -1756,6 +1757,9 @@ add_test(NAME kinetic_layer_cylinder COMMAND test_kinetic_layer_cylinder)
 add_executable(test_kinetic_layer_delta test/test_kinetic_layer_delta.f90)
 target_link_libraries(test_kinetic_layer_delta PRIVATE milca milca_mhd)
 add_test(NAME kinetic_layer_delta COMMAND test_kinetic_layer_delta)
+add_executable(test_kinetic_layer_torque test/test_kinetic_layer_torque.f90)
+target_link_libraries(test_kinetic_layer_torque PRIVATE milca)
+add_test(NAME kinetic_layer_torque COMMAND test_kinetic_layer_torque)
 add_executable(test_jeans test/test_jeans.f90)
 target_link_libraries(test_jeans PRIVATE milca)
 add_test(NAME jeans_instability COMMAND test_jeans)
@@ -1876,6 +1880,8 @@ add_executable(kl_cylinder app/kl_cylinder.f90)
 target_link_libraries(kl_cylinder PRIVATE milca)
 add_executable(kl_profiles app/kl_profiles.f90)
 target_link_libraries(kl_profiles PRIVATE milca)
+add_executable(kl_torque_balance app/kl_torque_balance.f90)
+target_link_libraries(kl_torque_balance PRIVATE milca)
 add_executable(ntv_axisymmetric_profile app/ntv_axisymmetric_profile.f90)
 target_link_libraries(ntv_axisymmetric_profile PRIVATE milca_ntv_geometry)
 add_executable(ntv_indicator_profile app/ntv_indicator_profile.f90)
