@@ -4,7 +4,7 @@ program gen_dk_mono
     use milca_gen_support, only: leaf_writer_t, fortsym_revision
     implicit none
     type(leaf_writer_t) :: writer
-    type(expr_t) :: b, b_theta, kappa, k
+    type(expr_t) :: b, b_theta, kappa, k, omega_e, mean_b2
     type(expr_t) :: m, t, nud, v, nu, b0, b2, cs, d11, d13, d33, ups2, d11p, d13p, &
         d33p, den
 
@@ -30,6 +30,11 @@ program gen_dk_mono
     call writer%emit('dk_mono_point', ['b      ', 'b_theta', 'kappa  '], &
         ['stream ', 'mirror ', 'drift0 ', 'drift2 ', 'drive_e', 'weight '], &
         [k, k*b_theta/(2*b), -(2*k*b_theta)/(3*b*b), -(k*b_theta)/(3*b*b), b, 1/(b*b)], ad=.true.)
+    ! Incompressible electric drift divided by speed. The Boozer measure
+    ! cancels b^2, leaving a constant multiple of the angular derivative.
+    omega_e = sym('omega_e'); mean_b2 = sym('mean_b2')
+    call writer%emit('dk_mono_exb_point', ['b      ', 'mean_b2', 'omega_e'], &
+        ['advection'], [omega_e*b*b/mean_b2], ad=.true.)
     ! Sugama and Nishimura, Phys. Plasmas 9, 4637 (2002), Eq. (43): viscosity
     ! and radial-flux coefficients M, N, L of monoenergetic particles (mass m,
     ! temperature t, speed v, deflection frequency nud = nu v) from the

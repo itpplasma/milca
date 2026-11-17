@@ -82,6 +82,17 @@ limit, three were input data and six were implementation defects.
 
 ## 3. Different model or convention in the reference
 
+- **Additional null modes at rational surfaces**. In the local Lorentz model
+  at zero electric field, a pitch-independent function constant along closed
+  field lines is in the collisionless and collisional nullspace. A global
+  density border removes only one such mode. At \(q=4/5\), three field
+  periods and resolved \(\cos(12\theta-15\zeta)\), both MILCA and SFINCS
+  returned finite but resolution-dependent radial coefficients despite LU
+  success. The analytic null-mode action and a reciprocal-condition check
+  now reject this MILCA solve. Nonzero incompressible electric drift removes
+  this particular null mode. Coefficient agreement on a coarser grid had
+  hidden the singularity rather than established convergence.
+
 - **Drift weight**: NEO-2-QL and NEO-RT weight drift and drive with
   (1 + xi^2)/b, grad-B plus low-beta curvature drift. MILCA's first NTV test
   case used the grad-B part (1 - xi^2)/b alone (#238). Both are switchable.
