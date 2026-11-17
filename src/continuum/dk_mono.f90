@@ -29,8 +29,10 @@
 !! one refinement step on the true residual for the algebraic error.
 module milca_dk_mono
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use fortnum_fourier, only: fourier_derivative
-    use milca_dk_mono_leaves, only: dk_mono_point, dk_mono_point_jvp
+    use fortnum_lapack_refine, only: fortnum_dgecon
+    use milca_dk_mono_leaves, only: dk_mono_point, dk_mono_point_jvp, dk_mono_exb_point
     implicit none
     private
     public :: mono_coefficients_t, mono_coefficients, mono_coefficients_jvp
@@ -69,7 +71,9 @@ module milca_dk_mono
     type :: mono_factor_t
         integer :: n = 0, lmax = 0
         real(dp) :: nu = 0
+        real(dp) :: omega_e = 0
         real(dp), allocatable :: d(:, :), s_lu(:, :, :), y(:, :, :), border_lu(:, :)
+        real(dp), allocatable :: exb(:, :)
         integer, allocatable :: s_piv(:, :), border_piv(:)
         type(mono_point_t) :: p
     end type
@@ -249,7 +253,9 @@ contains
         real(dp), intent(in) :: rate(0:)
         integer, intent(out) :: status
         integer :: n, l, j, info
-        real(dp), allocatable :: s(:, :), up(:, :)
+        integer, allocatable :: iwork(:)
+        real(dp), allocatable :: s(:, :), up(:, :), work(:)
+        real(dp) :: anorm, rcond
 
         n = f%n
         ! S_lmax = rate(lmax), S_l = rate(l) - Up_l Y_{l+1}.
@@ -258,8 +264,9 @@ contains
         status = MONO_SINGULAR
         do l = f%lmax, 1, -1
             s = 0
+            if (allocated(f%exb)) s = f%omega_e*f%exb
             do j = 1, n
-                s(j, j) = rate(l)
+                s(j, j) = s(j, j) + rate(l)
             end do
             if (l < f%lmax) then
                 up = upper(f%d, f%p, l)
@@ -277,13 +284,20 @@ contains
         allocate (f%border_lu(n + 1, n + 1), f%border_piv(n + 1))
         f%border_lu = 0
         f%border_lu(1:n, 1:n) = -matmul(upper(f%d, f%p, 0), f%y(:, :, 1))
+        if (allocated(f%exb)) f%border_lu(1:n, 1:n) = &
+            f%border_lu(1:n, 1:n) + f%omega_e*f%exb
         do j = 1, n
             f%border_lu(j, j) = f%border_lu(j, j) + rate(0)
         end do
         f%border_lu(1:n, n + 1) = 1
         f%border_lu(n + 1, 1:n) = f%p%weight
+        anorm = maxval(sum(abs(f%border_lu), dim=1))
         call dgetrf(n + 1, n + 1, f%border_lu, n + 1, f%border_piv, info)
         if (info /= 0) return
+        ! Closed field lines can leave additional density null modes.
+        allocate (work(4*(n + 1)), iwork(n + 1))
+        call fortnum_dgecon('1', n + 1, f%border_lu, n + 1, anorm, rcond, work, iwork, info)
+        if (info /= 0 .or. rcond <= (n + 1)*epsilon(1.0_dp)) return
         status = MONO_OK
     end subroutine factor_blocks
 
@@ -313,17 +327,32 @@ contains
     !! radial drift is that of the axisymmetric case with d_theta b replaced by
     !! d_theta b - (I/G) d_zeta b, from (B x grad B).grad psi ~ I d_zeta B -
     !! G d_theta B. The flux-surface weight is 1/b^2.
-    subroutine mono_coefficients_3d(b, nper, q, i_over_g, kappa, nu, n_leg, c, status)
+    !! Optional omega_e = Phi'_t G/[v (G + iota I)] in SI units (1/m)
+    !! selects incompressible electric drift. This monoenergetic reduction
+    !! omits electric velocity-space transport and tangential magnetic drift.
+    !! dc_domega is the implicit derivative at fixed field, speed and nu.
+    subroutine mono_coefficients_3d(b, nper, q, i_over_g, kappa, nu, n_leg, c, status, &
+            omega_e, dc_domega)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa, nu
         integer, intent(in) :: nper, n_leg
         type(mono_coefficients_t), intent(out) :: c
         integer, intent(out) :: status
+        real(dp), intent(in), optional :: omega_e
+        type(mono_coefficients_t), intent(out), optional :: dc_domega
         type(mono_factor_t) :: f
-        real(dp), allocatable :: g(:, :, :)
+        real(dp), allocatable :: g(:, :, :), dg(:, :, :), rhs(:, :, :)
+        real(dp) :: omega, mu(2)
+        integer :: l, j
 
         status = MONO_BAD_INPUT
         if (nu <= 0) return
-        call mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, f, status)
+        omega = 0
+        if (present(omega_e)) omega = omega_e
+        if (present(dc_domega)) then
+            call mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, f, status, omega)
+        else
+            call mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, f, status, omega_e)
+        end if
         if (status /= MONO_OK) return
         f%nu = nu
         call factor_blocks(f, lorentz_rates(nu, f%lmax), status)
@@ -331,21 +360,36 @@ contains
         call drive_solutions(f, g, c%border, status)
         if (status /= MONO_OK) return
         c = functionals(f%p, g, c%border)
+        if (.not. present(dc_domega)) return
+        allocate (rhs(f%n, 0:f%lmax, 2))
+        do j = 1, 2
+            do l = 0, f%lmax
+                rhs(:, l, j) = -matmul(f%exb, g(:, l, j))
+            end do
+        end do
+        call mono_solve(f, rhs, [0.0_dp, 0.0_dp], dg, mu, status)
+        if (status /= MONO_OK) return
+        dc_domega = functionals(f%p, dg, mu)
     end subroutine mono_coefficients_3d
 
     !> Surface points and parallel derivative of a 3D surface (arguments of
     !> mono_coefficients_3d) in f, not yet factorised.
-    subroutine mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, f, status)
+    subroutine mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, f, status, omega_e)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa
         integer, intent(in) :: nper, n_leg
         type(mono_factor_t), intent(out) :: f
         integer, intent(out) :: status
+        real(dp), intent(in), optional :: omega_e
         real(dp), allocatable :: bv(:), b_par(:), b_drift(:), weight(:), scratch(:, :)
+        real(dp), allocatable :: d_perp(:, :), advection(:)
         integer :: n
 
         status = MONO_BAD_INPUT
         if (n_leg < 3) return
-        call mono_surface_operators(b, nper, q, i_over_g, f%d, b_par, b_drift, status)
+        if (present(omega_e)) then
+            if (.not. ieee_is_finite(omega_e)) return
+        end if
+        call mono_surface_operators(b, nper, q, i_over_g, f%d, b_par, b_drift, status, d_perp)
         if (status /= MONO_OK) return
         n = size(b)
         f%n = n
@@ -359,6 +403,12 @@ contains
             f%p%drift0, f%p%drift2, scratch(5, :), weight)
         f%p%weight_sum = sum(weight)
         f%p%weight = weight/f%p%weight_sum
+        if (present(omega_e)) then
+            f%omega_e = omega_e
+            allocate (advection(n), f%exb(n, n))
+            call dk_mono_exb_point(bv, real(n, dp)/f%p%weight_sum, 1.0_dp, advection)
+            f%exb = spread(advection, 2, n)*d_perp
+        end if
     end subroutine mono_surface_point
 
     !> Collocation operators of a 3D surface in Boozer angles, b(i, j) on
@@ -367,11 +417,12 @@ contains
     !! the parallel derivative d = d_theta + q d_zeta, b_par = d b and the drift
     !! derivative b_drift = d_theta b - (I/G) d_zeta b. Shared by every solver
     !! on 3D surfaces, so that their geometry has one definition.
-    subroutine mono_surface_operators(b, nper, q, i_over_g, d, b_par, b_drift, status)
+    subroutine mono_surface_operators(b, nper, q, i_over_g, d, b_par, b_drift, status, d_perp)
         real(dp), intent(in) :: b(:, :), q, i_over_g
         integer, intent(in) :: nper
         real(dp), allocatable, intent(out) :: d(:, :), b_par(:), b_drift(:)
         integer, intent(out) :: status
+        real(dp), allocatable, intent(out), optional :: d_perp(:, :)
         real(dp), allocatable :: dt(:, :), dz(:, :), bv(:)
         integer :: nt, nz, n, i, j
 
@@ -392,9 +443,12 @@ contains
         do j = 1, nz
             d((j - 1)*nt + 1:j*nt, (j - 1)*nt + 1:j*nt) = dt
         end do
+        if (present(d_perp)) d_perp = d
         do j = 1, nz
             do i = 1, nt
                 d((j - 1)*nt + i, i:n:nt) = d((j - 1)*nt + i, i:n:nt) + q*dz(j, :)
+                if (present(d_perp)) d_perp((j - 1)*nt + i, i:n:nt) = &
+                    d_perp((j - 1)*nt + i, i:n:nt) - i_over_g*dz(j, :)
             end do
         end do
         bv = reshape(b, [n])
@@ -471,6 +525,7 @@ contains
         real(dp), intent(in) :: nu, x(:, 0:)
         real(dp) :: y(size(x, 1), 0:ubound(x, 2))
         y = apply_operator(f%d, f%p, nu, x)
+        if (allocated(f%exb)) y = y + f%omega_e*matmul(f%exb, x)
     end function mono_apply
 
     !> Coefficients of x_{l-1} (lower) and x_{l+1} (upper) in row l of the
