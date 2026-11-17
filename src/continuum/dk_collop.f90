@@ -157,16 +157,20 @@ contains
     !> int phi_i phi_j x^p exp(-x^2) dx and the vector int phi_i x^q
     !> exp(-x^2) dx, for the kinetic terms that a solver writes in the same
     !> Galerkin form as the collision operator.
-    subroutine collop_moments(grid, p, q, matrix, vector)
+    !! derivative, if requested, differentiates the test basis in the same
+    !! weighted integral.
+    subroutine collop_moments(grid, p, q, matrix, vector, derivative)
         type(collop_grid_t), intent(in) :: grid
         integer, intent(in) :: p, q
         real(dp), intent(out) :: matrix(grid%n, grid%n), vector(grid%n)
+        real(dp), intent(out), optional :: derivative(grid%n, grid%n)
         real(dp), allocatable :: xq(:), wq(:)
         real(dp) :: phi(grid%order), dphi(grid%order), g
         integer :: k, i, j, first
         call panel_rule(tail_edges(grid), xq, wq)
         matrix = 0
         vector = 0
+        if (present(derivative)) derivative = 0
         do k = 1, size(xq)
             call collop_basis(grid, xq(k), first, phi, dphi)
             g = wq(k)*exp(-xq(k)**2)
@@ -175,6 +179,10 @@ contains
                 do i = 1, grid%order
                     matrix(first + i - 1, first + j - 1) = matrix(first + i - 1, first + j - 1) &
                         + g*xq(k)**p*phi(i)*phi(j)
+                    if (present(derivative)) then
+                        derivative(first + i - 1, first + j - 1) = &
+                            derivative(first + i - 1, first + j - 1) + g*xq(k)**p*dphi(i)*phi(j)
+                    end if
                 end do
             end do
         end do
