@@ -1152,6 +1152,16 @@ foreach(check symmetric ambipolar onsager)
 endforeach()
 add_executable(test_dk_mono test/test_dk_mono.f90)
 target_link_libraries(test_dk_mono PRIVATE milca)
+add_executable(test_dk_mono_exb test/test_dk_mono_exb.f90)
+target_link_libraries(test_dk_mono_exb PRIVATE milca)
+foreach(check manufactured structure tangent reciprocity rational)
+    add_test(NAME dk_mono_exb_${check} COMMAND test_dk_mono_exb ${check})
+    milca_test_labels(dk_mono_exb_${check} fast CLASSES continuum TARGETS test_dk_mono_exb)
+endforeach()
+# Synthetic finite-electric-field reference with matched Lorentz collisions.
+add_test(NAME dk_mono_exb_sfincs COMMAND test_dk_mono_exb sfincs
+    ${CMAKE_SOURCE_DIR}/test/data/sfincs_mono_exb.txt)
+milca_test_labels(dk_mono_exb_sfincs fast CLASSES continuum TARGETS test_dk_mono_exb)
 foreach(check collisionless banana pfirsch_schlueter plateau onsager jvp estimate
         factor_api coupling quasisymmetric_3d monkes)
     add_test(NAME dk_mono_${check} COMMAND test_dk_mono ${check})
