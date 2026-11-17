@@ -161,6 +161,15 @@ the transport derivative with respect to that coefficient. Its
 retain the same incompressible approximation. Electric velocity-space
 transport and tangential magnetic drift remain absent.
 
+`surface_fluxes` converts that matrix and species gradients to SI particle
+flux, kinetic-energy flux, parallel flow, total radial current and species
+toroidal field torque. Gradients use toroidal flux divided by \(2\pi\).
+The [moment and torque derivation](../theory/derivations/surface-flux-normalization.md)
+defines geometric factors and signs. Its independent
+[SI reference](../test/data/surface_fluxes_sfincs.md) uses the public
+BSD 2-Clause SFINCS revision below, with Lorentz and full self-collisions.
+This conversion retains the surface model's trajectory approximations.
+
 Its synthetic coefficient reference is
 [SFINCS](https://github.com/landreman/sfincs) at
 8df5453472e982df0f6ae005243ce38d57a83711 (BSD 2-Clause), using the

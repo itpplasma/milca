@@ -1106,6 +1106,14 @@ foreach(check axisymmetric quasisymmetric monoenergetic onsager ambipolar iterat
     milca_test_labels(ntv_surface_${check} fast CLASSES continuum
         TARGETS test_ntv_surface)
 endforeach()
+add_executable(test_surface_fluxes test/test_surface_fluxes.f90)
+target_link_libraries(test_surface_fluxes PRIVATE milca)
+foreach(check sfincs equilibrium ad)
+    add_test(NAME surface_fluxes_${check} COMMAND test_surface_fluxes ${check}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/data/surface_fluxes_sfincs.txt)
+    milca_test_labels(surface_fluxes_${check} fast CLASSES continuum
+        TARGETS test_surface_fluxes)
+endforeach()
 add_executable(boozer_orbit_scan app/boozer_orbit_scan.f90)
 target_link_libraries(boozer_orbit_scan PRIVATE milca)
 add_executable(test_boozer_orbit test/test_boozer_orbit.f90)
