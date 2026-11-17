@@ -23,10 +23,11 @@ module milca_dk_surface
         mono_solve, mono_coupling, MONO_OK
     use milca_dk_ntv, only: ntv_collision_rows, NTV_OK
     use milca_dk_collop, only: collop_species_t, collop_grid_t
-    use milca_dk_mono_leaves, only: dk_surface_electric_scale
+    use milca_dk_mono_leaves, only: dk_surface_electric_scale, dk_surface_force_point, &
+        dk_surface_flux_point, dk_surface_torque_point
     implicit none
     private
-    public :: surface_transport
+    public :: surface_transport, surface_fluxes
     integer, parameter, public :: SURFACE_OK = 0, SURFACE_BAD_INPUT = 1, &
         SURFACE_SINGULAR = 2, SURFACE_NO_CONVERGENCE = 3
 
@@ -61,6 +62,77 @@ module milca_dk_surface
     end interface
 
 contains
+
+    !> SI moments of a surface_transport matrix. Logarithmic gradients and
+    !> phi_prime are derivatives in toroidal flux psi_t (Wb/radian), and
+    !> E_parallel = parallel_field*b. Outputs are <Gamma.grad psi_t>, the
+    !> kinetic-energy flux, and <b*u_parallel>. The optional torque is the
+    !> toroidal Lorentz torque on each species for
+    !> B = grad psi_t x grad theta + iota grad zeta x grad psi_t.
+    subroutine surface_fluxes(d, q, i_over_g, species, ln_n_prime, ln_t_prime, &
+            phi_prime, parallel_field, particle_flux, energy_flux, parallel_flow, &
+            status, torque, radial_current)
+        real(dp), intent(in) :: d(:, :, :, :), q, i_over_g, ln_n_prime(:), &
+            ln_t_prime(:), phi_prime, parallel_field
+        type(collop_species_t), intent(in) :: species(:)
+        real(dp), intent(out) :: particle_flux(:), energy_flux(:), parallel_flow(:)
+        integer, intent(out) :: status
+        real(dp), intent(out), optional :: torque(:), radial_current
+        real(dp), parameter :: elementary = 1.602176634e-19_dp
+        real(dp) :: forces(3, size(species)), contribution(3), current, moment
+        integer :: ns, a, sb
+        status = SURFACE_BAD_INPUT
+        ns = size(species)
+        particle_flux = 0
+        energy_flux = 0
+        parallel_flow = 0
+        if (present(torque)) torque = 0
+        if (present(radial_current)) radial_current = 0
+        if (ns < 1 .or. any(shape(d) /= [ns, ns, 3, 3])) return
+        if (size(ln_n_prime) /= ns .or. size(ln_t_prime) /= ns) return
+        if (size(particle_flux) /= ns .or. size(energy_flux) /= ns .or. &
+            size(parallel_flow) /= ns) return
+        if (present(torque)) then
+            if (size(torque) /= ns) return
+        end if
+        if (.not. all(ieee_is_finite([q, i_over_g, phi_prime, parallel_field]))) return
+        if (q == 0 .or. q+i_over_g == 0) return
+        if (.not. all(ieee_is_finite(d))) return
+        if (.not. all(ieee_is_finite(ln_n_prime)) .or. &
+            .not. all(ieee_is_finite(ln_t_prime))) return
+        do a = 1, ns
+            if (.not. all(ieee_is_finite([species(a)%n, species(a)%t, species(a)%z]))) return
+            if (species(a)%n <= 0 .or. species(a)%t <= 0 .or. species(a)%z == 0) return
+            call dk_surface_force_point(ln_n_prime(a), ln_t_prime(a), phi_prime, &
+                parallel_field, species(a)%z, elementary, species(a)%t, &
+                forces(1, a), forces(2, a), forces(3, a))
+        end do
+        do a = 1, ns
+            do sb = 1, ns
+                call dk_surface_flux_point(q, i_over_g, species(a)%n, species(a)%t, &
+                    d(a, sb, 1, 1), d(a, sb, 2, 1), d(a, sb, 3, 1), &
+                    d(a, sb, 1, 2), d(a, sb, 2, 2), d(a, sb, 3, 2), &
+                    d(a, sb, 1, 3), d(a, sb, 2, 3), d(a, sb, 3, 3), &
+                    forces(1, sb), forces(2, sb), forces(3, sb), &
+                    contribution(1), contribution(2), contribution(3))
+                particle_flux(a) = particle_flux(a)+contribution(1)
+                energy_flux(a) = energy_flux(a)+contribution(2)
+                parallel_flow(a) = parallel_flow(a)+contribution(3)
+            end do
+            call dk_surface_torque_point(particle_flux(a), q, species(a)%z, elementary, &
+                current, moment)
+            if (.not. all(ieee_is_finite([current, moment]))) return
+            if (present(torque)) torque(a) = moment
+            if (present(radial_current)) radial_current = radial_current+current
+        end do
+        if (.not. all(ieee_is_finite(particle_flux)) .or. &
+            .not. all(ieee_is_finite(energy_flux)) .or. &
+            .not. all(ieee_is_finite(parallel_flow))) return
+        if (present(radial_current)) then
+            if (.not. ieee_is_finite(radial_current)) return
+        end if
+        status = SURFACE_OK
+    end subroutine surface_fluxes
 
     !> Arguments and d as in ntv_surface_coefficients; iterations the FGMRES
     !> iterations summed over the 3 n_s drives and requested tangents.

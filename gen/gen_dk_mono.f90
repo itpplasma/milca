@@ -1,6 +1,8 @@
 program gen_dk_mono
-    use fortsym_expr, only: expr_t, sym, operator(+), operator(-), &
-        operator(*), operator(/)
+    use fortsym_expr, only: expr_t, sym, num, operator(+), operator(-), &
+        operator(*), operator(/), operator(**)
+    use fortsym_diff, only: diff
+    use fortsym_engine, only: engine_result_t, VERDICT_TRUE
     use milca_gen_support, only: leaf_writer_t, fortsym_revision
     implicit none
     type(leaf_writer_t) :: writer
@@ -41,6 +43,7 @@ program gen_dk_mono
     call writer%emit('dk_surface_electric_scale', &
         ['electric_rate', 'vt           ', 'x            ', 'row_ratio    '], &
         ['row_rate'], [row_ratio*electric_rate/(vt*x)], ad=.true.)
+    call surface_observables()
     ! Sugama and Nishimura, Phys. Plasmas 9, 4637 (2002), Eq. (43): viscosity
     ! and radial-flux coefficients M, N, L of monoenergetic particles (mass m,
     ! temperature t, speed v, deflection frequency nud = nu v) from the
@@ -65,4 +68,89 @@ program gen_dk_mono
         (d11p - v*v*nud*cs*cs*ups2/3 + 3*nud*d13p*d13p/(v*v*b0*b0*b2*den))/t], ad=.true.)
     call writer%line('end module milca_dk_mono_leaves')
     call writer%close()
+contains
+    subroutine surface_observables()
+        type(expr_t) :: q, ig, density, temperature, elementary, z, phi_prime, &
+            e_parallel, ln_n_prime, ln_t_prime, f1, f2, f3, scale, &
+            d(3, 3), particle, energy, flow, charge, gamma
+        integer :: i, j
+        character(3) :: name
+        call verify_surface_moments()
+        q = sym('q'); ig = sym('i_over_g'); density = sym('density')
+        temperature = sym('temperature'); elementary = sym('elementary'); z = sym('z')
+        phi_prime = sym('phi_prime'); e_parallel = sym('e_parallel')
+        ln_n_prime = sym('ln_n_prime'); ln_t_prime = sym('ln_t_prime')
+        charge = z*elementary
+        call writer%emit('dk_surface_force_point', &
+            [character(11) :: 'ln_n_prime', 'ln_t_prime', 'phi_prime', 'e_parallel', &
+            'z', 'elementary', 'temperature'], &
+            [character(2) :: 'f1', 'f2', 'f3'], &
+            [ln_n_prime+charge*phi_prime/temperature-3*ln_t_prime/2, &
+            ln_t_prime, charge*e_parallel/temperature], ad=.true.)
+        do j = 1, 3
+            do i = 1, 3
+                write (name, '(a,i1,i1)') 'd', i, j
+                d(i, j) = sym(name)
+            end do
+        end do
+        f1 = sym('f1'); f2 = sym('f2'); f3 = sym('f3')
+        scale = q/(1+ig/q)
+        particle = -2*density*scale*(scale*(d(1, 1)*f1+d(1, 2)*f2)+d(1, 3)*f3)
+        energy = -2*density*temperature*scale &
+            *(scale*(d(2, 1)*f1+d(2, 2)*f2)+d(2, 3)*f3)
+        flow = 2*(scale*(d(3, 1)*f1+d(3, 2)*f2)+d(3, 3)*f3)
+        call writer%emit('dk_surface_flux_point', &
+            [character(11) :: 'q', 'i_over_g', 'density', 'temperature', &
+            'd11', 'd21', 'd31', 'd12', 'd22', 'd32', 'd13', 'd23', 'd33', 'f1', 'f2', 'f3'], &
+            [character(8) :: 'particle', 'energy', 'flow'], [particle, energy, flow], ad=.true.)
+        gamma = sym('particle')
+        call writer%emit('dk_surface_torque_point', &
+            [character(10) :: 'particle', 'q', 'z', 'elementary'], &
+            [character(7) :: 'current', 'torque'], [charge*gamma, charge*gamma/q], ad=.true.)
+    end subroutine surface_observables
+
+    subroutine verify_surface_moments()
+        type(expr_t) :: pitch, one, integrand, value, expected
+        integer :: kind
+        pitch = sym('xi'); one = num(1)
+        do kind = 1, 3
+            select case (kind)
+            case (1)
+                integrand = 1+pitch**2
+                expected = 8*one/3
+            case (2)
+                integrand = (1+pitch**2)*(3*pitch**2-1)/2
+                expected = 4*one/15
+            case (3)
+                integrand = pitch**2
+                expected = 2*one/3
+            end select
+            value = diff(pitch_primitive(kind, pitch), pitch)-integrand
+            call exact_zero(value)
+            value = pitch_primitive(kind, one)-pitch_primitive(kind, -one)-expected
+            call exact_zero(value)
+        end do
+    end subroutine verify_surface_moments
+
+    function pitch_primitive(kind, pitch) result(value)
+        integer, intent(in) :: kind
+        type(expr_t), intent(in) :: pitch
+        type(expr_t) :: value
+        select case (kind)
+        case (1); value = pitch+pitch**3/3
+        case (2); value = 3*pitch**5/10+pitch**3/3-pitch/2
+        case (3); value = pitch**3/3
+        end select
+    end function pitch_primitive
+
+    subroutine exact_zero(expression)
+        type(expr_t), intent(in) :: expression
+        type(engine_result_t) :: result
+        result = writer%engine%expand(expression)
+        if (.not. result%ok) error stop 'surface moment expansion'
+        result = writer%engine%simplify(result%value)
+        if (.not. result%ok) error stop 'surface moment simplification'
+        result = writer%engine%zero_test(result%value)
+        if (result%verdict /= VERDICT_TRUE) error stop 'surface moment identity'
+    end subroutine exact_zero
 end program gen_dk_mono
