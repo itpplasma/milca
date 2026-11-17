@@ -1101,7 +1101,7 @@ endforeach()
 add_executable(test_ntv_surface test/test_ntv_surface.f90)
 target_link_libraries(test_ntv_surface PRIVATE milca)
 foreach(check axisymmetric quasisymmetric monoenergetic onsager ambipolar iterative real
-        exact)
+        exact electric electric_tangent electric_onsager)
     add_test(NAME ntv_surface_${check} COMMAND test_ntv_surface ${check})
     milca_test_labels(ntv_surface_${check} fast CLASSES continuum
         TARGETS test_ntv_surface)

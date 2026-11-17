@@ -52,13 +52,28 @@ program test_ntv_surface
     real(dp), parameter :: eps = 0.1_dp, q = 2.2_dp, rmajor = 6.2_dp, ig = 0.05_dp
     integer, parameter :: n_leg = 20
     character(64) :: check
+    character(1024) :: trace_path
+    integer :: trace_unit = 0
     logical :: ok
 
     call get_command_argument(1, check)
+    call get_command_argument(2, trace_path)
+    if (trim(check) == 'electric' .and. len_trim(trace_path) > 0) then
+        open (newunit=trace_unit, file=trim(trace_path), status='replace')
+        write (trace_unit, '(a)') 'electric_rate_per_s,computed_d11_V2s,reference_d11_V2s'
+    end if
     select case (trim(check))
     case ('axisymmetric'); ok = axisymmetric()
     case ('quasisymmetric'); ok = quasisymmetric()
     case ('monoenergetic'); ok = monoenergetic()
+    case ('electric')
+        ok = monoenergetic(0.0_dp)
+        ok = monoenergetic(4000.0_dp) .and. ok
+        ok = monoenergetic(-4000.0_dp) .and. ok
+    case ('electric_tangent'); ok = electric_tangent()
+    case ('electric_onsager')
+        ok = electric_onsager()
+        ok = electric_onsager(.true.) .and. ok
     case ('onsager'); ok = onsager()
     case ('ambipolar'); ok = ambipolar()
     case ('iterative'); ok = iterative()
@@ -68,6 +83,7 @@ program test_ntv_surface
         print '(a)', 'unknown check '//trim(check)
         ok = .false.
     end select
+    if (trace_unit /= 0) close (trace_unit)
     if (.not. ok) error stop 1
 
 contains
@@ -171,19 +187,28 @@ contains
                              want, 1e-10_dp)
     end function quasisymmetric
 
-    logical function monoenergetic() result(ok)
+    logical function monoenergetic(electric) result(ok)
+        real(dp), intent(in), optional :: electric
         integer, parameter :: nt = 11, nz = 7
         real(dp), parameter :: kappa = 1/(q*rmajor)
         type(collop_species_t) :: sp(1)
         type(collop_grid_t) :: grid
         type(mono_coefficients_t) :: c
-        real(dp) :: lnl(1, 1), d(1, 1, 3, 3), b(nt, nz), want(3), x, w, nu, tz, vt, nuhat
+        real(dp) :: lnl(1, 1), d(1, 1, 3, 3), b(nt, nz), want(3), x, w, nu, tz, vt, nuhat, rate
         integer :: its, st, k
         call plasma(1e-2_dp, sp, lnl, grid)
         b = helical(nt, nz)
-        call ntv_surface_coefficients(b, 1, q, ig, kappa, sp, lnl, grid, COLLOP_LORENTZ, &
+        rate = 0
+        if (present(electric)) rate = electric
+        if (present(electric)) then
+            call surface_transport(b, 1, q, ig, kappa, sp, lnl, grid, COLLOP_LORENTZ, &
+                                   n_leg, d, its, st, rate)
+            ok = st == SURFACE_OK
+        else
+            call ntv_surface_coefficients(b, 1, q, ig, kappa, sp, lnl, grid, COLLOP_LORENTZ, &
                                         n_leg, d, its, st)
-        ok = st == NTV_OK
+            ok = st == NTV_OK
+        end if
         if (.not. ok) return
         tz = sp(1)%t/(sp(1)%z*charge)
         vt = collop_vth(sp(1))
@@ -193,7 +218,7 @@ contains
             x = grid%x(k)
             w = grid%w(k)*exp(-x**2)
             nu = nuhat*(erf(x) - chandrasekhar(x))/x**3/(vt*x)
-            call mono_coefficients_3d(b, 1, q, ig, kappa, nu, n_leg, c, st)
+            call mono_coefficients_3d(b, 1, q, ig, kappa, nu, n_leg, c, st, rate/(vt*x))
             if (st /= MONO_OK) then
                 ok = .false.
                 return
@@ -205,10 +230,73 @@ contains
         want(1) = 8*tz**2/(sqrt(pi)*vt*kappa**2*q**2)*want(1)
         want(2) = -4*tz/(sqrt(pi)*kappa*q)*want(2)
         want(3) = 2*vt/sqrt(pi)*want(3)
+        if (trace_unit /= 0) write (trace_unit, '(*(g0,:,","))') rate, d(1, 1, 1, 1), want(1)
         ok = close ('d11 against mono_coefficients_3d', d(1, 1, 1, 1), want(1), 1e-9_dp) &
             .and. close ('d31 against mono_coefficients_3d', d(1, 1, 3, 1), want(2), 1e-9_dp) &
             .and. close ('d33 against mono_coefficients_3d', d(1, 1, 3, 3), want(3), 1e-9_dp)
     end function monoenergetic
+
+    logical function electric_tangent() result(ok)
+        real(dp), parameter :: rate = 4000, step = 1
+        type(collop_species_t) :: sp(1)
+        type(collop_grid_t) :: grid
+        real(dp) :: lnl(1, 1), d(1, 1, 3, 3), tangent(1, 1, 3, 3), &
+            plus(1, 1, 3, 3), minus(1, 1, 3, 3)
+        real(dp) :: fd(3, 3), scale(3, 3)
+        integer :: its, st
+        call plasma(1e-2_dp, sp, lnl, grid, 2, 3)
+        call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 12, d, its, st, rate, tangent)
+        if (st /= SURFACE_OK) error stop 'electric tangent solve'
+        call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 12, plus, its, st, rate + step)
+        if (st /= SURFACE_OK) error stop 'positive electric difference'
+        call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 12, minus, its, st, rate - step)
+        if (st /= SURFACE_OK) error stop 'negative electric difference'
+        fd = (plus(1, 1, :, :) - minus(1, 1, :, :))/(2*step)
+        scale = max(abs(fd), abs(d(1, 1, :, :))/rate*1e-4_dp)
+        ok = maxval(abs(tangent(1, 1, :, :) - fd)/scale) < 2e-4_dp
+        print '(a,es12.4)', 'electric tangent relative error ', &
+            maxval(abs(tangent(1, 1, :, :) - fd)/scale)
+    end function electric_tangent
+
+    logical function electric_onsager(helium) result(ok)
+        logical, intent(in), optional :: helium
+        real(dp), parameter :: rate = 4000
+        type(collop_species_t) :: sp(2)
+        type(collop_grid_t) :: grid
+        real(dp) :: lnl(2, 2), d(2, 2, 3, 3), reversed(2, 2, 3, 3), l1(1, 1), parity(3)
+        integer :: its, st, a, b, i, j
+        call plasma(1e-2_dp, sp(1:1), l1, grid, 2, 3)
+        sp(2) = collop_species_t(9.1093837015e-31_dp, -1.0_dp, sp(1)%n, sp(1)%t)
+        if (present(helium)) then
+            if (helium) then
+                sp(1)%m = 2*sp(1)%m
+                sp(1)%z = 2
+                sp(2)%n = 2*sp(1)%n
+            end if
+        end if
+        lnl = l1(1, 1)
+        call surface_transport(helical(17, 11), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 16, d, its, st, rate)
+        if (st /= SURFACE_OK) error stop 'multispecies positive electric solve'
+        call surface_transport(helical(17, 11), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 16, reversed, its, st, -rate)
+        if (st /= SURFACE_OK) error stop 'multispecies negative electric solve'
+        parity = [1.0_dp, 1.0_dp, -1.0_dp]
+        ok = .true.
+        do a = 1, 2
+            do b = 1, 2
+                do i = 1, 3
+                    do j = 1, 3
+                        ok = close ('finite-electric Onsager-Casimir', sp(a)%n*d(a, b, i, j), &
+                            parity(i)*parity(j)*sp(b)%n*reversed(b, a, j, i), 2e-4_dp) .and. ok
+                    end do
+                end do
+            end do
+        end do
+    end function electric_onsager
 
     logical function onsager() result(ok)
         integer, parameter :: nt = 15, nz = 9

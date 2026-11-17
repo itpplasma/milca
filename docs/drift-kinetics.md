@@ -151,8 +151,15 @@ SFINCS flux curves, with declared numerical and reference errors.
 The monoenergetic surface solver accepts the incompressible electric drift,
 with an implicit derivative with respect to its signed electric parameter.
 The [derivation](../theory/derivations/monoenergetic-electric-drift.md) defines
-the approximation, measure, omissions and verification gates. This does not
-add finite-electric-field transport to the energy-coupled multispecies solver.
+the approximation, measure, omissions and verification gates.
+
+The energy-coupled `surface_transport` additionally accepts `electric_rate`,
+the common physical coefficient \(\Phi'G/(G+\iota I)\) in inverse seconds.
+It retains the existing conserving ion-electron collision matrix and exposes
+the transport derivative with respect to that coefficient. Its
+[row-scaling and implicit derivative](../theory/derivations/multispecies-electric-drift.md)
+retain the same incompressible approximation. Electric velocity-space
+transport and tangential magnetic drift remain absent.
 
 Its synthetic coefficient reference is
 [SFINCS](https://github.com/landreman/sfincs) at
