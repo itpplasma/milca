@@ -204,6 +204,8 @@ cut, for a reproducible before/after figure. The units are inverse metres.
 ## Open physics gates
 
 Low-collisionality resolution ladders remain required. Full electric velocity-space transport,
-tangential magnetic drift, energy-coupled collisions at finite electric field,
-radial orbit coupling, self-consistent potential and physical wall losses are
+tangential magnetic drift, radial orbit coupling, self-consistent potential and physical wall losses are
 separate extensions. Numerical certification of this new solve is unavailable.
+
+[The multispecies surface solver](multispecies-electric-drift.md) adds
+energy-coupled collisions in the same incompressible electric approximation.

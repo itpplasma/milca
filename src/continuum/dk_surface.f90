@@ -8,7 +8,7 @@
 !!
 !! Unknowns h(i, l, m): surface point i, Legendre degree l, speed-species
 !! index m = (a - 1) n_x + k. After the row scaling the operator is
-!! S x R - I x C_l (S streaming and mirror force per unit speed, R the
+!! S x R + E x W - I x C_l (S streaming and mirror force per unit speed, R the
 !! streaming coefficient of each node, C_l the collision rows of degree l);
 !! S acts on all m at once as two dense surface matrices per degree.
 !! FGMRES is right-preconditioned by one dk_mono factorisation per eigenmode
@@ -17,11 +17,13 @@
 !! surface problems; the modes are factorised and solved in parallel.
 module milca_dk_surface
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use fortnum_krylov, only: real_fgmres_operator, KRYLOV_OK
     use milca_dk_mono, only: mono_factor_t, mono_surface_point, mono_factor_rates, &
         mono_solve, mono_coupling, MONO_OK
     use milca_dk_ntv, only: ntv_collision_rows, NTV_OK
     use milca_dk_collop, only: collop_species_t, collop_grid_t
+    use milca_dk_mono_leaves, only: dk_surface_electric_scale
     implicit none
     private
     public :: surface_transport
@@ -61,9 +63,11 @@ module milca_dk_surface
 contains
 
     !> Arguments and d as in ntv_surface_coefficients; iterations the FGMRES
-    !> iterations summed over the 3 n_s drives.
+    !> iterations summed over the 3 n_s drives and requested tangents.
+    !> electric_rate = Phi'_t G/(G+iota I) in 1/s selects incompressible
+    !> electric drift. d_drate holds field, species and collision inputs fixed.
     subroutine surface_transport(b, nper, q, i_over_g, kappa, species, lnlambda, grid, &
-            model, n_leg, d, iterations, status)
+            model, n_leg, d, iterations, status, electric_rate, d_drate)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa
         integer, intent(in) :: nper, n_leg
         type(collop_species_t), intent(in) :: species(:)
@@ -72,19 +76,33 @@ contains
         integer, intent(in) :: model
         real(dp), intent(out) :: d(:, :, :, :)
         integer, intent(out) :: iterations, status
+        real(dp), intent(in), optional :: electric_rate
+        real(dp), intent(out), optional :: d_drate(:, :, :, :)
         type(mono_factor_t) :: geo
         type(mono_factor_t), allocatable :: modes(:)
         real(dp), allocatable :: rows(:, :, :, :, :), ratio(:, :), d3(:), d4(:), d6(:), &
             vt(:), tz(:), coll(:, :, :), lo(:, :, :), up(:, :, :), v(:, :), vu(:, :), &
-            rinv(:), rhs(:, :, :), x(:, :, :), radial(:), measure(:), bv(:)
-        real(dp) :: j0
+            rinv(:), rhs(:, :, :), x(:, :, :), radial(:), measure(:), bv(:), &
+            electric_unit(:), electric_rows(:), dx(:, :, :)
+        real(dp) :: j0, rate
         integer :: n, lmax, ns, nx, nm, a, sb, jf, k, l, st, its
 
         status = SURFACE_BAD_INPUT
         iterations = 0
         ns = size(species)
         if (any(shape(d) /= [ns, ns, 3, 3]) .or. mod(n_leg, 2) /= 0) return
-        call mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, geo, st)
+        rate = 0
+        if (present(electric_rate)) rate = electric_rate
+        if (.not. ieee_is_finite(rate)) return
+        if (present(d_drate)) then
+            if (any(shape(d_drate) /= shape(d))) return
+            d_drate = 0
+        end if
+        if (present(electric_rate) .or. present(d_drate)) then
+            call mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, geo, st, 0.0_dp)
+        else
+            call mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, geo, st)
+        end if
         if (st /= MONO_OK) return
         call ntv_collision_rows(species, lnlambda, grid, model, n_leg, rows, ratio, d3, &
             d4, d6, vt, tz, st)
@@ -93,6 +111,12 @@ contains
         lmax = geo%lmax
         nx = size(ratio, 1)
         nm = nx*ns
+        allocate (electric_unit(nm), electric_rows(nm))
+        do a = 1, ns
+            call dk_surface_electric_scale(1.0_dp, vt(a), grid%x(2:), ratio(:, a), &
+                                           electric_unit((a - 1)*nx + 1:a*nx))
+        end do
+        electric_rows = rate*electric_unit
         ! Collision rows over (node, species), node fastest.
         allocate (coll(nm, nm, 0:lmax), lo(n, n, 0:lmax), up(n, n, 0:lmax))
         do l = 0, lmax
@@ -138,24 +162,41 @@ contains
                     return
                 end if
                 do a = 1, ns
-                    d(a, sb, :, jf) = 0
-                    do k = 1, nx
-                        associate (m => (a - 1)*nx + k)
-                            ! flux: 2 pi/n sum measure S (8/3 h_0 + 4/15 h_2);
-                            ! flow: 2 pi/n sum measure b^2 (2/3) h_1; over 2 J_0.
-                            d(a, sb, 1, jf) = d(a, sb, 1, jf) + d4(k)*flux(x(:, :, m))
-                            d(a, sb, 2, jf) = d(a, sb, 2, jf) + d6(k)*flux(x(:, :, m))
-                            d(a, sb, 3, jf) = d(a, sb, 3, jf) + d3(k) &
-                                *sum(measure*bv**2*2/3.0_dp*x(:, 1, m))
-                        end associate
-                    end do
-                    d(a, sb, 1:2, jf) = tz(a)/(sqrt(pi)*2*j0)*d(a, sb, 1:2, jf)
-                    d(a, sb, 3, jf) = vt(a)/(sqrt(pi)*2*j0)*d(a, sb, 3, jf)
+                    d(a, sb, :, jf) = moments(x, a)
+                end do
+                if (.not. present(d_drate)) cycle
+                do k = 1, nm
+                    rhs(:, :, k) = -electric_unit(k)*matmul(geo%exb, x(:, :, k))
+                end do
+                call solve(rhs, dx, its, st)
+                iterations = iterations + its
+                if (st /= SURFACE_OK) then
+                    status = st
+                    return
+                end if
+                do a = 1, ns
+                    d_drate(a, sb, :, jf) = moments(dx, a)
                 end do
             end do
         end do
         status = SURFACE_OK
     contains
+        function moments(h, species_index) result(value)
+            real(dp), intent(in) :: h(:, 0:, :)
+            integer, intent(in) :: species_index
+            real(dp) :: value(3)
+            integer :: k, m
+            value = 0
+            do k = 1, nx
+                m = (species_index - 1)*nx + k
+                value(1) = value(1) + d4(k)*flux(h(:, :, m))
+                value(2) = value(2) + d6(k)*flux(h(:, :, m))
+                value(3) = value(3) + d3(k)*sum(measure*bv**2*2/3.0_dp*h(:, 1, m))
+            end do
+            value(1:2) = tz(species_index)/(sqrt(pi)*2*j0)*value(1:2)
+            value(3) = vt(species_index)/(sqrt(pi)*2*j0)*value(3)
+        end function moments
+
         !> sum measure S (8/3 h_0 + 4/15 h_2), S = b_drift/q = -3 b drift0/(2 kappa q).
         real(dp) function flux(h)
             real(dp), intent(in) :: h(:, 0:)
@@ -166,7 +207,8 @@ contains
         !> V, V^-1 and one dk_mono factorisation per eigenmode of R^-1 C_4.
         subroutine modal_factors(status)
             integer, intent(out) :: status
-            real(dp), allocatable :: w(:, :), wr(:), wi(:), work(:), vl(:, :), rate(:, :)
+            real(dp), allocatable :: w(:, :), wr(:), wi(:), work(:), vl(:, :), rate(:, :), &
+                mode_electric(:)
             integer, allocatable :: piv(:), mode_status(:)
             integer :: m, info
             status = SURFACE_SINGULAR
@@ -196,10 +238,13 @@ contains
                     rate(l, m) = -w(m, m)
                 end do
             end do
+            w = matmul(vu, spread(rinv*electric_rows, 2, nm)*v)
+            mode_electric = [(w(m, m), m=1, nm)]
             allocate (modes(nm))
             !$omp parallel do schedule(dynamic, 1) default(shared) private(m)
             do m = 1, nm
                 modes(m) = geo
+                modes(m)%omega_e = mode_electric(m)
                 call mono_factor_rates(modes(m), rate(:, m), mode_status(m))
             end do
             !$omp end parallel do
@@ -247,16 +292,26 @@ contains
             allocate (y(n, 0:lmax, nm))
             !$omp parallel do schedule(static) default(shared) private(l, m)
             do l = 0, lmax
-                y(:, l, :) = 0
-                if (l > 0) call dgemm('N', 'N', n, nm, n, 1.0_dp, lo(:, :, l), n, &
-                    h(:, l, :), n, 1.0_dp, y(:, l, :), n)
-                if (l < lmax) call dgemm('N', 'N', n, nm, n, 1.0_dp, up(:, :, l), n, &
-                    h(:, l + 2, :), n, 1.0_dp, y(:, l, :), n)
-                do m = 1, nm
-                    y(:, l, m) = ratio_flat(m)*y(:, l, m)
-                end do
-                call dgemm('N', 'T', n, nm, nm, -1.0_dp, h(:, l + 1, :), n, coll(:, :, l), &
-                    nm, 1.0_dp, y(:, l, :), n)
+                block
+                    real(dp) :: electric(n, nm)
+                    y(:, l, :) = 0
+                    if (l > 0) call dgemm('N', 'N', n, nm, n, 1.0_dp, lo(:, :, l), n, &
+                        h(:, l, :), n, 1.0_dp, y(:, l, :), n)
+                    if (l < lmax) call dgemm('N', 'N', n, nm, n, 1.0_dp, up(:, :, l), n, &
+                        h(:, l + 2, :), n, 1.0_dp, y(:, l, :), n)
+                    do m = 1, nm
+                        y(:, l, m) = ratio_flat(m)*y(:, l, m)
+                    end do
+                    if (allocated(geo%exb)) then
+                        call dgemm('N', 'N', n, nm, n, 1.0_dp, geo%exb, n, &
+                                   h(:, l + 1, :), n, 0.0_dp, electric, n)
+                        do m = 1, nm
+                            y(:, l, m) = y(:, l, m) + electric_rows(m)*electric(:, m)
+                        end do
+                    end if
+                    call dgemm('N', 'T', n, nm, nm, -1.0_dp, h(:, l + 1, :), n, coll(:, :, l), &
+                        nm, 1.0_dp, y(:, l, :), n)
+                end block
             end do
             !$omp end parallel do
             do m = 1, nm
