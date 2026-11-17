@@ -19,15 +19,18 @@ module milca_dk_surface
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use fortnum_krylov, only: real_fgmres_operator, KRYLOV_OK
+    use fortnum_quadrature, only: gauss_legendre
+    use fortnum_special_legendre, only: legendre_p, legendre_p_derivative
     use milca_dk_mono, only: mono_factor_t, mono_surface_point, mono_factor_rates, &
-        mono_solve, mono_coupling, MONO_OK
+        mono_solve, mono_coupling, mono_surface_operators, MONO_OK
     use milca_dk_ntv, only: ntv_collision_rows, NTV_OK
-    use milca_dk_collop, only: collop_species_t, collop_grid_t
+    use milca_dk_collop, only: collop_species_t, collop_grid_t, collop_moments
     use milca_dk_mono_leaves, only: dk_surface_electric_scale, dk_surface_force_point, &
         dk_surface_flux_point, dk_surface_torque_point
     implicit none
     private
     public :: surface_transport, surface_fluxes
+    public :: surface_full_exb_t, surface_full_exb_setup, surface_full_exb_apply
     integer, parameter, public :: SURFACE_OK = 0, SURFACE_BAD_INPUT = 1, &
         SURFACE_SINGULAR = 2, SURFACE_NO_CONVERGENCE = 3
 
@@ -35,6 +38,12 @@ module milca_dk_surface
     ! Relative residual of the FGMRES solves.
     real(dp), parameter :: tolerance = 1e-10_dp
     integer, parameter :: restart = 100, max_iterations = 5000
+
+    type :: surface_full_exb_t
+        private
+        real(dp), allocatable :: d_perp(:, :), measure(:), metric(:), &
+            mass(:, :), speed_derivative(:, :), speed_pitch(:, :), pitch_derivative(:, :)
+    end type
 
     interface
         subroutine dgemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
@@ -62,6 +71,95 @@ module milca_dk_surface
     end interface
 
 contains
+
+    !> Weak full electrostatic drift on a fixed surface with f = exp(-x^2) h.
+    !! The velocity coordinate x is in thermal-speed units and the pitch
+    !! coordinate is v_parallel/v. Integrating the conservative phase-volume
+    !! form by parts makes the density moment vanish in the discrete action.
+    subroutine surface_full_exb_setup(b, nper, q, i_over_g, grid, n_leg, operator, status)
+        real(dp), intent(in) :: b(:, :), q, i_over_g
+        integer, intent(in) :: nper, n_leg
+        type(collop_grid_t), intent(in) :: grid
+        type(surface_full_exb_t), intent(out) :: operator
+        integer, intent(out) :: status
+        real(dp), allocatable :: parallel(:, :), b_parallel(:), b_perp(:), flat_b(:), &
+            unused_mass(:, :), unused_moment(:), pitch(:), weight(:), p(:, :), dp_dxi(:, :)
+        integer :: l, count
+
+        status = SURFACE_BAD_INPUT
+        if (grid%n < 3 .or. n_leg < 3) return
+        if (.not. all(ieee_is_finite(b)) .or. .not. all(ieee_is_finite([q, i_over_g]))) return
+        call mono_surface_operators(b, nper, q, i_over_g, parallel, b_parallel, b_perp, &
+            status, operator%d_perp)
+        if (status /= MONO_OK) then
+            status = SURFACE_BAD_INPUT
+            return
+        end if
+        flat_b = reshape(b, [size(b)])
+        operator%measure = 1/flat_b**2
+        operator%metric = operator%measure*b_perp/(2*flat_b)
+        allocate (operator%mass(grid%n, grid%n), operator%speed_derivative(grid%n, grid%n), &
+            unused_mass(grid%n, grid%n), unused_moment(grid%n))
+        call collop_moments(grid, 2, 2, operator%mass, unused_moment)
+        call collop_moments(grid, 3, 2, unused_mass, unused_moment, operator%speed_derivative)
+        count = n_leg + 1
+        allocate (pitch(count), weight(count), p(count, 0:n_leg-1), dp_dxi(count, 0:n_leg-1))
+        call gauss_legendre(count, pitch, weight)
+        do l = 0, n_leg-1
+            p(:, l) = legendre_p(l, 0, pitch)
+            dp_dxi(:, l) = legendre_p_derivative(l, 0, pitch)
+        end do
+        operator%speed_pitch = matmul(transpose(p), spread(weight*(1+pitch**2), 2, n_leg)*p)
+        operator%pitch_derivative = matmul(transpose(dp_dxi), &
+            spread(weight*pitch*(1-pitch**2), 2, n_leg)*p)
+        status = SURFACE_OK
+    end subroutine surface_full_exb_setup
+
+    !> Full electric contribution at unit angular rate to the Galerkin
+    !! residual. h(point, degree, speed) and the output include x=0. The
+    !! output carries the unnormalised phase-volume weight on the test basis.
+    subroutine surface_full_exb_apply(operator, h, action, status)
+        type(surface_full_exb_t), intent(in) :: operator
+        real(dp), intent(in) :: h(:, 0:, :)
+        real(dp), intent(out) :: action(:, 0:, :)
+        integer, intent(out) :: status
+        integer :: lmax, n, nx
+
+        status = SURFACE_BAD_INPUT
+        if (.not. allocated(operator%mass)) return
+        n = size(operator%measure)
+        nx = size(operator%mass, 1)
+        lmax = size(operator%speed_pitch, 1)-1
+        if (any(shape(h) /= [n, lmax+1, nx]) .or. any(shape(h) /= shape(action))) return
+        call full_exb_action(operator, h, action)
+        status = SURFACE_OK
+    end subroutine surface_full_exb_apply
+
+    subroutine full_exb_action(operator, h, action)
+        type(surface_full_exb_t), intent(in) :: operator
+        real(dp), intent(in) :: h(:, 0:, :)
+        real(dp), intent(out) :: action(:, 0:, :)
+        real(dp), allocatable :: mass(:, :, :), derivative(:, :, :)
+        integer :: l, j, lmax, n, nx
+        n = size(h, 1)
+        lmax = ubound(h, 2)
+        nx = size(h, 3)
+        allocate (mass(n, 0:lmax, nx), derivative(n, 0:lmax, nx))
+        do l = 0, lmax
+            mass(:, l, :) = matmul(h(:, l, :), transpose(operator%mass))
+            derivative(:, l, :) = matmul(h(:, l, :), transpose(operator%speed_derivative))
+        end do
+        do l = 0, lmax
+            action(:, l, :) = -2.0_dp/(2*l+1)*matmul(transpose(operator%d_perp), &
+                spread(operator%measure, 2, nx)*mass(:, l, :))
+            do j = l-2, l+2, 2
+                if (j < 0 .or. j > lmax) cycle
+                action(:, l, :) = action(:, l, :) - spread(operator%metric, 2, nx) &
+                    *(operator%speed_pitch(l+1, j+1)*derivative(:, j, :) &
+                    +operator%pitch_derivative(l+1, j+1)*mass(:, j, :))
+            end do
+        end do
+    end subroutine full_exb_action
 
     !> SI moments of a surface_transport matrix. Logarithmic gradients and
     !> phi_prime are derivatives in toroidal flux psi_t (Wb/radian), and
@@ -137,9 +235,11 @@ contains
     !> Arguments and d as in ntv_surface_coefficients; iterations the FGMRES
     !> iterations summed over the 3 n_s drives and requested tangents.
     !> electric_rate = Phi'_t G/(G+iota I) in 1/s selects incompressible
-    !> electric drift. d_drate holds field, species and collision inputs fixed.
+    !> electric drift. full_local_electric includes electric speed and pitch
+    !> advection with the same per-speed distribution constraint. d_drate
+    !> holds field, species and collision inputs fixed.
     subroutine surface_transport(b, nper, q, i_over_g, kappa, species, lnlambda, grid, &
-            model, n_leg, d, iterations, status, electric_rate, d_drate)
+            model, n_leg, d, iterations, status, electric_rate, d_drate, full_local_electric)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa
         integer, intent(in) :: nper, n_leg
         type(collop_species_t), intent(in) :: species(:)
@@ -150,20 +250,25 @@ contains
         integer, intent(out) :: iterations, status
         real(dp), intent(in), optional :: electric_rate
         real(dp), intent(out), optional :: d_drate(:, :, :, :)
+        logical, intent(in), optional :: full_local_electric
         type(mono_factor_t) :: geo
         type(mono_factor_t), allocatable :: modes(:)
+        type(surface_full_exb_t) :: full_exb
         real(dp), allocatable :: rows(:, :, :, :, :), ratio(:, :), d3(:), d4(:), d6(:), &
             vt(:), tz(:), coll(:, :, :), lo(:, :, :), up(:, :, :), v(:, :), vu(:, :), &
             rinv(:), rhs(:, :, :), x(:, :, :), radial(:), measure(:), bv(:), &
             electric_unit(:), electric_rows(:), dx(:, :, :)
         real(dp) :: j0, rate
         integer :: n, lmax, ns, nx, nm, a, sb, jf, k, l, st, its
+        logical :: full
 
         status = SURFACE_BAD_INPUT
         iterations = 0
         ns = size(species)
         if (any(shape(d) /= [ns, ns, 3, 3]) .or. mod(n_leg, 2) /= 0) return
         rate = 0
+        full = .false.
+        if (present(full_local_electric)) full = full_local_electric
         if (present(electric_rate)) rate = electric_rate
         if (.not. ieee_is_finite(rate)) return
         if (present(d_drate)) then
@@ -176,6 +281,10 @@ contains
             call mono_surface_point(b, nper, q, i_over_g, kappa, n_leg, geo, st)
         end if
         if (st /= MONO_OK) return
+        if (full .and. (rate /= 0 .or. present(d_drate))) then
+            call surface_full_exb_setup(b, nper, q, i_over_g, grid, n_leg, full_exb, st)
+            if (st /= SURFACE_OK) return
+        end if
         call ntv_collision_rows(species, lnlambda, grid, model, n_leg, rows, ratio, d3, &
             d4, d6, vt, tz, st)
         if (st /= NTV_OK) return
@@ -237,9 +346,14 @@ contains
                     d(a, sb, :, jf) = moments(x, a)
                 end do
                 if (.not. present(d_drate)) cycle
-                do k = 1, nm
-                    rhs(:, :, k) = -electric_unit(k)*matmul(geo%exb, x(:, :, k))
-                end do
+                if (full) then
+                    call full_electric_action(x, rhs)
+                    rhs = -rhs
+                else
+                    do k = 1, nm
+                        rhs(:, :, k) = -electric_unit(k)*matmul(geo%exb, x(:, :, k))
+                    end do
+                end if
                 call solve(rhs, dx, its, st)
                 iterations = iterations + its
                 if (st /= SURFACE_OK) then
@@ -279,13 +393,13 @@ contains
         !> V, V^-1 and one dk_mono factorisation per eigenmode of R^-1 C_4.
         subroutine modal_factors(status)
             integer, intent(out) :: status
-            real(dp), allocatable :: w(:, :), wr(:), wi(:), work(:), vl(:, :), rate(:, :), &
+            real(dp), allocatable :: w(:, :), wr(:), wi(:), work(:), vl(:, :), collision_rate(:, :), &
                 mode_electric(:)
             integer, allocatable :: piv(:), mode_status(:)
-            integer :: m, info
+            integer :: m, info, a, k, first, last
             status = SURFACE_SINGULAR
             allocate (w(nm, nm), wr(nm), wi(nm), work(8*nm), vl(1, 1), v(nm, nm), &
-                vu(nm, nm), piv(nm), rate(0:lmax, nm), mode_status(nm))
+                vu(nm, nm), piv(nm), collision_rate(0:lmax, nm), mode_status(nm))
             ! Eigenvectors of degree 4: fewest FGMRES iterations among degrees 1
             ! to 9 on the DIII-D helical core (2402 for degree 1, 857 for 4).
             do m = 1, nm
@@ -307,17 +421,30 @@ contains
                 end do
                 w = matmul(vu, matmul(w, v))
                 do m = 1, nm
-                    rate(l, m) = -w(m, m)
+                    collision_rate(l, m) = -w(m, m)
                 end do
             end do
-            w = matmul(vu, spread(rinv*electric_rows, 2, nm)*v)
+            if (full .and. rate /= 0) then
+                w = 0
+                do a = 1, ns
+                    first = (a-1)*nx+1
+                    last = a*nx
+                    do k = 1, nx
+                        w(first+k-1, first:last) = rate*full_exb%mass(k+1, 2:)/(vt(a)*d3(k))
+                    end do
+                end do
+                w = matmul(vu, matmul(w, v))
+            else
+                w = matmul(vu, spread(rinv*electric_rows, 2, nm)*v)
+            end if
             mode_electric = [(w(m, m), m=1, nm)]
             allocate (modes(nm))
             !$omp parallel do schedule(dynamic, 1) default(shared) private(m)
             do m = 1, nm
                 modes(m) = geo
+                if (full .and. rate /= 0) modes(m)%exb = full_exb%d_perp
                 modes(m)%omega_e = mode_electric(m)
-                call mono_factor_rates(modes(m), rate(:, m), mode_status(m))
+                call mono_factor_rates(modes(m), collision_rate(:, m), mode_status(m))
             end do
             !$omp end parallel do
             if (any(mode_status /= MONO_OK)) return
@@ -357,7 +484,7 @@ contains
         subroutine apply(input, output)
             real(dp), intent(in) :: input(:)
             real(dp), intent(out) :: output(:)
-            real(dp), allocatable :: h(:, :, :), y(:, :, :)
+            real(dp), allocatable :: h(:, :, :), y(:, :, :), full_electric_rows(:, :, :)
             integer :: l, m, nh
             nh = n*(lmax + 1)*nm
             h = reshape(input(1:nh), [n, lmax + 1, nm])
@@ -374,7 +501,7 @@ contains
                     do m = 1, nm
                         y(:, l, m) = ratio_flat(m)*y(:, l, m)
                     end do
-                    if (allocated(geo%exb)) then
+                    if (allocated(geo%exb) .and. .not. full) then
                         call dgemm('N', 'N', n, nm, n, 1.0_dp, geo%exb, n, &
                                    h(:, l + 1, :), n, 0.0_dp, electric, n)
                         do m = 1, nm
@@ -386,12 +513,39 @@ contains
                 end block
             end do
             !$omp end parallel do
+            if (full .and. rate /= 0) then
+                allocate (full_electric_rows(n, 0:lmax, nm))
+                call full_electric_action(h, full_electric_rows)
+                y = y + rate*full_electric_rows
+            end if
             do m = 1, nm
                 y(:, 0, m) = y(:, 0, m) + input(nh + m)
                 output(nh + m) = sum(geo%p%weight*h(:, 1, m))
             end do
             output(1:nh) = reshape(y, [nh])
         end subroutine apply
+
+        !> Map the electric weak form to the transport solver's scaled rows.
+        !! Its basis fixes the coefficient at x=0 to zero.
+        subroutine full_electric_action(h, action)
+            real(dp), intent(in) :: h(:, 0:, :)
+            real(dp), intent(out) :: action(:, 0:, :)
+            real(dp), allocatable :: samples(:, :, :), weak(:, :, :)
+            integer :: a, k, l, m
+            allocate (samples(n, 0:lmax, nx+1), weak(n, 0:lmax, nx+1))
+            samples(:, :, 1) = 0
+            do a = 1, ns
+                samples(:, :, 2:) = h(:, :, (a-1)*nx+1:a*nx)
+                call full_exb_action(full_exb, samples, weak)
+                do k = 1, nx
+                    m = (a-1)*nx+k
+                    do l = 0, lmax
+                        action(:, l, m) = weak(:, l, k+1)*ratio(k, a)*(2*l+1) &
+                            /(2*full_exb%measure*vt(a)*d3(k))
+                    end do
+                end do
+            end do
+        end subroutine full_electric_action
 
         pure real(dp) function ratio_flat(m)
             integer, intent(in) :: m
