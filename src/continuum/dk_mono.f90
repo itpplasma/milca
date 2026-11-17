@@ -70,10 +70,12 @@ module milca_dk_mono
     !> and the LU of the bordered l = 0 system.
     type :: mono_factor_t
         integer :: n = 0, lmax = 0
+        integer, private :: ntheta = 0, nzeta = 0
         real(dp) :: nu = 0
         real(dp) :: omega_e = 0
         real(dp), allocatable :: d(:, :), s_lu(:, :, :), y(:, :, :), border_lu(:, :)
         real(dp), allocatable :: exb(:, :)
+        real(dp), allocatable, private :: dtheta(:, :), dzeta(:, :)
         integer, allocatable :: s_piv(:, :), border_piv(:)
         type(mono_point_t) :: p
     end type
@@ -254,36 +256,36 @@ contains
         integer, intent(out) :: status
         integer :: n, l, j, info
         integer, allocatable :: iwork(:)
-        real(dp), allocatable :: s(:, :), up(:, :), work(:)
+        real(dp), allocatable :: s(:, :), work(:)
         real(dp) :: anorm, rcond
 
         n = f%n
         ! S_lmax = rate(lmax), S_l = rate(l) - Up_l Y_{l+1}.
-        allocate (f%s_lu(n, n, f%lmax), f%s_piv(n, f%lmax), f%y(n, n, f%lmax), &
-            s(n, n), up(n, n))
+        allocate (f%s_lu(n, n, f%lmax), f%s_piv(n, f%lmax), f%y(n, n, f%lmax))
         status = MONO_SINGULAR
         do l = f%lmax, 1, -1
-            s = 0
-            if (allocated(f%exb)) s = f%omega_e*f%exb
-            do j = 1, n
-                s(j, j) = s(j, j) + rate(l)
-            end do
-            if (l < f%lmax) then
-                up = upper(f%d, f%p, l)
-                s = s - matmul(up, f%y(:, :, l + 1))
-            end if
-            call dgetrf(n, n, s, n, f%s_piv(:, l), info)
-            if (info /= 0) return
-            f%s_lu(:, :, l) = s
-            f%y(:, :, l) = lower(f%d, f%p, l)
-            call dgetrs('N', n, n, s, n, f%s_piv(:, l), f%y(:, :, l), n, info)
+            associate (schur => f%s_lu(:, :, l))
+                schur = 0
+                if (allocated(f%exb)) schur = f%omega_e*f%exb
+                do j = 1, n
+                    schur(j, j) = schur(j, j) + rate(l)
+                end do
+                if (l < f%lmax) call subtract_upper(f, l, f%y(:, :, l + 1), schur)
+                call dgetrf(n, n, schur, n, f%s_piv(:, l), info)
+                if (info /= 0) return
+                f%y(:, :, l) = lower(f%d, f%p, l)
+                call dgetrs('N', n, n, schur, n, f%s_piv(:, l), f%y(:, :, l), n, info)
+                if (info /= 0) return
+            end associate
         end do
 
         ! l = 0: S_0 = rate(0) - Up_0 Y_1, bordered by the density source and
         ! <w g_0>.
-        allocate (f%border_lu(n + 1, n + 1), f%border_piv(n + 1))
+        allocate (f%border_lu(n + 1, n + 1), f%border_piv(n + 1), s(n, n))
         f%border_lu = 0
-        f%border_lu(1:n, 1:n) = -matmul(upper(f%d, f%p, 0), f%y(:, :, 1))
+        s = 0
+        call subtract_upper(f, 0, f%y(:, :, 1), s)
+        f%border_lu(1:n, 1:n) = s
         if (allocated(f%exb)) f%border_lu(1:n, 1:n) = &
             f%border_lu(1:n, 1:n) + f%omega_e*f%exb
         do j = 1, n
@@ -394,6 +396,12 @@ contains
         n = size(b)
         f%n = n
         f%lmax = n_leg - 1
+        f%ntheta = size(b, 1)
+        f%nzeta = size(b, 2)
+        if (f%nzeta > 1) then
+            f%dtheta = f%d(:f%ntheta, :f%ntheta)
+            f%dzeta = f%d(1:n:f%ntheta, 1:n:f%ntheta)
+        end if
         allocate (weight(n), scratch(5, n))
         bv = reshape(b, [n])
         call allocate_point(f%p, n)
@@ -507,12 +515,27 @@ contains
     subroutine subtract_upper(f, l, z, r)
         type(mono_factor_t), intent(in) :: f
         integer, intent(in) :: l
-        real(dp), intent(in) :: z(:, :)
+        real(dp), contiguous, intent(in) :: z(:, :)
         real(dp), intent(inout) :: r(:, :)
-        real(dp) :: dz(size(z, 1), size(z, 2))
-        integer :: j
-        call dgemm('N', 'N', f%n, size(z, 2), f%n, 1.0_dp, f%d, f%n, z, f%n, 0.0_dp, dz, &
-            f%n)
+        real(dp), allocatable :: dz(:, :)
+        integer :: j, nt, nz, nr
+        nr = size(z, 2)
+        allocate (dz(f%n, nr))
+        if (allocated(f%dtheta)) then
+            ! D is the tensor sum of two angular derivatives. Reuse the
+            ! contiguous poloidal blocks for all right-hand sides.
+            nt = f%ntheta
+            nz = f%nzeta
+            call dgemm('N', 'N', nt, nz*nr, nt, 1.0_dp, f%dtheta, nt, z, nt, &
+                0.0_dp, dz, nt)
+            do j = 1, nr
+                call dgemm('N', 'T', nt, nz, nz, 1.0_dp, z(:, j), nt, f%dzeta, nz, &
+                    1.0_dp, dz(:, j), nt)
+            end do
+        else
+            call dgemm('N', 'N', f%n, nr, f%n, 1.0_dp, f%d, f%n, z, f%n, &
+                0.0_dp, dz, f%n)
+        end if
         do j = 1, size(z, 2)
             r(:, j) = r(:, j) - f%p%stream*(l + 1)/real(2*l + 3, dp)*dz(:, j) &
                 + f%p%mirror*(l + 1)*(l + 2)/real(2*l + 3, dp)*z(:, j)
@@ -591,7 +614,7 @@ contains
         real(dp) :: m(size(d, 1), size(d, 1))
         integer :: i
         do i = 1, size(d, 1)
-            m(i, :) = p%stream(i)*(l + 1)/real(2*l + 3, dp)*d(i, :)
+            m(:, i) = (p%stream*(l + 1)/real(2*l + 3, dp))*d(:, i)
             m(i, i) = m(i, i) - p%mirror(i)*(l + 1)*(l + 2)/real(2*l + 3, dp)
         end do
     end function upper
@@ -605,7 +628,7 @@ contains
         real(dp) :: m(size(d, 1), size(d, 1))
         integer :: i
         do i = 1, size(d, 1)
-            m(i, :) = p%stream(i)*l/real(2*l - 1, dp)*d(i, :)
+            m(:, i) = (p%stream*l/real(2*l - 1, dp))*d(:, i)
             m(i, i) = m(i, i) + p%mirror(i)*(l - 1)*l/real(2*l - 1, dp)
         end do
     end function lower
