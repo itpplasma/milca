@@ -148,6 +148,28 @@ uniqueness from convergence. Check the root solver on an independently solved
 reduced flux model and compare all bracketed kinetic roots with matched
 SFINCS flux curves, with declared numerical and reference errors.
 
+The monoenergetic surface solver accepts the incompressible electric drift,
+with an implicit derivative with respect to its signed electric parameter.
+The [derivation](../theory/derivations/monoenergetic-electric-drift.md) defines
+the approximation, measure, omissions and verification gates. This does not
+add finite-electric-field transport to the energy-coupled multispecies solver.
+
+Its synthetic coefficient reference is
+[SFINCS](https://github.com/landreman/sfincs) at
+8df5453472e982df0f6ae005243ce38d57a83711 (BSD 2-Clause), using the
+incompressible trajectory model of
+[Landreman et al. (2014)](https://arxiv.org/html/1312.6058v2).
+The retained `test/data/sfincs_mono_exb.txt` contains its native matrix for
+`RHSMode=3`, `collisionOperator=1`, `nuPrime=0.1`, `EStar=+/-0.05`,
+`Ntheta=31`, `Nzeta=17`, `Nxi=64`, spectral angular derivatives and
+`solverTolerance=1e-10`. Both electric velocity-space switches, `includePhi1`
+and `magneticDriftScheme` are off. The field is
+\(b=1-0.12\cos\theta-0.04\cos(\theta-3\zeta)+0.02\sin(2\theta-3\zeta)\),
+with \(B_0=1\,\mathrm T\), \(G=6\,\mathrm{T\,m}\),
+\(I=0.3\,\mathrm{T\,m}\) and \(\iota=1.25\).
+The [normalization and results](../theory/derivations/monoenergetic-electric-drift.md#independent-coefficient-reference)
+keep this reduced-model comparison separate from physical torque validation.
+
 Status of the first K1 step (`ntv_surface_coefficients`, test
 `ntv_surface_*`): the transport matrix of one 3D surface with the full
 linearised operator at E_r = 0, without tangential drift. This is the
