@@ -43,6 +43,7 @@ program gen_dk_mono
     call writer%emit('dk_surface_electric_scale', &
         ['electric_rate', 'vt           ', 'x            ', 'row_ratio    '], &
         ['row_rate'], [row_ratio*electric_rate/(vt*x)], ad=.true.)
+    call local_characteristics()
     call surface_observables()
     ! Sugama and Nishimura, Phys. Plasmas 9, 4637 (2002), Eq. (43): viscosity
     ! and radial-flux coefficients M, N, L of monoenergetic particles (mass m,
@@ -69,6 +70,32 @@ program gen_dk_mono
     call writer%line('end module milca_dk_mono_leaves')
     call writer%close()
 contains
+    subroutine local_characteristics()
+        type(expr_t) :: field, b_par, b_perp, pitch, speed, k, er, q, ig
+        type(expr_t) :: stream, advection, xdot, xidot, bdot, moment, moment_rate, jacobian, divergence
+
+        field = sym('b'); b_par = sym('b_parallel'); b_perp = sym('b_perp')
+        pitch = sym('xi'); speed = sym('x'); k = sym('kappa')
+        er = sym('electric'); q = sym('q'); ig = sym('i_over_g')
+        stream = speed*pitch*k*field
+        advection = er*b_perp/(2*field)
+        xdot = advection*speed*(1+pitch**2)
+        xidot = -speed*k*(1-pitch**2)*b_par/2+advection*pitch*(1-pitch**2)
+        bdot = stream*b_par+er*b_perp
+        moment = speed**2*(1-pitch**2)/field
+        jacobian = speed**2/field**2
+        divergence = diff(jacobian*stream, field)*b_par+diff(jacobian*er, field)*b_perp &
+            +diff(jacobian*xdot, speed)+diff(jacobian*xidot, pitch)
+        moment_rate = diff(moment, speed)*xdot+diff(moment, pitch)*xidot+diff(moment, field)*bdot
+        call exact_zero(moment_rate)
+        call exact_zero(divergence)
+        call writer%emit('dk_local_characteristic', &
+            ['b         ', 'b_parallel', 'b_perp    ', 'xi        ', 'x         ', &
+             'kappa     ', 'electric  ', 'q         ', 'i_over_g  '], &
+            ['theta_dot  ', 'zeta_dot   ', 'x_dot      ', 'xi_dot     ', 'maxwell_dot'], &
+            [stream+er, q*stream-ig*er, xdot, xidot, -2*speed*xdot], ad=.true.)
+    end subroutine local_characteristics
+
     subroutine surface_observables()
         type(expr_t) :: q, ig, density, temperature, elementary, z, phi_prime, &
             e_parallel, ln_n_prime, ln_t_prime, f1, f2, f3, scale, &

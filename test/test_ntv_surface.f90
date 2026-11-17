@@ -70,7 +70,8 @@ program test_ntv_surface
         ok = monoenergetic(0.0_dp)
         ok = monoenergetic(4000.0_dp) .and. ok
         ok = monoenergetic(-4000.0_dp) .and. ok
-    case ('electric_tangent'); ok = electric_tangent()
+    case ('electric_tangent'); ok = electric_tangent(.false.)
+    case ('full_electric'); ok = electric_tangent(.true.)
     case ('electric_onsager')
         ok = electric_onsager()
         ok = electric_onsager(.true.) .and. ok
@@ -236,7 +237,8 @@ contains
             .and. close ('d33 against mono_coefficients_3d', d(1, 1, 3, 3), want(3), 1e-9_dp)
     end function monoenergetic
 
-    logical function electric_tangent() result(ok)
+    logical function electric_tangent(full) result(ok)
+        logical, intent(in) :: full
         real(dp), parameter :: rate = 4000, step = 1
         type(collop_species_t) :: sp(1)
         type(collop_grid_t) :: grid
@@ -246,19 +248,34 @@ contains
         integer :: its, st
         call plasma(1e-2_dp, sp, lnl, grid, 2, 3)
         call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
-                               COLLOP_FULL, 12, d, its, st, rate, tangent)
-        if (st /= SURFACE_OK) error stop 'electric tangent solve'
+                               COLLOP_FULL, 12, d, its, st, rate, tangent, full)
+        if (st /= SURFACE_OK) then
+            print '(a,2i8)', 'electric tangent status and iterations ', st, its
+            error stop 'electric tangent solve'
+        end if
         call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
-                               COLLOP_FULL, 12, plus, its, st, rate + step)
+                               COLLOP_FULL, 12, plus, its, st, rate + step, full_local_electric=full)
         if (st /= SURFACE_OK) error stop 'positive electric difference'
         call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
-                               COLLOP_FULL, 12, minus, its, st, rate - step)
+                               COLLOP_FULL, 12, minus, its, st, rate - step, full_local_electric=full)
         if (st /= SURFACE_OK) error stop 'negative electric difference'
         fd = (plus(1, 1, :, :) - minus(1, 1, :, :))/(2*step)
         scale = max(abs(fd), abs(d(1, 1, :, :))/rate*1e-4_dp)
         ok = maxval(abs(tangent(1, 1, :, :) - fd)/scale) < 2e-4_dp
         print '(a,es12.4)', 'electric tangent relative error ', &
             maxval(abs(tangent(1, 1, :, :) - fd)/scale)
+        if (.not. full) return
+        call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 12, plus, its, st, rate)
+        if (st /= SURFACE_OK) error stop 'incompressible electric reference'
+        ok = ok .and. abs(d(1, 1, 1, 1)-plus(1, 1, 1, 1)) > 1e-5_dp*abs(plus(1, 1, 1, 1))
+        call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 12, plus, its, st, 0.0_dp)
+        if (st /= SURFACE_OK) error stop 'zero electric reference'
+        call surface_transport(helical(9, 7), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 12, minus, its, st, 0.0_dp, full_local_electric=.true.)
+        if (st /= SURFACE_OK) error stop 'zero electric full solve'
+        ok = close('full electric zero-rate limit', maxval(abs(plus-minus)), 0.0_dp, 1e-12_dp) .and. ok
     end function electric_tangent
 
     logical function electric_onsager(helium) result(ok)
