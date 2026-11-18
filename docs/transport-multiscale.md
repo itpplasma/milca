@@ -1,8 +1,7 @@
 # Transport and multiscale coupling
 
-Status: canonical transport/multiscale specification. KAMEL/QL-Balance and
-GORILLA provide important internal heritage/oracles, but no generic MILCA
-transport engine is implemented yet.
+Status: canonical transport and multiscale specification. MILCA implements
+the flux-shell toroidal momentum balance below.
 
 ## Principle
 
@@ -25,6 +24,102 @@ n_Z,\ \text{fast-particle moments},\ldots
 \]
 
 and their 1D, 2D or 3D spatial dependence.
+
+## Flux-shell toroidal momentum balance
+
+The balance advances the mechanical toroidal angular momentum inside fixed
+shells. Let \(\mathbf x\) be Cartesian position, \(\hat{\mathbf z}\) the
+chosen rotation axis and \(\mathbf k=\hat{\mathbf z}\times\mathbf x\) the
+generator of positive toroidal rotation. Let \(\mathbf p\) be mechanical
+momentum per unit volume, \(\boldsymbol{\Pi}\) its symmetric momentum-flux
+tensor and \(\mathbf f\) the force per unit volume on the modeled species.
+The momentum moment gives
+
+\[
+\begin{aligned}
+\partial_t\mathbf p+\nabla\cdot\boldsymbol{\Pi}&=\mathbf f, \tag{1}\\
+\boldsymbol{\Pi}:\nabla\mathbf k&=0, \tag{2}\\
+\partial_t(\mathbf k\cdot\mathbf p)
+  +\nabla\cdot(\boldsymbol{\Pi}\mathbf k)&=\mathbf k\cdot\mathbf f. \tag{3}
+\end{aligned}
+\]
+
+Equation (2) follows from symmetry of the tensor and antisymmetry of
+\(\nabla\mathbf k\). The species momentum equation and stress convention are
+given in [R. Fitzpatrick, *Plasma Fluid Theory*, equations (4.94) and (4.97)](https://farside.ph.utexas.edu/teaching/plasma/Plasma/node53.html).
+
+For shell \(i\), let \(L_i\) be its volume integral of
+\(\mathbf k\cdot\mathbf p\), in \(\mathrm{kg\,m^2\,s^{-1}}\), and \(T_i\)
+its integral of \(\mathbf k\cdot\mathbf f\), in \(\mathrm{N\,m}\). At face
+\(j\), let \(F_j\) be the integral of
+\(\mathbf n\cdot\boldsymbol{\Pi}\mathbf k\), in \(\mathrm{N\,m}\), with the
+normal \(\mathbf n\) pointing toward the exterior on every face. Faces
+\(i\) and \(i+1\) are the inner and outer faces of shell \(i\).
+For a time step \(\Delta t\) the overbar denotes a time average over the step.
+
+\[
+\begin{aligned}
+L_i^{n+1}&=L_i^n+\Delta t\,(\overline F_i-\overline F_{i+1}
+  +\overline T_i), \tag{4}\\
+\sum_{i=1}^{N}(L_i^{n+1}-L_i^n)
+  &=\Delta t\,\left(\overline F_1-\overline F_{N+1}
+  +\sum_{i=1}^{N}\overline T_i\right). \tag{5}
+\end{aligned}
+\]
+
+Here \(n\) is the step index and \(N\) the number of shells. One shared flux
+per interior face gives cancellation in (5). A shell that starts on a regular
+magnetic axis has zero inner face flux. A positive outer edge flux removes
+positive toroidal angular momentum. Reversing the toroidal direction reverses
+\(L_i\), \(F_j\) and \(T_i\). It leaves the face normals directed outward.
+
+In a flux coordinate \(s\) increasing outward, integrate a flux-surface-averaged
+torque density over each shell with the volume measure \((dV/ds)\,ds\), where
+\(V(s)\) is the enclosed volume. For neoclassical toroidal viscosity with
+finite orbit width, the input is the real-space deposited torque. When the
+momentum tensor includes a stress that carries an exchange through the shell
+faces, the associated torque enters the ledger through that flux.
+For angular velocity constant on a shell, \(\Omega_i=L_i/I_i\), with
+\(I_i=\int_i \rho R^2\,dV\), mass density \(\rho\) and cylindrical distance
+\(R\) from the chosen axis. Changes in inertia alter \(\Omega_i\) even in a
+shell with conserved \(L_i\).
+
+The axisymmetric kinetic closure gives the local toroidal angular velocity
+\(\Omega_\phi(R)=\omega+K/R^2\), where \(\omega\) is its rigid rotation term
+and \(K\) its parallel-flow correction. If both coefficients are held constant
+across shell \(i\), then \(L_i=I_i\omega+M_iK\) with shell mass
+\(M_i=\int_i\rho\,dV\). The rotation \(L_i/I_i\) then equals
+\(\Omega_\phi\) at \(R=\sqrt{I_i/M_i}\). [Axisymmetric profile](../app/ntv_axisymmetric_profile.f90)
+
+For a species of charge \(q_a\), number density \(n_a\), pressure \(p_a\)
+and mean velocity \(\mathbf v_a\), the radial projection of its momentum
+equation gives
+
+\[
+E_r=\frac{\hat{\mathbf e}_r\cdot\nabla p_a}{q_a n_a}
+    -\hat{\mathbf e}_r\cdot(\mathbf v_a\times\mathbf B), \tag{6}
+\]
+
+where \(\hat{\mathbf e}_r\) is the outward unit normal, \(\mathbf B\) the
+magnetic field and \(E_r\) the electric field along the normal. This model
+neglects radial inertia, viscous forces and collisional friction.
+Use the same toroidal direction for the momentum ledger and the rotation
+given to `ntv_omega_te_from_rotation`. It returns
+\(\Omega_{tE}=d\Phi/d\psi_{\rm pol}\), with electrostatic potential \(\Phi\)
+and poloidal flux per radian \(\psi_{\rm pol}\) in the native convention.
+The outward field is \(E_r=-\Omega_{tE}\hat{\mathbf e}_r\cdot\nabla\psi_{\rm pol}\).
+[Axisymmetric force balance](../src/apps/ntv_device.f90)
+
+`toroidal_momentum_step` in `milca_toroidal_momentum` takes \(N\) shell
+inventories, \(N+1\) face fluxes and \(N\) torques in inside-to-outside order.
+The face flux and torque averages
+are supplied by the caller. Equation (4) integrates exact averages without
+time discretization error. Start-of-step inputs give a forward Euler step and require the
+stability limit of the chosen flux closure. The FortSym definition supplies
+the value, Jacobian-vector and transpose-Jacobian-vector products. The
+interval overload encloses the discrete update for enclosed inputs. Errors
+from calculating the averages, from the closure and from the geometry enter
+through the input enclosures.
 
 ## Transport dimensionality
 

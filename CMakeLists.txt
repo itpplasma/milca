@@ -278,6 +278,7 @@ target_sources(milca_continuum PRIVATE src/continuum/vlasov_response.f90
     src/continuum/ou_susceptibility.f90 src/continuum/kinetic_layer_cylinder.f90
     src/continuum/kinetic_layer_window.f90 src/continuum/kinetic_layer_delta.f90
     src/continuum/kinetic_layer_torque.f90
+    src/generated/milca_toroidal_momentum_leaves.f90 src/continuum/toroidal_momentum.f90
     src/generated/milca_poisson_leaves.f90 src/continuum/poisson_laboratory.f90
     src/generated/milca_fp_leaves.f90 src/continuum/fp_laboratory.f90
     src/generated/milca_fp_relaxation_leaves.f90 src/continuum/fp_relaxation.f90
@@ -1489,7 +1490,7 @@ if(MILCA_FORTSYM_BUILD)
             response_strip_jets
             response_fluid
             gs_coarea gs_inverse boozer_file boozer_orbit dk_pitch dk_mono dk_hp dk_ntv dk_collop ntv_boozer
-            gs_reference_error laboratory poisson fp fp_relaxation transport
+            gs_reference_error laboratory poisson fp fp_relaxation transport toroidal_momentum
             streaming streaming_moments
             debye_sphere slab_oscillation shielding_dynamics interaction cloud homma
             fermi_gas quantum_fock quantum_evolution quantum_correlations
@@ -1539,6 +1540,14 @@ if(MILCA_FORTSYM_BUILD)
         -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
     milca_test_labels(ntv_boozer_leaf_regeneration fast CLASSES apps
         TARGETS gen_ntv_boozer)
+    add_test(NAME toroidal_momentum_leaf_regeneration COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:gen_toroidal_momentum>
+        -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_toroidal_momentum_leaves.f90
+        -DWORK=${CMAKE_BINARY_DIR}/toroidal-momentum-regeneration
+        -DLEAF=milca_toroidal_momentum_leaves.f90
+        -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
+    milca_test_labels(toroidal_momentum_leaf_regeneration fast CLASSES continuum
+        TARGETS gen_toroidal_momentum)
     add_test(NAME dk_ntv_leaf_regeneration COMMAND ${CMAKE_COMMAND}
         -DGENERATOR=$<TARGET_FILE:gen_dk_ntv>
         -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_dk_ntv_leaves.f90
@@ -1778,6 +1787,13 @@ add_test(NAME kinetic_layer_delta COMMAND test_kinetic_layer_delta)
 add_executable(test_kinetic_layer_torque test/test_kinetic_layer_torque.f90)
 target_link_libraries(test_kinetic_layer_torque PRIVATE milca)
 add_test(NAME kinetic_layer_torque COMMAND test_kinetic_layer_torque)
+add_executable(test_toroidal_momentum test/test_toroidal_momentum.f90)
+target_link_libraries(test_toroidal_momentum PRIVATE milca_continuum)
+set_source_files_properties(src/generated/milca_toroidal_momentum_leaves.f90
+    PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
+add_test(NAME toroidal_momentum_shell_balance COMMAND test_toroidal_momentum)
+milca_test_labels(toroidal_momentum_shell_balance fast CLASSES continuum
+    TARGETS test_toroidal_momentum)
 add_executable(test_jeans test/test_jeans.f90)
 target_link_libraries(test_jeans PRIVATE milca)
 add_test(NAME jeans_instability COMMAND test_jeans)
