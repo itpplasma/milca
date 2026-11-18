@@ -702,6 +702,70 @@ dominates in the continuum limit, free-boundary effects, and the nonlinear
 evolution (saturation, rearrangement, reconnection), which the linear
 energy principle does not determine.
 
+### Stability of equilibria with islands
+
+An equilibrium with islands is a root of a closure residual R(u; c) = 0 of
+[island-equilibrium.md](island-equilibrium.md) (closures A: pressure
+transport, B: prescribed profiles, C: Taylor regions, D: Ohm's law), not of
+ideal force balance, so the ideal delta W of M0 is not defined on it. Its
+linear stability uses the Jacobian K = -dR/du at the root with the
+kinetic-energy mass matrix M, restricted to perturbations v that keep a
+declared constraint class fixed. Two conventions occur:
+
+\[
+M\ddot v=-Kv:\quad Kv=\omega^2Mv,\ \text{unstable for }\omega^2<0;\qquad
+M\dot v=-Kv:\quad Kv=-\gamma Mv,\ \text{unstable for }\operatorname{Re}\gamma>0 .
+\]
+
+The first holds when R is the gradient of an energy, so K is its Hessian and
+symmetric; the second holds for dissipative closures. The class decides the
+answer and is part of every result:
+
+1. **Ideal limit:** along the ideal-limit sequence of
+   [islands](island-equilibrium.md#execution-order-and-status-9-november-2026)
+   the spectrum of each member is reported; its limit is compared with M0
+   where the limit state has nested surfaces.
+2. **Relaxed:** closure C, whose residual is the gradient of the multi-region
+   relaxed energy with fluxes and helicity fixed per region; negative
+   eigenvalues of its Hessian predict instability [25,26].
+3. **Tearing:** closure C with reconnection allowed at a declared resonant
+   surface; for a force-free current sheet the stability boundary equals linear
+   tearing theory [27], and a constrained current profile gives the saturated
+   island [28].
+4. **Dissipative:** closures A and D; K is not symmetric, so the growth rates
+   are complemented by the resolvent norm of
+   [Non-normal and resolvent analysis](#non-normal-and-resolvent-analysis).
+
+O1 (inertia) applies to classes 2 and 3, O2 to all. Local criteria are
+evaluated on the island's own flux surfaces: near the X-point field lines
+bunch, and ballooning modes localized there are less stable than without the
+island [29]. Pressure varying on a flux surface near X-lines drives currents
+that are logarithmically singular in equilibria without stellarator symmetry
+[30]; the equilibrium error ledger reports this before a stability result is
+accepted.
+
+| Id | Observable | Internal | Against references |
+|---|---|---|---|
+| OI1 | constraint class and the inertia of K + delta M within it, as O1 | exact | exact where stated |
+| OI2 | tearing stability boundary, Delta' = 0 | 1e-3 of the scanned parameter | analytic: 1e-3 |
+| OI3 | saturated island width, and whether K has a negative eigenvalue there | 1 % | 2 % against the small-Delta' scaling |
+| OI4 | marginal point of relaxed-class modes | 1 % | 3 % against published marginal points |
+| OI5 | ballooning eigenvalue on island flux surfaces, as O7 | 1e-3 | qualitative: localization at the X-point |
+| OI6 | growth rates of tearing, ballooning and interchange modes in stellarators | 1 % | 3 % against published values |
+| OI7 | OI1, O2 and O3 as the island width goes to zero | the nested spectrum of S1 within its O tolerances | not applicable |
+
+The tolerances are MILCA's acceptance bands, frozen with this specification;
+the references state agreement, not these numbers.
+
+| Rung | Case | Reference | Observables | Equilibrium gate |
+|---|---|---|---|---|
+| RI1 | force-free slab current sheet | linear tearing theory [27] | OI1, OI2 | NN2 slab cases |
+| RI2 | saturated tearing island, slab and cylinder | small-Delta' scaling [28]; G9 of [islands](island-equilibrium.md) | OI3 | G9 |
+| RI3 | cylinder, then tokamak and stellarator, in the relaxed class | SPEC against M3D-C1 and Delta' in the cylinder [25]; against CAS3D and MISHKA-1 in tokamak and stellarator [26], published values only | OI1, OI4 | G2, G3 |
+| RI4 | large-aspect-ratio tokamak with an equilibrium island | ballooning near the X-point [29] | OI5 | G4 |
+| RI5 | W7-A, QA and QH: tearing, ballooning and interchange on nested states | NIMSTELL, JOREK and CASTOR3D published growth rates [31] | OI6 | P1b E2 |
+| RI6 | stellarator with edge islands at finite beta | none published; MILCA nested and island states for the same coils | OI1, OI5, OI7 | P1b E9 |
+
 ### Verification ladder
 
 Each rung is a frozen gate; a later rung does not start before the earlier
@@ -733,18 +797,19 @@ criterion, the magnetic well and the energy and mode diagnostics.
 | S0 | confirm every S and ? entry of the reference matrix from full text; collect published inputs | matrix holds only P and full-text entries | - |
 | S1 | global ideal spectrum of the D5 operator at solved axisymmetric and 3D map equilibria, O-grid reference mesh, adiabatic term | R1 to R3 against the oracles (cylinder kink, Solov'ev internal kink to 1e-4) and GLISS on the same states | P1e.1 |
 | S2 | free boundary on the same operator (existing boundary-element exterior); W_P, W_V, W_T | R2 external kink and marginal wall; R3 O6 against DCON | S1 |
-| S3 | stellarator map equilibria and mode families | R4, R5 against GLISS, TERPSICHORE and published CAS3D | S1 |
+| S3 | stellarator map equilibria and mode families | R4, R5 against GLISS, TERPSICHORE and published CAS3D | S1, P1b E2 |
 | S4 | certified two-sided eigenvalue bounds (Rayleigh-Ritz above, Lehmann-Goerisch or residual enclosure below) and interval inertia | O1 certified, O2 enclosed on R2, R3 | S1 |
 | S5 | adjoint derivatives of growth rates and marginal points through the equilibrium | O9; O3 as beta scans on R3, R5 | S1, S2 |
 | S6 | error-controlled adaptivity of the mesh and the harmonic window (dual-weighted residuals) | the one-sided-window trap of the lessons page detected automatically | S1 |
 | S7 | Mercier and ballooning; global-to-local limit | O7 on R2 to R4 | S1 |
 | S8 | resistive and viscous spectra from the visco-resistive Jacobian; thin resistive wall | ideal limit equals S1; RM-B2 tearing; R6 | S1, S2 |
-| S9 | non-nested states (free-B lane): compatible spaces without global surfaces | pollution and convergence on island cases | S1 |
+| S9 | island states: K of the closure residual with M in a declared constraint class, compatible spaces without global surfaces | RI1 to RI4; OI7 on the nested limit; no pollution (O5) | S1, S8 |
+| S9b | stellarators with islands | RI5 (also needs S8), RI6 | S9, S3 |
 | S10 | performance: supernodal complex factors in FortSparse, matrix-free and block eigensolvers | O10 against GLISS, TERPSICHORE and DCON at matched accuracy | S1 |
 
 ### Sources
 
-Publications (S and ? entries above are still to be read in full):
+Publications (S and ? entries above are still to be read in full; of [25] to [31] only the abstracts are read, and the full text is read before the rung that uses it is frozen):
 
 1. C. Schwab, Phys. Fluids B 5, 3195 (1993).
 2. C. Nührenberg, Phys. Plasmas 6, 137 (1999).
@@ -791,6 +856,22 @@ Publications (S and ? entries above are still to be read in full):
     doi:10.1017/S0962492906210018.
 24. A. Buffa, G. Sangalli and R. Vázquez, Comput. Methods Appl. Mech. Eng.
     199, 1143 (2010), doi:10.1016/j.cma.2009.12.002.
+
+25. A. Kumar, Z. Qu, M. J. Hole, A. M. Wright, J. Loizu, S. R. Hudson et
+    al., Plasma Phys. Control. Fusion 63, 045006 (2021),
+    doi:10.1088/1361-6587/abdbd0.
+26. A. Kumar, C. Nührenberg, Z. Qu, M. J. Hole, J. Doak, R. L. Dewar et
+    al., Plasma Phys. Control. Fusion 64, 065001 (2022),
+    doi:10.1088/1361-6587/ac53ee.
+27. J. Loizu and S. R. Hudson, Phys. Plasmas 26, 030702 (2019),
+    doi:10.1063/1.5091765.
+28. J. Loizu, Y.-M. Huang, S. R. Hudson, A. Baillod, A. Kumar and Z. S. Qu,
+    Phys. Plasmas 27, 070701 (2020), doi:10.1063/5.0009110.
+29. C. C. Hegna and J. D. Callen, Phys. Fluids B 4, 3031 (1992),
+    doi:10.1063/1.860414.
+30. A. H. Reiman, Phys. Plasmas 23, 072502 (2016), doi:10.1063/1.4954900.
+31. S. Patil, C. Sovinec, R. Ramasamy and N. Nikulsin, Phys. Plasmas 33,
+    113901 (2026), doi:10.1063/5.0351043.
 
 Open-source comparators, to be studied and run, no code taken from them. The
 commit is the one inspected on 2026-11-12; each comparison run replaces it
