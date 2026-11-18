@@ -407,7 +407,7 @@ not widened to absorb it.
   finite elements aligned with flux surfaces and Fourier harmonics in the two
   angles: the contravariant density normal to the surfaces continuous of
   degree p, the tangential densities discontinuous of degree p-1, which
-  generalizes the hybrid elements of [1,15] and keeps the continua
+  generalizes the hybrid elements of [1,12,15,23,24] and keeps the continua
   unpolluted (O5). Its lessons carry over: densities rather than physical
   components, and a harmonic window wide on both sides of the resonance.
 - **Equilibria.** Solved states of MILCA's lanes; imported VMEC, GVEC, DESC
@@ -787,6 +787,10 @@ Publications (S and ? entries above are still to be read in full):
     https://magnetohydrodynamics.physics.wisc.edu/lecture23.html.
 22. M. Landreman, arXiv:2609.26742 (2026); the evaluation in MILCA is
     described in [nested-oracles.md](nested-oracles.md).
+23. D. N. Arnold, R. S. Falk and R. Winther, Acta Numer. 15, 1 (2006),
+    doi:10.1017/S0962492906210018.
+24. A. Buffa, G. Sangalli and R. Vázquez, Comput. Methods Appl. Mech. Eng.
+    199, 1143 (2010), doi:10.1016/j.cma.2009.12.002.
 
 Open-source comparators, to be studied and run, no code taken from them. The
 commit is the one inspected on 2026-11-12; each comparison run replaces it
