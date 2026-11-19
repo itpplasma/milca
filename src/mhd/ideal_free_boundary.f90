@@ -5859,6 +5859,35 @@ contains
         close (u)
     end subroutine
 
+    subroutine trace_shell_min(fb, it)
+        ! Cell of the smallest relative shell Jacobian after each Newton step
+        ! (fb_shell.txt): where the shell collapses.
+        type(ideal_fb_t), intent(in) :: fb
+        integer, intent(in) :: it
+        real(dp) :: w, jac, gv(15), hv(15, 15), r, rmin
+        integer :: e, g, j, u, a, emin, gmin, jmin
+        rmin = huge(1.0_dp); emin = 0; gmin = 0; jmin = 0
+        do e = 1, fb%ncell
+            do j = 1, fb%plasma%nphi
+                do g = 1, fb%plasma%nq
+                    call shell_point(fb, fb%xs, fb%phi, e, g, j, w, jac, gv, hv, .false.)
+                    r = jac/fb%det(g, e)
+                    if (r < rmin) then
+                        rmin = r; emin = e; gmin = g; jmin = j
+                    end if
+                end do
+            end do
+        end do
+        if (emin == 0) return
+        open (newunit=u, file='fb_shell.txt', position='append', action='write')
+        do a = 1, fb%nloc
+            write (u, '(i5,i7,2i4,es12.4,i3,i7,4es14.6)') it, emin, gmin, jmin, rmin, &
+                fb%role(fb%conn(a, emin)), fb%conn(a, emin), &
+                fb%reference(:, fb%conn(a, emin)), fb%xs(1:2, 1, fb%conn(a, emin))
+        end do
+        close (u)
+    end subroutine
+
     subroutine chain_of_plasma(map, order, chain, status)
         ! Plasma boundary nodes in chain order (order per boundary edge).
         type(ideal_map_t), intent(in) :: map
@@ -6027,6 +6056,7 @@ contains
                 ' res/sigmaV ', report%residual, ' E_red ', energy, ' delta ', &
                 opt%delta_last
             if (talk) call trace_boundary(fb, it, report%residual, energy)
+            if (talk) call trace_shell_min(fb, it)
             if (res_tol > 0) then
                 if (report%residual <= res_tol) then
                     status = IDEAL_FB_OK; exit
