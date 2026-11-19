@@ -28,7 +28,8 @@ program nested_equilibrium
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
-    use milca_ideal_fb_nested, only: fb_nested_geometry, fb_nested_mesh, &
+    use milca_ideal_fb_nested, only: fb_nested_offset_distance, fb_nested_layer_mesh, &
+        fb_nested_geometry, fb_nested_mesh, &
         fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t
     use milca_mgrid_file, only: mgrid_t, mgrid_read
     implicit none
@@ -100,6 +101,14 @@ program nested_equilibrium
     real(dp), allocatable :: filament_drive(:, :), filament_load(:, :)
     real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
     real(dp), allocatable :: fb_curve(:)
+    ! shell_layers > 0: Gamma_c is the normal offset of the guess's mean
+    ! section at shell_distance (fb_nested_offset_distance, at most
+    ! coupling_margin minor radii) and the shell is layered along the normal
+    ! segments (fb_nested_layer_mesh); 0: the harmonic-extension shell.
+    integer :: shell_layers
+    real(dp) :: shell_distance
+    real(dp), allocatable :: shell_positions(:, :), shell_t(:)
+    integer, allocatable :: shell_lines(:, :)
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -107,7 +116,7 @@ program nested_equilibrium
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
         iota_nodes, iota_tolerance, free_boundary, mgrid_file, extcur, mgrid_degree, &
-        coupling_margin
+        coupling_margin, shell_layers
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -119,7 +128,7 @@ program nested_equilibrium
     mesh_tolerance = 1e-4_dp
     iota_nodes = -1; iota_tolerance = 1e-4_dp
     free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
-    coupling_margin = 0.5_dp
+    coupling_margin = 0.5_dp; shell_layers = 2
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -357,6 +366,14 @@ contains
             grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
             fb_curve, margin_used, local, message)
         if (local /= 0) call fail(trim(message))
+        if (shell_layers > 0) then
+            call fb_nested_offset_distance(boundary_input, fb_centre, fb_axes, &
+                [grid%rmin, grid%rmax, grid%zmin, grid%zmax], coils_inside, &
+                coupling_margin*sqrt(fb_axes(1)*fb_axes(2)), shell_distance, local)
+            if (local /= 0) call fail('no room for the coupling surface between the' &
+                //' guess and the coils')
+            margin_used = shell_distance/sqrt(fb_axes(1)*fb_axes(2))
+        end if
         print '(a,2f9.4,a,2f8.4,a,f6.3)', 'reference disc centre', fb_centre, &
             ' half-widths', fb_axes, ', coupling margin', margin_used
         filament%source = fb_centre
@@ -378,12 +395,22 @@ contains
         real(dp), allocatable :: chain(:, :), d(:, :, :), l(:, :, :)
         real(dp) :: closure(1), f(1), spread(1)
         integer :: local
-        call fb_nested_mesh(mesh, chain, fb_centre, fb_axes, fb_curve, nodes, degree, &
-            local)
-        if (local /= 0) call fail('the free-boundary mesh failed')
         seed%profile = profile
-        call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, 0.0_dp, &
-            circulation, local, nphi=max(1, 4*ntor_level + 1))
+        if (shell_layers > 0) then
+            call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
+                shell_layers, shell_distance, mesh, chain, shell_positions, &
+                shell_lines, shell_t, local)
+            if (local /= 0) call fail('the free-boundary mesh failed')
+            call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
+                0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
+                positions=shell_positions, lines=shell_lines, line_t=shell_t)
+        else
+            call fb_nested_mesh(mesh, chain, fb_centre, fb_axes, fb_curve, nodes, &
+                degree, local)
+            if (local /= 0) call fail('the free-boundary mesh failed')
+            call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
+                0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1))
+        end if
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
         call ideal_fb_circuits_build(next, coil_basis, circuits, local)
         if (local /= IDEAL_FB_OK) &

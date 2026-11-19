@@ -5,13 +5,14 @@ module milca_ideal_fb_nested
     !! of the region inside it, the seed of the plasma map and its transfer
     !! between resolution levels. The physics stays in
     !! milca_ideal_free_boundary; this module only places and seeds it.
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use milca_grad_shafranov, only: gs_state_t, initialize_gs
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_field_basis_t, &
         ideal_fb_solve_shell_map, ideal_fb_solve_vacuum, ideal_fb_solve_multipliers, &
         IDEAL_FB_OK, IDEAL_FB_BAD_INPUT, IDEAL_FB_FOLDED
-    use milca_ideal_seed_3d, only: ideal_seed_boundary_coefficients
+    use milca_ideal_seed_3d, only: ideal_seed_boundary_coefficients, ideal_seed_disk_mesh
+    use milca_sort_keys, only: sort_key_order
     use milca_winslow_seed, only: winslow_seed, WINSLOW_OK
     use milca_curved_triangle, only: triangle_locate
     use milca_triangle_basis, only: triangle_basis_jet
@@ -19,7 +20,7 @@ module milca_ideal_fb_nested
     implicit none
     private
     public :: fb_nested_geometry, fb_nested_mesh, fb_nested_seed, fb_nested_transfer
-    public :: fb_nested_settle
+    public :: fb_nested_settle, fb_nested_layer_mesh, fb_nested_offset_distance
     public :: filament_basis_t
     real(dp), parameter :: pi = acos(-1.0_dp)
     ! Gamma_c is a star-shaped curve r(alpha) about the centre, sampled on
@@ -394,5 +395,257 @@ contains
         call ideal_fb_solve_multipliers(fb, status)
         if (status /= IDEAL_FB_OK) return
         if (.not. all(ieee_is_finite(fb%xs))) status = IDEAL_FB_FOLDED
+    end subroutine
+
+    subroutine fb_nested_offset_distance(boundary, centre, axes, box, obstacles, cap, &
+                                         distance, status)
+        !! Distance d of Gamma_c as an outward normal offset of the guess's
+        !! mean section: below the reach of its normal lines (0.9 times the
+        !! smallest radius of curvature where the section is concave; a convex
+        !! section has unbounded reach), half the smallest gap to the coils
+        !! inside the box and to the box edge, and cap.
+        real(dp), intent(in) :: boundary(:, :, 0:), centre(2), axes(2), box(4)
+        real(dp), intent(in) :: obstacles(:, :), cap
+        real(dp), intent(out) :: distance
+        integer, intent(out) :: status
+        integer, parameter :: ns = 1024
+        real(dp) :: x(2, ns), t(2), tt(2), kappa, gap, reach
+        integer :: j, jm, jp, k
+        status = IDEAL_FB_BAD_INPUT
+        do j = 1, ns
+            x(:, j) = section_point(boundary, centre, axes, 2*pi*(j - 1)/ns)
+        end do
+        reach = huge(1.0_dp); gap = huge(1.0_dp)
+        do j = 1, ns
+            jm = modulo(j - 2, ns) + 1; jp = mod(j, ns) + 1
+            t = (x(:, jp) - x(:, jm))/2
+            tt = x(:, jp) - 2*x(:, j) + x(:, jm)
+            ! signed curvature, positive where the counter-clockwise section
+            ! turns left (convex)
+            kappa = (t(1)*tt(2) - t(2)*tt(1))/norm2(t)**3
+            if (kappa < 0) reach = min(reach, 0.9_dp/(-kappa))
+            gap = min(gap, x(1, j) - box(1), box(2) - x(1, j), x(2, j) - box(3), &
+                box(4) - x(2, j))
+            do k = 1, size(obstacles, 2)
+                gap = min(gap, norm2(obstacles(:, k) - x(:, j)))
+            end do
+        end do
+        distance = min(reach, gap/2, cap)
+        if (.not. distance > 0) return
+        status = IDEAL_FB_OK
+    end subroutine
+
+    function section_point(boundary, centre, axes, alpha) result(x)
+        ! Mean (n = 0) section of the guess at reference angle alpha.
+        real(dp), intent(in) :: boundary(:, :, 0:), centre(2), axes(2), alpha
+        real(dp) :: x(2), values(3, size(boundary, 2))
+        call ideal_seed_boundary_coefficients(centre + axes*[cos(alpha), sin(alpha)], &
+            boundary, values, centre=centre, axes=axes)
+        x = values(1:2, 1)
+    end function
+
+    subroutine fb_nested_layer_mesh(boundary, centre, axes, nodes, degree, layers, &
+                                    distance, mesh, chain, positions, lines, line_t, &
+                                    status)
+        !! Reference mesh of the plasma disc (the reference ellipse, nodes
+        !! boundary nodes) and a layered shell around it for
+        !! ideal_fb_init(positions, lines, line_t). Every Gamma_p chain node y_p
+        !! (the disc's boundary nodes, degree per edge) starts a segment to its
+        !! Gamma_c node; the shell nodes lie on these segments at t = k/(degree
+        !! layers), and the cells are the two triangles of every (edge, layer)
+        !! quadrilateral. Reference: y = y_p + t delta nu (nu the ellipse
+        !! normal, delta = min(axes)/4). Physical rest positions: Gamma_c is
+        !! the guess's mean section X(y_p) offset by distance along its outward
+        !! normal, the interior nodes x = (1 - t) y_p + t X_c (only the
+        !! constraint rows read them). chain: all Gamma_p chain nodes, for the
+        !! plasma-cell test of ideal_fb_init.
+        real(dp), intent(in) :: boundary(:, :, 0:), centre(2), axes(2), distance
+        integer, intent(in) :: nodes, degree, layers
+        type(gs_state_t), intent(out) :: mesh
+        real(dp), allocatable, intent(out) :: chain(:, :), positions(:, :), line_t(:)
+        integer, allocatable, intent(out) :: lines(:, :)
+        integer, intent(out) :: status
+        type(gs_state_t) :: disc
+        integer, allocatable :: ring(:), lattice(:, :), tri(:, :)
+        real(dp), allocatable :: points(:, :), xc(:, :)
+        real(dp) :: nu(2), delta, xp(2), tangent(2), alpha, t, area
+        real(dp), parameter :: eps = 1.0e-6_dp
+        integer :: np, nring, nr, i, r, k, e, l, nloc, ncell, ntri, a, b, next
+        integer :: local(2, 10), corner(2, 3), j
+        status = IDEAL_FB_BAD_INPUT
+        if (layers < 1 .or. (degree /= 2 .and. degree /= 3)) return
+        if (.not. distance > 0) return
+        call ideal_seed_disk_mesh(disc, nodes, degree, status)
+        if (status /= 0) return
+        status = IDEAL_FB_BAD_INPUT
+        np = size(disc%points, 2); nloc = size(disc%triangles, 1)
+        ! the seed's disk mesh is the unit disc about (2, 0)
+        do i = 1, np
+            disc%points(:, i) = centre + axes*(disc%points(:, i) - [2.0_dp, 0.0_dp])
+        end do
+        call boundary_ring(disc, degree, ring, status)
+        if (status /= 0) return
+        status = IDEAL_FB_BAD_INPUT
+        nring = size(ring); nr = degree*layers
+        ! Gamma_c of every chain node: offset of the mean section along its
+        ! outward normal at the same reference angle.
+        allocate (xc(2, nring))
+        do i = 1, nring
+            alpha = atan2((disc%points(2, ring(i)) - centre(2))/axes(2), &
+                (disc%points(1, ring(i)) - centre(1))/axes(1))
+            xp = section_point(boundary, centre, axes, alpha)
+            tangent = section_point(boundary, centre, axes, alpha + eps) &
+                - section_point(boundary, centre, axes, alpha - eps)
+            xc(:, i) = xp + distance*[tangent(2), -tangent(1)]/norm2(tangent)
+        end do
+        ! Lattice (chain node, layer node) -> mesh node; layer 0 is Gamma_p.
+        allocate (lattice(nring, 0:nr), points(2, np + nring*nr))
+        points(:, :np) = disc%points
+        lattice(:, 0) = ring
+        delta = minval(axes)/4
+        k = np
+        do r = 1, nr
+            do i = 1, nring
+                k = k + 1
+                lattice(i, r) = k
+                nu = (disc%points(:, ring(i)) - centre)/axes**2
+                nu = nu/norm2(nu)
+                points(:, k) = disc%points(:, ring(i)) + real(r, dp)/nr*delta*nu
+            end do
+        end do
+        allocate (positions(2, k), lines(2, k), line_t(k))
+        positions = points; lines = 0; line_t = -1
+        do r = 1, nr
+            t = real(r, dp)/nr
+            do i = 1, nring
+                lines(:, lattice(i, r)) = [ring(i), lattice(i, nr)]
+                line_t(lattice(i, r)) = t
+                positions(:, lattice(i, r)) = (1 - t)*disc%points(:, ring(i)) &
+                    + t*xc(:, i)
+            end do
+        end do
+        ! Local nodes of the P2/P3 triangle in lattice steps from its
+        ! vertices: vertices, degree - 1 nodes per edge (1-2, 2-3, 3-1), then
+        ! the P3 centroid.
+        ncell = size(disc%triangles, 2) + 2*(nring/degree)*layers
+        allocate (tri(nloc, ncell))
+        tri(:, :size(disc%triangles, 2)) = disc%triangles
+        ntri = size(disc%triangles, 2)
+        do e = 1, nring/degree
+            do l = 1, layers
+                i = (e - 1)*degree; r = (l - 1)*degree
+                do j = 1, 2
+                    if (j == 1) then
+                        corner = reshape([0, 0, degree, 0, degree, degree], [2, 3])
+                    else
+                        corner = reshape([0, 0, degree, degree, 0, degree], [2, 3])
+                    end if
+                    ! counter-clockwise in the reference
+                    area = cross2(lattice_point(corner(:, 2)) - lattice_point(corner(:, 1)), &
+                        lattice_point(corner(:, 3)) - lattice_point(corner(:, 1)))
+                    if (area < 0) corner = corner(:, [1, 3, 2])
+                    local(:, 1:3) = corner
+                    k = 3
+                    do a = 1, 3
+                        next = mod(a, 3) + 1
+                        do b = 1, degree - 1
+                            k = k + 1
+                            local(:, k) = corner(:, a) + b*(corner(:, next) - corner(:, a)) &
+                                /degree
+                        end do
+                    end do
+                    if (degree == 3) local(:, 10) = sum(corner, dim=2)/3
+                    ntri = ntri + 1
+                    do k = 1, nloc
+                        tri(k, ntri) = lattice(modulo(i + local(1, k), nring) + 1, &
+                            r + local(2, k))
+                    end do
+                end do
+            end do
+        end do
+        mesh%points = points
+        mesh%triangles = tri
+        allocate (mesh%boundary(size(points, 2)))
+        mesh%boundary = .false.
+        mesh%boundary(lattice(:, nr)) = .true.
+        call mesh_neighbors(tri, mesh%neighbors)
+        chain = disc%points(:, ring)
+        status = IDEAL_FB_OK
+    contains
+        function lattice_point(c) result(y)
+            integer, intent(in) :: c(2)
+            real(dp) :: y(2)
+            y = points(:, lattice(modulo(i + c(1), nring) + 1, r + c(2)))
+        end function
+    end subroutine
+
+    pure real(dp) function cross2(a, b)
+        real(dp), intent(in) :: a(2), b(2)
+        cross2 = a(1)*b(2) - a(2)*b(1)
+    end function
+
+    subroutine boundary_ring(mesh, degree, ring, status)
+        ! Boundary nodes of a P2/P3 mesh in counter-clockwise chain order,
+        ! degree per boundary edge (edge k of a cell runs from vertex k to
+        ! k + 1; neighbors(k, e) = 0 on the boundary).
+        type(gs_state_t), intent(in) :: mesh
+        integer, intent(in) :: degree
+        integer, allocatable, intent(out) :: ring(:)
+        integer, intent(out) :: status
+        integer, allocatable :: first(:)
+        integer :: e, k, nb, i, cell, side, start, j
+        status = 1
+        allocate (first(size(mesh%points, 2)))
+        first = 0; nb = 0
+        do e = 1, size(mesh%triangles, 2)
+            do k = 1, 3
+                if (mesh%neighbors(k, e) > 0) cycle
+                first(mesh%triangles(k, e)) = 3*(e - 1) + k
+                nb = nb + 1
+            end do
+        end do
+        if (nb < 3) return
+        allocate (ring(nb*degree))
+        start = findloc(first > 0, .true., dim=1)
+        i = start
+        do j = 1, nb
+            cell = (first(i) - 1)/3 + 1; side = first(i) - 3*(cell - 1)
+            ring((j - 1)*degree + 1) = mesh%triangles(side, cell)
+            do k = 1, degree - 1
+                ring((j - 1)*degree + 1 + k) = &
+                    mesh%triangles(3 + (side - 1)*(degree - 1) + k, cell)
+            end do
+            i = mesh%triangles(mod(side, 3) + 1, cell)
+            if (first(i) == 0) return
+        end do
+        if (i /= start) return
+        status = 0
+    end subroutine
+
+    subroutine mesh_neighbors(triangles, neighbors)
+        ! neighbors(k, e): the cell across edge (vertex k, vertex k + 1), 0 on
+        ! the boundary.
+        integer, intent(in) :: triangles(:, :)
+        integer, allocatable, intent(out) :: neighbors(:, :)
+        integer(int64), allocatable :: keys(:)
+        integer, allocatable :: order(:)
+        integer :: e, k, a, b, n, i, c1, c2
+        n = size(triangles, 2)
+        allocate (keys(3*n), order(3*n), neighbors(3, n))
+        neighbors = 0
+        do e = 1, n
+            do k = 1, 3
+                a = triangles(k, e); b = triangles(mod(k, 3) + 1, e)
+                keys(3*(e - 1) + k) = int(min(a, b), int64)*2_int64**31 &
+                    + max(a, b)
+            end do
+        end do
+        call sort_key_order(keys, order)
+        do i = 1, 3*n - 1
+            if (keys(order(i)) /= keys(order(i + 1))) cycle
+            c1 = order(i); c2 = order(i + 1)
+            neighbors(mod(c1 - 1, 3) + 1, (c1 - 1)/3 + 1) = (c2 - 1)/3 + 1
+            neighbors(mod(c2 - 1, 3) + 1, (c2 - 1)/3 + 1) = (c1 - 1)/3 + 1
+        end do
     end subroutine
 end module milca_ideal_fb_nested

@@ -182,6 +182,10 @@ module milca_ideal_free_boundary
         integer, allocatable :: conn(:, :), role(:), plasma_node(:)
         integer, allocatable :: shell_global(:), plasma_global(:)
         real(dp), allocatable :: reference(:, :)
+        ! Physical rest position of the shell nodes (Gamma_c: the fixed
+        ! coupling surface; elsewhere any point with the constraint rows
+        ! satisfied). Equal to reference unless ideal_fb_init got positions.
+        real(dp), allocatable :: position(:, :)
         ! Master derivatives of theta/(2 pi) and the reference det per point.
         real(dp), allocatable :: theta_s(:, :, :), det(:, :)
         ! Reference Laplacian of the shell (harmonic extension), CSR.
@@ -390,10 +394,18 @@ contains
 
     subroutine ideal_fb_init(fb, mesh, chain, chart, field, nfp, ntor, f_vac, &
                              circulation, status, mu0, nphi, panels_per_edge, &
-                             quadrature_order, exterior_from)
+                             quadrature_order, exterior_from, positions, lines, &
+                             line_t)
         ! mesh: curved P2/P3 mesh of the Gamma_c region with Gamma_p as the
         ! constrained internal chain (initialize_gs with interior_chain);
         ! chain: the Gamma_p vertices used for it; field: frozen plasma data.
+        ! positions(2, mesh node): physical rest positions (default: the mesh
+        ! points). lines(2, mesh node), line_t(mesh node): a layered shell
+        ! (fb_nested_layer_mesh). An interior shell node lies on the segment
+        ! from the Gamma_p node lines(1, a) to the Gamma_c node lines(2, a) at
+        ! line_t(a), and its constraint row is x_a = (1 - t) x_p + t x_c instead
+        ! of the harmonic extension: fold-free while Gamma_p stays within the
+        ! reach of the segments.
         type(ideal_fb_t), intent(out) :: fb
         type(gs_state_t), intent(in) :: mesh
         real(dp), intent(in) :: chain(:, :), f_vac, circulation
@@ -406,6 +418,8 @@ contains
         !> A state on the same Gamma_c (for example another frozen field):
         !! its per-n exterior operators are reused when the panels agree.
         type(ideal_fb_t), intent(in), optional :: exterior_from
+        real(dp), intent(in), optional :: positions(:, :), line_t(:)
+        integer, intent(in), optional :: lines(:, :)
         type(gs_state_t) :: sub
         logical, allocatable :: inside(:), in_plasma(:), in_shell(:)
         integer :: e, a, nodes, cells, nplasma, k, st, ppe
@@ -474,12 +488,15 @@ contains
             ! Shell numbering.
             fb%ns = count(in_shell); fb%ncell = cells - count(inside)
             allocate (fb%shell_global(fb%ns), fb%reference(2, fb%ns), &
+                fb%position(2, fb%ns), &
                 fb%role(fb%ns), fb%plasma_node(fb%ns), fb%conn(fb%nloc, fb%ncell))
             k = 0
             do a = 1, nodes
                 if (.not. in_shell(a)) cycle
                 k = k + 1; fb%shell_global(k) = a
                 fb%reference(:, k) = mesh%points(:, a)
+                fb%position(:, k) = mesh%points(:, a)
+                if (present(positions)) fb%position(:, k) = positions(:, a)
                 fb%role(k) = 2
                 fb%plasma_node(k) = number(a)
                 if (in_plasma(a)) fb%role(k) = 1
@@ -497,6 +514,11 @@ contains
             end do
             call gamma_c_chain(fb, mesh, number, st)
             if (st /= 0) return
+            if (present(lines)) then
+                if (.not. present(line_t)) return
+                call shell_lines(fb, lines, line_t, number, st)
+                if (st /= 0) return
+            end if
         end block
         status = IDEAL_FB_MAP_FAILED
         call ideal_map_init(fb%plasma, sub, chart, nfp, ntor, st, nphi, &
@@ -517,7 +539,7 @@ contains
             fb%theta_centre = sub%points(:, k)
         end if
         call shell_geometry(fb)
-        call shell_laplacian(fb)
+        if (.not. allocated(fb%lap_ptr)) call shell_laplacian(fb)
         status = IDEAL_FB_BEM_FAILED
         if (axisymmetric) then
             call gamma_c_operators(fb, ppe, st, exterior_from)
@@ -529,7 +551,7 @@ contains
             fb%lam(3, fb%nmode, fb%ns), fb%drive(fb%nt, fb%nmode), &
             fb%load(fb%nt, fb%nmode))
         fb%xs = 0; fb%phi = 0; fb%lam = 0; fb%drive = 0; fb%load = 0
-        fb%xs(1:2, 1, :) = fb%reference
+        fb%xs(1:2, 1, :) = fb%position
         do k = 1, fb%ns
             if (fb%role(k) == 1) fb%xs(:, :, k) = fb%plasma%x(:, :, fb%plasma_node(k))
         end do
@@ -623,19 +645,30 @@ contains
         end do
     end subroutine
 
-    subroutine edge_point(fb, i, t, x, tangent, w)
-        ! Position, tangent dx/dt and edge basis of Gamma_c edge i at t.
+    subroutine edge_point(fb, i, t, x, tangent, w, reference)
+        ! Physical position, tangent dx/dt and edge basis of Gamma_c edge i at
+        ! t; with reference, the reference point and tangent instead (the
+        ! poloidal-angle lift of the shell potential lives there).
         type(ideal_fb_t), intent(in) :: fb
         integer, intent(in) :: i
         real(dp), intent(in) :: t
         real(dp), intent(out) :: x(2), tangent(2), w(0:fb%order)
+        logical, intent(in), optional :: reference
         real(dp) :: dw(0:3)
         integer :: j
+        logical :: ref
+        ref = .false.
+        if (present(reference)) ref = reference
         call edge_lagrange(fb%order, t, w, dw(0:fb%order))
         x = 0; tangent = 0
         do j = 0, fb%order
-            x = x + w(j)*fb%reference(:, fb%edge(j, i))
-            tangent = tangent + dw(j)*fb%reference(:, fb%edge(j, i))
+            if (ref) then
+                x = x + w(j)*fb%reference(:, fb%edge(j, i))
+                tangent = tangent + dw(j)*fb%reference(:, fb%edge(j, i))
+            else
+                x = x + w(j)*fb%position(:, fb%edge(j, i))
+                tangent = tangent + dw(j)*fb%position(:, fb%edge(j, i))
+            end if
         end do
     end subroutine
 
@@ -1009,6 +1042,7 @@ contains
         integer, intent(out) :: status
         integer, parameter :: ng = 10
         real(dp), allocatable :: q2(:, :), tq(:, :), wq(:, :), xc(:, :), xt(:, :)
+        real(dp) :: yr(2), tr(2), wr(0:3)
         real(dp), allocatable :: xp(:, :), bf(:, :, :), ck(:, :), sk(:, :)
         real(dp), allocatable :: fnode(:), g(:)
         real(dp) :: gx(ng), gw(ng), w(0:3), dw(0:3), d1(3, 3), d2(3, 3, 3)
@@ -1047,7 +1081,7 @@ contains
             call edge_point(fb, i, 0.5_dp, q2(:, p), tq(:, p), w(0:fb%order))
         end do
         do col = 1, fb%nt
-            q2(:, nl + nd + col) = fb%reference(:, fb%trace(col))
+            q2(:, nl + nd + col) = fb%position(:, fb%trace(col))
             tq(:, nl + nd + col) = 0
         end do
         ! Trapezoid weights of the mean and the real harmonics (the DFT of
@@ -1114,9 +1148,10 @@ contains
                         do l = 1, np
                             g(l) = dot_product(bf(:, b, j0 + l), xt(:, j0 + l))
                         end do
+                        call edge_point(fb, i, gx(q)*j/fb%order, yr, tr, &
+                            wr(0:fb%order), reference=.true.)
                         acc = acc + gw(q)*real(j, dp)/fb%order*(sum(ck(:, 0)*g) &
-                            - circulation(b)*dot_product(theta_gradient(fb, q2(:, p)), &
-                            tq(:, p)))
+                            - circulation(b)*dot_product(theta_gradient(fb, yr), tr))
                     end do
                     if (j < fb%order) then
                         drive((i - 1)*fb%order + j + 1, 1, b) = run + acc
@@ -1209,6 +1244,7 @@ contains
         real(dp) :: gx(ng), gw(ng), x(2), tangent(2), w(0:3), bc(3), bs(3)
         real(dp) :: grad_t(2), acc, run, speed, worst, nn, at(2), dmax
         real(dp) :: dw(0:3), wv(0:3)
+        real(dp) :: yr(2), tr(2), wr(0:3)
         integer :: nf, i, q, j, k, col, b, p, nl, nd
         status = IDEAL_FB_BAD_INPUT
         ! Meridional (R, Z) sampling: axisymmetric Gamma_c only. Other charts
@@ -1241,7 +1277,7 @@ contains
             call edge_point(fb, i, 0.5_dp, pm(:, i), tm(:, i), w(0:fb%order))
         end do
         do col = 1, fb%nt
-            pt(:, col) = fb%reference(:, fb%trace(col))
+            pt(:, col) = fb%position(:, fb%trace(col))
         end do
         allocate (cl(3, 0:fb%ntor, nf, nl), sl(3, 0:fb%ntor, nf, nl), &
             cd(3, 0:0, nf, nd), sd(3, 0:0, nf, nd), &
@@ -1297,9 +1333,11 @@ contains
                     do q = 1, ng
                         p = ((i - 1)*fb%order + j - 1)*ng + q
                         x = pd(:, p); tangent = td(:, p); bc = cd(:, 0, b, p)
-                        grad_t = theta_gradient(fb, x)
-                        acc = acc + gw(q)*real(j, dp)/fb%order*(dot_product(bc([1, 3]) &
-                            - circulation(b)*grad_t, tangent))
+                        call edge_point(fb, i, gx(q)*j/fb%order, yr, tr, &
+                            wr(0:fb%order), reference=.true.)
+                        grad_t = theta_gradient(fb, yr)
+                        acc = acc + gw(q)*real(j, dp)/fb%order*(dot_product(bc([1, 3]), &
+                            tangent) - circulation(b)*dot_product(grad_t, tr))
                     end do
                     if (j < fb%order) then
                         drive((i - 1)*fb%order + j + 1, 1, b) = run + acc
@@ -1762,7 +1800,7 @@ contains
         real(dp), allocatable :: u(:, :, :)
         integer :: s, p
         u = fb%xs
-        u(1:2, 1, :) = u(1:2, 1, :) - fb%reference
+        u(1:2, 1, :) = u(1:2, 1, :) - fb%position
         do s = 1, fb%ns
             select case (fb%role(s))
             case (1)
@@ -2873,7 +2911,7 @@ contains
         mean = 0; nb = 0; rms = 0
         do s = 1, fb%ns
             if (fb%role(s) /= 1) cycle
-            mean = mean + fb%xs(1:2, 1, s) - fb%reference(:, s); nb = nb + 1
+            mean = mean + fb%xs(1:2, 1, s) - fb%position(:, s); nb = nb + 1
             if (fb%nmode > 1) rms = rms + sum(fb%xs(1:2, 2:fb%nmode, s)**2)
         end do
         print '(a,2es12.4)', '   Gamma_p mean shift', mean/nb
@@ -5559,5 +5597,33 @@ contains
         real(dp), intent(out) :: xi(2), phi_hat
         call field_shell_locate(fb%plasma%chart, fb%nfp, fb%conn, fb%xs, x, seed, &
             e, xi, phi_hat, status)
+    end subroutine
+
+    subroutine shell_lines(fb, lines, line_t, number, status)
+        ! Constraint rows of a layered shell: x_a - (1 - t) x_p - t x_c = 0
+        ! for every interior shell node a (layout of shell_laplacian).
+        type(ideal_fb_t), intent(inout) :: fb
+        integer, intent(in) :: lines(:, :), number(:)
+        real(dp), intent(in) :: line_t(:)
+        integer, intent(out) :: status
+        integer :: k, a, p, c, nnz
+        status = 1
+        allocate (fb%lap_ptr(fb%ns + 1), fb%lap_col(3*fb%ns), fb%lap_val(3*fb%ns))
+        nnz = 0; fb%lap_ptr(1) = 1
+        do k = 1, fb%ns
+            a = fb%shell_global(k)
+            if (fb%role(k) == 2) then
+                p = number(lines(1, a)); c = number(lines(2, a))
+                if (p == 0 .or. c == 0) return
+                if (fb%role(p) /= 1 .or. fb%role(c) /= 3) return
+                if (.not. (line_t(a) > 0 .and. line_t(a) < 1)) return
+                fb%lap_col(nnz + 1:nnz + 3) = [k, p, c]
+                fb%lap_val(nnz + 1:nnz + 3) = [1.0_dp, line_t(a) - 1, -line_t(a)]
+                nnz = nnz + 3
+            end if
+            fb%lap_ptr(k + 1) = nnz + 1
+        end do
+        fb%lap_col = fb%lap_col(:nnz); fb%lap_val = fb%lap_val(:nnz)
+        status = 0
     end subroutine
 end module milca_ideal_free_boundary
