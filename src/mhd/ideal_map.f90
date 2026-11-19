@@ -2278,18 +2278,22 @@ contains
                         if (direct) then
                             use_lu = .false.
                             spd = .false.
+                            ! Inertia control: the damped Hessian H + shift must be
+                            ! positive definite (Cholesky; LDL^T inertia for the
+                            ! Krylov policy), so the step descends; near-null
+                            ! relabelling and slightly negative directions raise mu
+                            ! instead of entering a Newton step towards a saddle.
                             if (map%krylov_step) then
-                                ! The preconditioner must be SPD (map%factor_policy);
-                                ! an indefinite factor is used for this trial only.
                                 call factor_masked(map, matrix, .not. map%fixed, shift, &
                                     solver, factored, estatus, report, lu=lsolver, &
                                     lu_done=lfactored, use_lu=use_lu, spd=spd)
                             else
                                 call factor_masked(map, matrix, .not. map%fixed, shift, &
-                                    solver, factored, estatus, report)
+                                    solver, factored, estatus, report, spd=spd, &
+                                    definite=.true.)
                             end if
                             retained = estatus == 0 .and. spd
-                            if (estatus /= 0) then
+                            if (estatus /= 0 .or. .not. spd) then
                                 mu = mu*10; cycle
                             end if
                             if (use_lu) then
@@ -2325,22 +2329,27 @@ contains
                         call ideal_map_energy(map, trial, trial_energy, estatus, &
                             angle=trial_angle)
                         report%energy_s = report%energy_s + wall_seconds() - t0
+                        ! Outside the roundoff band of W a step is accepted when
+                        ! the actual reduction is at least a tenth of the one the
+                        ! quadratic model g.s + s.H s/2 predicts.
                         if (estatus == IDEAL_MAP_OK .and. trial_energy < energy &
-                            - 64*epsilon(1.0_dp)*abs(energy)) then
-                            accepted = .true.; exit
+                            - 1024*epsilon(1.0_dp)*abs(energy)) then
+                            if (energy - trial_energy >= 0.1_dp*predicted_reduction()) then
+                                accepted = .true.; exit
+                            end if
                         end if
                         ! Within the roundoff band of W the energy cannot rank steps.
                         ! Rank them by the trapezoidal energy change
                         ! (g(x) + g(x + s)) . s / 2 (error O(|s|^3), no cancellation
-                        ! against W); near-null directions need full Newton steps that
-                        ! do not decrease |g| monotonically.
-                        if (estatus == IDEAL_MAP_OK .and. trial_energy <= energy &
-                            + 1024*epsilon(1.0_dp)*abs(energy)) then
+                        ! against W); with a positive definite damped Hessian the
+                        ! step descends along the near-null directions as well.
+                        if (estatus == IDEAL_MAP_OK .and. abs(trial_energy - energy) &
+                            <= 1024*epsilon(1.0_dp)*abs(energy)) then
                             call ideal_map_energy(map, trial, trial_energy, estatus, grad, &
                                 angle=trial_angle)
                             call ideal_map_reduce(map, grad, rhs)
                             where (map%fixed) rhs = 0
-                            if (dot_product(gred + rhs, step) <= 0) then
+                            if (estatus == IDEAL_MAP_OK .and. dot_product(gred + rhs, step) <= 0) then
                                 accepted = .true.; exit
                             end if
                         end if
@@ -2642,6 +2651,20 @@ contains
             end do
         end subroutine
 
+        real(dp) function predicted_reduction()
+            ! -(g.s + s.H s/2) of the undamped Hessian along the reduced step
+            real(dp) :: hs
+            integer :: r, q
+            predicted_reduction = -dot_product(gred, step)
+            do r = 1, map%nred
+                hs = 0
+                do q = matrix%rowptr(r), matrix%rowptr(r + 1) - 1
+                    hs = hs + matrix%val(q)*step(matrix%colidx(q))
+                end do
+                predicted_reduction = predicted_reduction - step(r)*hs/2
+            end do
+        end function
+
         subroutine cleanup()
             if (factored) call sparse_destroy(solver)
             if (ofactored) call sparse_destroy(osolver)
@@ -2795,7 +2818,7 @@ contains
     end function
 
     subroutine factor_masked(map, matrix, keep, shift, slv, done, info, report, gauge, &
-                             lu, lu_done, use_lu, spd)
+                             lu, lu_done, use_lu, spd, definite)
         ! Factorise the reduced Hessian restricted to the keep rows/columns
         ! (identity elsewhere), plus shift on the diagonal. done: slv holds a
         ! factorisation of this pattern (only the numerical one is redone).
@@ -2807,7 +2830,9 @@ contains
         ! policy map%factor_policy. slv holds the Cholesky or LDL^T and lu the
         ! pivoted LU of the same matrix; use_lu tells which one holds the
         ! factor of this trial and spd whether it is the positive definite
-        ! factor in slv. Without them, slv holds the pivoted LU.
+        ! factor in slv. Without them, slv holds the pivoted LU. definite (with
+        ! spd, without lu): the Cholesky factor only; info /= 0 when the matrix
+        ! is not positive definite.
         type(ideal_map_t), intent(in) :: map
         type(csr_matrix_t), intent(in) :: matrix
         logical, intent(in) :: keep(:)
@@ -2820,6 +2845,7 @@ contains
         type(sparse_solver_t), intent(inout), optional :: lu
         logical, intent(inout), optional :: lu_done
         logical, intent(out), optional :: use_lu, spd
+        logical, intent(in), optional :: definite
         type(fortsparse_status_t) :: sstatus
         logical :: krylov
         integer :: row, nc
@@ -2850,6 +2876,14 @@ contains
         ! trial: an indefinite LDL^T, or the pivoted LU of the same matrix
         ! after a failed Cholesky, serves this trial only. Without lu, the
         ! pivoted LU is the factor (the direct-step policy).
+        if (present(definite)) then
+            if (definite .and. nc == 0) then
+                call factor_one(slv, done, CHOLESKY, info, sstatus)
+                spd = info == 0
+                if (.not. spd) report%indefinite_trials = report%indefinite_trials + 1
+                return
+            end if
+        end if
         if (.not. krylov) then
             call factor_one(slv, done, PIVOTED_LU, info, sstatus)
             return
