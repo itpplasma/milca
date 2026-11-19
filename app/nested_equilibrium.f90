@@ -33,7 +33,7 @@ program nested_equilibrium
     integer, parameter :: mesh_nodes(7) = [16, 24, 32, 48, 64, 96, 128]
     logical :: automatic_ntor, automatic_mesh, automatic_iota
     logical :: mesh_confirmed, modes_confirmed, iota_confirmed
-    logical :: iota_crosses_zero = .false.
+    logical :: iota_vanishes = .false.
     real(dp) :: fourier_tolerance, fourier_error, mesh_tolerance, mesh_error
     real(dp) :: iota_tolerance, iota_error
     real(dp) :: observed(4), previous_observed(4)
@@ -153,11 +153,11 @@ program nested_equilibrium
     do
         mesh_confirmed = .true.; modes_confirmed = .true.; iota_confirmed = .true.
         if (automatic_mesh) call raise_mesh(mesh_confirmed)
-        if (iota_crosses_zero) exit
+        if (iota_vanishes) exit
         if (automatic_ntor) call raise_modes(modes_confirmed)
-        if (iota_crosses_zero) exit
+        if (iota_vanishes) exit
         if (automatic_iota) call raise_iota(iota_confirmed)
-        if (iota_crosses_zero) exit
+        if (iota_vanishes) exit
         if (count([automatic_mesh, automatic_ntor, automatic_iota]) < 2) exit
         if (mesh_confirmed .and. modes_confirmed .and. iota_confirmed) exit
     end do
@@ -175,7 +175,7 @@ program nested_equilibrium
     call result%attribute('physical_model', 'fixed-boundary nested ideal MHD, prescribed iota')
     call result%attribute('converged', merge('true ', 'false', &
         solve_status == 0 .and. residual <= tolerance .and. current_error <= current_tolerance &
-        .and. .not. iota_crosses_zero &
+        .and. .not. iota_vanishes &
         .and. (.not. automatic_ntor .or. fourier_error <= fourier_tolerance) &
         .and. (.not. automatic_mesh .or. mesh_error <= mesh_tolerance) &
         .and. (.not. automatic_iota .or. iota_error <= iota_tolerance)))
@@ -192,8 +192,11 @@ program nested_equilibrium
     call result%write('betatotal', kinetic/magnetic, '1', 'int p dV / int B^2/2 dV')
     call result%write('ctor', ctor, 'A', 'enclosed toroidal current at the edge')
     if (prescribe_current) then
-        call result%attribute('current_status', merge('iota crosses zero', 'matched          ', &
-            iota_crosses_zero))
+        call result%attribute('current_status', merge('iota vanishes', 'matched      ', &
+            iota_vanishes))
+        if (iota_vanishes) call result%attribute('failure', 'the iota matched to the' &
+            //' prescribed current comes within current_tolerance of zero, which the' &
+            //' frozen map does not admit')
         call result%write('current_error', current_error, '1', &
             'largest iota change of the last Newton step on the prescribed current')
         call result%write('current_iterations', real(current_iterations, dp), '1', &
@@ -279,6 +282,17 @@ contains
         end do
     end function
 
+    real(dp) function min_abs_iota()
+        ! smallest |iota| on the grid of the seed's iota admission
+        real(dp) :: value, unused1, unused2
+        integer :: a
+        min_abs_iota = huge(1.0_dp)
+        do a = 0, 128
+            call profile%evaluate(a/128.0_dp, value, unused1, unused2)
+            min_abs_iota = min(min_abs_iota, abs(value))
+        end do
+    end function
+
     subroutine raise_mesh(confirmed)
         ! mesh levels at the current toroidal modes until mesh_error is below
         ! mesh_tolerance; confirmed when the first refinement already is
@@ -294,7 +308,7 @@ contains
             steps = steps + 1
             print '(a,i4,a,es10.3)', 'boundary nodes ', boundary_nodes, ': mesh error ', &
                 mesh_error
-            if (iota_crosses_zero .or. mesh_error <= mesh_tolerance) exit
+            if (iota_vanishes .or. mesh_error <= mesh_tolerance) exit
             ! a change that does not shrink is limited by another resolution
             if (mesh_error >= last) exit
             last = mesh_error
@@ -317,7 +331,7 @@ contains
             steps = steps + 1
             print '(a,i3,a,es10.3)', 'toroidal modes ', ntor_level, ': fourier error ', &
                 fourier_error
-            if (iota_crosses_zero .or. fourier_error <= fourier_tolerance) exit
+            if (iota_vanishes .or. fourier_error <= fourier_tolerance) exit
             ! a change that does not shrink is limited by another resolution
             if (fourier_error >= last) exit
             last = fourier_error
@@ -341,7 +355,7 @@ contains
             iota_error = change()
             steps = steps + 1
             print '(a,i3,a,es10.3)', 'iota nodes ', iota_level, ': iota error ', iota_error
-            if (iota_crosses_zero .or. iota_error <= iota_tolerance) exit
+            if (iota_vanishes .or. iota_error <= iota_tolerance) exit
             ! a change that does not shrink is limited by another resolution
             if (iota_error >= last) exit
             last = iota_error
@@ -417,9 +431,11 @@ contains
         type(map_3d_loop_t), allocatable :: loops(:)
         real(dp), allocatable :: s(:), c(:), target(:), measured(:), step(:, :)
         real(dp), allocatable :: jacobian(:, :)
-        real(dp) :: unused1, unused2
+        real(dp), allocatable :: c0(:)
+        real(dp) :: unused1, unused2, tau
         type(toroidal_profile_t) :: previous
-        integer :: j, k, local, n, info
+        type(ideal_map_t) :: map0
+        integer :: j, k, local, n, info, sign_attempt
         integer, allocatable :: pivot(:)
         n = iota_level
         s = iota_surfaces(n)
@@ -435,7 +451,9 @@ contains
         call set_iota(c)
         call resolve(local)
         if (local /= 0) call fail('the map folded when frozen with the represented iota')
+        c0 = c; map0 = map
         k = 0
+        sign_attempt = 1
         do
             call measure(loops, measured)
             call current_jacobian(c, loops, measured, jacobian)
@@ -454,17 +472,41 @@ contains
             end if
             k = k + 1
             current_iterations = k
-            c = c + step(:, 1)
-            ! The frozen map admits iota of one sign only (docs/ideal-seed-3d.md);
-            ! the step may reverse that sign on every surface.
+            ! The frozen map admits iota of one sign only (docs/ideal-seed-3d.md).
+            ! A step may reverse that sign on every surface; one that would
+            ! make iota change sign is halved until iota keeps one sign, which
+            ! holds for a short enough step from the admitted c.
             previous = profile
-            call set_iota(c)
-            if (.not. single_signed()) then
+            tau = 1
+            do
+                call set_iota(c + tau*step(:, 1))
+                if (single_signed() .or. tau < epsilon(1.0_dp)) exit
+                tau = tau/2
+            end do
+            if (tau < 1) print '(a,es10.3)', 'current iteration: step scaled by ', tau
+            c = c + tau*step(:, 1)
+            ! Iota within current_tolerance of zero has no resolved sign. The
+            ! admitted iota form two components, iota > 0 and iota < 0, and
+            ! the damped steps stay in one, so the other is searched from the
+            ! mirrored start before the match is given up.
+            if (.not. single_signed() .or. min_abs_iota() <= current_tolerance) then
                 profile = previous
-                iota_crosses_zero = .true.
-                print '(a)', 'current iteration: the matched iota crosses zero, which the' &
-                    //' frozen map does not admit'
-                exit
+                print '(a,es10.3,a)', 'current iteration: the matched iota comes within ', &
+                    current_tolerance, ' of zero'
+                if (sign_attempt == 2) then
+                    iota_vanishes = .true.
+                    print '(a)', 'current iteration: on both signs, which the frozen map' &
+                        //' does not admit'
+                    exit
+                end if
+                sign_attempt = 2
+                print '(a)', 'current iteration: starting from the iota of the other sign'
+                c = -c0; map = map0
+                call set_iota(c)
+                solve_tolerance = tolerance
+                call resolve(local)
+                if (local /= 0) call fail('the map folded when frozen with the mirrored iota')
+                cycle
             end if
             ! intermediate maps need only the accuracy of the iota increment
             solve_tolerance = max(tolerance, min(1e-4_dp, 1e-3_dp*error))

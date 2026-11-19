@@ -848,7 +848,8 @@ foreach(family 1 2)
         TARGETS nested_oracle_export test_nested_boundary_input)
 endforeach()
 foreach(name circular-tokamak circular-tokamak-current circular-tokamak-hermite
-        circular-tokamak-current-hermite doubled-boundary axis-current-free)
+        circular-tokamak-current-hermite doubled-boundary axis-current-free
+        wrong-sign-start vanishing-current)
     milca_test_labels(equilibrium_nested_${name} fast CLASSES apps
         TARGETS nested_equilibrium test_nested_equilibrium_app)
 endforeach()

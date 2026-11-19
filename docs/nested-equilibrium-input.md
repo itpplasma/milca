@@ -66,10 +66,12 @@ increment of the last Newton step is `current_error`. Intermediate maps are
 solved to max(tolerance, min(1e-4, 1e-3 * increment)) against the first
 seed's gradient, and the last step is repeated on the fully solved map. A
 step may reverse the sign of iota on every surface (a current-free
-stellarator started from the other handedness). A matched iota that changes
-sign inside [0, 1] is not admitted by the frozen map
-([ideal-seed-3d](ideal-seed-3d.md)) and ends the solve with
-`current_status = "iota crosses zero"`. On an axisymmetric boundary Ampere's
+stellarator started from the other handedness). An iota that changes sign
+inside [0, 1] is not admitted by the frozen map
+([ideal-seed-3d](ideal-seed-3d.md)), so a step that would produce one is
+halved until iota keeps one sign. An iterate whose |iota| comes within
+`current_tolerance` of zero has no resolved sign and ends the solve with
+`current_status = "iota vanishes"` and a `failure` reason. On an axisymmetric boundary Ampere's
 law on the surface s gives mu0 I(s) = psi'(s) oint |grad s|/R dl with a
 positive integral of order s near the axis, so iota has the zeros of
 I_T(s)/s. A prescribed current that vanishes on (0, 1], or has dI_T/ds = 0
