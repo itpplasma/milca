@@ -2305,6 +2305,16 @@ contains
         real(dp) :: dg(2, 2), flux(2), rho, x, w
         integer :: e, g, l, nl, k
         nl = max(1, nint(sqrt(fb%plasma%cells*sqrt(3.0_dp)/(4*pi))))
+        block
+            ! DEBUG: MILCA_FB_SLIDE multiplies the slide layers
+            character(16) :: text
+            integer :: length, factor
+            call get_environment_variable('MILCA_FB_SLIDE', text, length)
+            if (length > 0) then
+                read (text, *) factor
+                nl = nl*factor
+            end if
+        end block
         allocate (fb%slide(2, fb%plasma%nodes, nl + 1))
         fb%slide = 0
         associate (map => fb%plasma)
@@ -2472,7 +2482,7 @@ contains
         real(dp) :: step_tol, mu, scale_p, res_tol, history(0:5), tangent_damping
         integer :: it, i, p, st, tries, back, nback
         integer, allocatable :: tpos(:, :)
-        real(dp), allocatable :: trial_du(:)
+        real(dp), allocatable :: trial_du(:), du_newton(:)
         type(sparse_solver_t) :: csolver, msolver
         type(ideal_fb_hypotheses_t) :: hyp
         logical :: cready, mready
@@ -2642,6 +2652,7 @@ contains
                     end if
                 end if
                 du = sol(:fb%n)
+                if (tries == 1) du_newton = du
                 report%factor_s = report%factor_s + wall() - t0
                 call map_steps(fb, du, disp, rot)
                 if (fb%trust_region) then
@@ -2693,6 +2704,10 @@ contains
                 if (accepted) exit
                 mu = 10*mu
             end do
+            if (.not. accepted .and. talk) then
+                call merit_slope(du_newton, 'Newton')
+                call merit_slope(du, 'LM')
+            end if
             if (.not. accepted .and. fb%negative_curvature) then
                 fb%plasma%x = x0; fb%xs = xs0; fb%phi = phi0; fb%lam = lam0
                 call escape(moved)
@@ -2885,6 +2900,58 @@ contains
                 report%rejected = report%rejected + 1
                 if (delta < 1.0e-9_dp*cap_x) return
             end do
+        end subroutine
+
+        subroutine merit_slope(d, label)
+            ! DEBUG: d/de merit(x + e d) by central differences against the
+            ! linear model 2 sum w g P(H d) (P the multiplier and slide
+            ! projections of the merit).
+            real(dp), intent(in) :: d(:)
+            character(*), intent(in) :: label
+            real(dp), allocatable :: y(:), dm(:), gt(:)
+            real(dp) :: model, mp, mm, e
+            logical :: okm
+            integer :: k, s2
+            y = hmul(d)
+            if (cready) call multiplier_increment(fb, csolver, y, dm, okm)
+            call project_slide(fb, wts, y)
+            model = 2*sum(wts*grad*y)
+            print '(3a,es12.4)', '   merit slope ', label, ': model ', model
+            block
+                real(dp), allocatable :: r(:)
+                r = hmul(d) + grad
+                call project_slide(fb, wts, r)
+                print '(a,es12.4,a,es12.4)', '     KKT residual |P(Hd + g)|_w ', &
+                    sqrt(sum(wts*r**2)), ' |g|_w ', sqrt(sum(wts*grad**2))
+                block
+                    real(dp), allocatable :: u1(:), u2(:)
+                    allocate (u1(fb%n), u2(fb%n))
+                    call random_number(u1); call random_number(u2)
+                    print '(a,2es14.6)', '     symmetry u1.Hu2, u2.Hu1 ', &
+                        dot_product(u1, hmul(u2)), dot_product(u2, hmul(u1))
+                end block
+            end block
+            do k = 4, 10
+                e = 10.0_dp**(-k)
+                call trial(d, e, mp, s2)
+                call trial(d, -e, mm, s2)
+                print '(a,es9.1,a,es12.4,a,i0)', '     e ', e, ' central ', &
+                    (mp - mm)/(2*e), ' status ', s2
+            end do
+        end subroutine
+
+        subroutine trial(d, e, m, s2)
+            real(dp), intent(in) :: d(:), e
+            real(dp), intent(out) :: m
+            integer, intent(out) :: s2
+            real(dp), allocatable :: g2(:)
+            allocate (g2(fb%n))
+            call ideal_fb_step(fb, d, e)
+            call ideal_fb_gradient(fb, g2, s2)
+            if (cready) call project_multipliers(fb, csolver, g2)
+            call project_slide(fb, wts, g2)
+            m = sum(wts*g2**2)
+            fb%plasma%x = x0; fb%xs = xs0; fb%phi = phi0; fb%lam = lam0
         end subroutine
 
         logical function saddle()

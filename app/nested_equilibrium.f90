@@ -413,8 +413,7 @@ contains
             if (local /= 0) call fail('the free-boundary mesh failed')
             call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
                 0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
-                positions=shell_positions, lines=shell_lines, line_t=shell_t, &
-                spines=shell_spines, spine_origins=shell_origins)
+                positions=shell_positions, lines=shell_lines, line_t=shell_t)
         else
             call fb_nested_mesh(mesh, chain, fb_centre, fb_axes, fb_curve, nodes, &
                 degree, local)
