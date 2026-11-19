@@ -191,6 +191,8 @@ module milca_ideal_free_boundary
         ! Reference Laplacian of the shell (harmonic extension), CSR.
         integer, allocatable :: lap_ptr(:), lap_col(:)
         real(dp), allocatable :: lap_val(:)
+        ! Layered shell: the (Gamma_p, Gamma_c) shell nodes of every segment.
+        integer, allocatable :: line_pair(:, :)
         ! Gamma_c: nt trace dofs (shell nodes), ccw edges (0:order, nedge),
         ! Galerkin S per harmonic k (nt, nt, 0:ntor), external trace a and
         ! normal-field load h per real mode (nt, nmode).
@@ -2574,7 +2576,12 @@ contains
                     call trust_region_trials()
                     exit
                 end if
+                ! In a layered shell no step moves Gamma_p by more than a
+                ! quarter of its distance to Gamma_c: a longer step thins
+                ! the layers towards a fold, and the stalls on DIII-D sat next
+                ! to such near-degenerate cells.
                 alpha = min(1.0_dp, cap_x/max(disp, tiny(1.0_dp)), &
+                    0.25_dp*shell_gap(fb)/max(disp, tiny(1.0_dp)), &
                     cap_w/max(rot, tiny(1.0_dp)))
                 if (talk) print '(a,i3,4es10.2)', '   try mu disp rot alpha', tries, &
                     mu, disp, rot, alpha
@@ -5606,9 +5613,11 @@ contains
         integer, intent(in) :: lines(:, :), number(:)
         real(dp), intent(in) :: line_t(:)
         integer, intent(out) :: status
-        integer :: k, a, p, c, nnz
+        integer :: k, a, p, c, nnz, npair
         status = 1
-        allocate (fb%lap_ptr(fb%ns + 1), fb%lap_col(3*fb%ns), fb%lap_val(3*fb%ns))
+        allocate (fb%lap_ptr(fb%ns + 1), fb%lap_col(3*fb%ns), fb%lap_val(3*fb%ns), &
+            fb%line_pair(2, fb%ns))
+        fb%line_pair = 0; npair = 0
         nnz = 0; fb%lap_ptr(1) = 1
         do k = 1, fb%ns
             a = fb%shell_global(k)
@@ -5617,6 +5626,10 @@ contains
                 if (p == 0 .or. c == 0) return
                 if (fb%role(p) /= 1 .or. fb%role(c) /= 3) return
                 if (.not. (line_t(a) > 0 .and. line_t(a) < 1)) return
+                if (findloc(fb%line_pair(1, :npair), p, dim=1) == 0) then
+                    npair = npair + 1
+                    fb%line_pair(:, npair) = [p, c]
+                end if
                 fb%lap_col(nnz + 1:nnz + 3) = [k, p, c]
                 fb%lap_val(nnz + 1:nnz + 3) = [1.0_dp, line_t(a) - 1, -line_t(a)]
                 nnz = nnz + 3
@@ -5624,6 +5637,20 @@ contains
             fb%lap_ptr(k + 1) = nnz + 1
         end do
         fb%lap_col = fb%lap_col(:nnz); fb%lap_val = fb%lap_val(:nnz)
+        fb%line_pair = fb%line_pair(:, :npair)
         status = 0
     end subroutine
+
+    real(dp) function shell_gap(fb) result(gap)
+        ! Smallest Gamma_p-Gamma_c distance along the segments of a layered
+        ! shell (n = 0 positions), huge without one.
+        type(ideal_fb_t), intent(in) :: fb
+        integer :: k
+        gap = huge(1.0_dp)
+        if (.not. allocated(fb%line_pair)) return
+        do k = 1, size(fb%line_pair, 2)
+            gap = min(gap, norm2(fb%xs(1:2, 1, fb%line_pair(2, k)) &
+                - fb%xs(1:2, 1, fb%line_pair(1, k))))
+        end do
+    end function
 end module milca_ideal_free_boundary

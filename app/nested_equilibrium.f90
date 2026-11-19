@@ -25,7 +25,8 @@ program nested_equilibrium
     use milca_equilibrium_chart, only: cylindrical_chart_t
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
-        ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED
+        ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
+        ideal_fb_hessian, ideal_fb_step
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
     use milca_ideal_fb_nested, only: fb_nested_offset_distance, fb_nested_layer_mesh, &
@@ -106,6 +107,8 @@ program nested_equilibrium
     ! coupling_margin minor radii) and the shell is layered along the normal
     ! segments (fb_nested_layer_mesh); 0: the harmonic-extension shell.
     integer :: shell_layers
+    ! Print every free-boundary Newton step (environment MILCA_FB_VERBOSE).
+    logical :: fb_verbose
     real(dp) :: shell_distance
     real(dp), allocatable :: shell_positions(:, :), shell_t(:)
     integer, allocatable :: shell_lines(:, :)
@@ -129,6 +132,11 @@ program nested_equilibrium
     iota_nodes = -1; iota_tolerance = 1e-4_dp
     free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
     coupling_margin = 0.5_dp; shell_layers = 2
+    block
+        integer :: length
+        call get_environment_variable('MILCA_FB_VERBOSE', length=length)
+        fb_verbose = length > 0
+    end block
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -452,6 +460,13 @@ contains
                 call fail('the free-boundary seed is not admitted')
         end if
         fb = next
+        block
+            ! DEBUG: tangential damping from MILCA_FB_TANGENTIAL
+            character(32) :: text
+            integer :: length
+            call get_environment_variable('MILCA_FB_TANGENTIAL', text, length)
+            if (length > 0) read (text, *) fb%tangential_damping
+        end block
         call fb_solve(tolerance)
     end subroutine
 
@@ -536,6 +551,39 @@ contains
         if (local /= IDEAL_FB_OK) call fail('the vacuum traces are not finite')
     end subroutine
 
+    subroutine jacobian_check()
+        ! DEBUG: H v against central differences of the gradient, by block.
+        integer, allocatable :: rp(:), ci(:)
+        real(dp), allocatable :: val(:), v(:), gp(:), gm(:), hv(:), fd(:)
+        real(dp) :: h
+        integer :: i, p, st, k, b(5)
+        call ideal_fb_hessian(fb, rp, ci, val)
+        allocate (v(fb%n), gp(fb%n), gm(fb%n), hv(fb%n))
+        call random_number(v); v = v - 0.5_dp
+        v(fb%np + fb%nx + 1:fb%np + 2*fb%nx) = 0
+        b = [0, fb%np, fb%np + fb%nx, fb%np + 2*fb%nx, fb%n]
+        do i = 1, fb%n
+            hv(i) = 0
+            do p = rp(i), rp(i + 1) - 1
+                hv(i) = hv(i) + val(p)*v(ci(p))
+            end do
+        end do
+        do k = 1, 3
+            h = 1.0e-4_dp*10.0_dp**(-k)
+            call ideal_fb_step(fb, v, h)
+            call ideal_fb_gradient(fb, gp, st)
+            call ideal_fb_step(fb, v, -2*h)
+            call ideal_fb_gradient(fb, gm, st)
+            call ideal_fb_step(fb, v, h)
+            fd = (gp - gm)/(2*h)
+            print '(a,es9.1,4(a,2es10.2))', 'jacobian check h', h, &
+                ' plasma', maxval(abs(fd(b(1)+1:b(2)) - hv(b(1)+1:b(2)))), maxval(abs(hv(b(1)+1:b(2)))), &
+                ' shell', maxval(abs(fd(b(2)+1:b(3)) - hv(b(2)+1:b(3)))), maxval(abs(hv(b(2)+1:b(3)))), &
+                ' constr', maxval(abs(fd(b(3)+1:b(4)) - hv(b(3)+1:b(4)))), maxval(abs(hv(b(3)+1:b(4)))), &
+                ' phi', maxval(abs(fd(b(4)+1:b(5)) - hv(b(4)+1:b(5)))), maxval(abs(hv(b(4)+1:b(5))))
+        end do
+    end subroutine
+
     subroutine fb_solve(target)
         ! Newton on the free-boundary residual to the relative residual target.
         ! A solve that stalls has driven its Levenberg damping up; it is
@@ -544,10 +592,11 @@ contains
         real(dp), intent(in) :: target
         real(dp) :: last
         integer :: restart
+        if (fb_verbose) call jacobian_check()
         last = huge(1.0_dp)
         do restart = 0, 20
             call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
-                solve_status, verbose=.false., residual_tolerance=target)
+                solve_status, verbose=fb_verbose, residual_tolerance=target)
             if (solve_status == IDEAL_FB_OK .or. solve_status == IDEAL_FB_FOLDED) exit
             if (.not. fb_report%residual < 0.75_dp*last) exit
             last = fb_report%residual
