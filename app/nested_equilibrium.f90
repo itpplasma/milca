@@ -142,11 +142,11 @@ program nested_equilibrium
             call ideal_seed_disk_mesh(mesh, boundary_nodes, degree, status)
             if (status /= 0) error stop 'nested_equilibrium: disk mesh'
             call init_seed(status)
-            if (status /= 0) error stop 'nested_equilibrium: toroidal level seed'
+            if (status /= 0) call fail('the seed of a toroidal level is not admitted')
             reference = free_gradient()
             seed_x = map%x
             call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
-            if (status /= 0) error stop 'nested_equilibrium: toroidal level correction'
+            if (status /= 0) call fail('the toroidal level correction failed')
             call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
                 reference_gradient=reference)
         end if
@@ -167,11 +167,11 @@ program nested_equilibrium
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
     residual = free_gradient()/max(tiny(1.0_dp), reference)
     call integrals(volume, area, magnetic, kinetic, status)
-    if (status /= 0) error stop 'nested_equilibrium: integrals'
+    if (status /= 0) call fail('a volume integral met a folded map')
     call axis_radius(raxis, status)
-    if (status /= 0) error stop 'nested_equilibrium: axis'
+    if (status /= 0) call fail('the magnetic axis was not found')
     ctor = enclosed_current(1.0_dp, status)
-    if (status /= 0) error stop 'nested_equilibrium: current'
+    if (status /= 0) call fail('the edge current readback met a folded map')
 
     call result%create(run)
     call result%attribute('physical_model', 'fixed-boundary nested ideal MHD, prescribed iota')
@@ -218,6 +218,19 @@ program nested_equilibrium
 
 contains
 
+    subroutine fail(reason)
+        ! A state that cannot be solved or read back is a result, not a crash:
+        ! write converged = false with the reason and stop.
+        character(*), intent(in) :: reason
+        print '(2a)', 'nested_equilibrium: ', reason
+        call result%create(run)
+        call result%attribute('physical_model', 'fixed-boundary nested ideal MHD')
+        call result%attribute('converged', 'false')
+        call result%attribute('failure', reason)
+        call result%close()
+        stop
+    end subroutine
+
     subroutine mesh_ladder()
         ! Resolution ladder (docs/equilibrium-harness.md): each level starts from
         ! its own seed plus the correction of the solved coarser level and stops
@@ -237,15 +250,12 @@ contains
                 guessed = .true.
                 call init_seed(status)
             end if
-            if (status /= 0) then
-                print '(a,i0)', 'nested_equilibrium: seed status ', status
-                error stop 'nested_equilibrium: seed'
-            end if
+            if (status /= 0) call fail('the seed is not admitted (folded or invalid input)')
             reference = free_gradient()
             seed_x = map%x
             if (step > 1) then
                 call ideal_map_prolong_correction(map, coarse, coarse_seed, status)
-                if (status /= 0) error stop 'nested_equilibrium: ladder correction'
+                if (status /= 0) call fail('the resolution ladder correction failed')
             end if
             call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
                 reference_gradient=reference)
@@ -284,9 +294,9 @@ contains
         real(dp) :: v, a, w, k, r, i0, i1, unused1, unused2
         integer :: local
         call integrals(v, a, w, k, local)
-        if (local /= 0) error stop 'nested_equilibrium: integrals'
+        if (local /= 0) call fail('a volume integral met a folded map')
         call axis_radius(r, local)
-        if (local /= 0) error stop 'nested_equilibrium: axis'
+        if (local /= 0) call fail('the magnetic axis was not found')
         call profile%evaluate(0.0_dp, i0, unused1, unused2)
         call profile%evaluate(1.0_dp, i1, unused1, unused2)
         values = [w, r/sqrt(a/pi), i0, i1]
@@ -365,7 +375,7 @@ contains
             ! intermediate maps need only the accuracy of the current mismatch
             solve_tolerance = max(tolerance, min(1e-4_dp, 1e-3_dp*error))
             call resolve(local)
-            if (local /= 0) error stop 'nested_equilibrium: current re-seed'
+            if (local /= 0) call fail('the seed for an iota update is not admitted')
         end do
     end subroutine
 
@@ -434,7 +444,7 @@ contains
         end do
         rhs = transpose(points)
         call dgels('N', nplane, 2*ntor + 1, 2, lsq, nplane, rhs, nplane, work, size(work), info)
-        if (info /= 0) error stop 'nested_equilibrium: axis fit'
+        if (info /= 0) call fail('the axis guess fit failed')
         if (allocated(axis_input)) deallocate (axis_input)
         allocate (axis_input(4, -ntor:ntor), source=boundary_input(:, :, 0))
         axis_input(:, 0) = [rhs(1, 1), 0.0_dp, rhs(1, 2), 0.0_dp]
@@ -471,7 +481,7 @@ contains
         integer :: i, local
         do i = 1, size(s)
             values(i) = enclosed_current(s(i), local)
-            if (local /= 0) error stop 'nested_equilibrium: current'
+            if (local /= 0) call fail('the current readback met a folded map')
         end do
     end subroutine
 
@@ -515,7 +525,7 @@ contains
         integer :: local
         allocate (gradient(map%ndof), reduced(map%nred))
         call ideal_map_energy(map, map%x, energy, local, gradient)
-        if (local /= 0) error stop 'nested_equilibrium: energy'
+        if (local /= 0) call fail('the energy met a folded map')
         call ideal_map_reduce(map, gradient, reduced)
         where (map%fixed) reduced = 0
         free_gradient = norm2(reduced)

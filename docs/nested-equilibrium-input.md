@@ -86,7 +86,10 @@ surfaces use the image of the reference circle), with a prescribed current also
 map's toroidal modes `map_ntor` and, with `map_ntor = -1`, `fourier_error`, the final solve's wall seconds
 (`energy_seconds`, `hessian_seconds`, `factor_seconds`) and counts
 (`factorizations`, `lu_fallbacks`, `analyses`), and the global attribute
-`converged`. Volume integrals use collapsed Gauss-Legendre on each triangle and
+`converged`. A seed that is not admitted, a folded map met by a readback or a
+failed correction ends the run with exit status 0, `converged = "false"` and
+the global attribute `failure` giving the reason; invalid input stops with an
+error. Volume integrals use collapsed Gauss-Legendre on each triangle and
 the trapezoidal rule in phi; the mean area is int dV/R / (2 pi).
 
 These are candidate values: `fourier_error` estimates the toroidal truncation

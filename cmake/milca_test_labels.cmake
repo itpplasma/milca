@@ -847,10 +847,13 @@ foreach(family 1 2)
     milca_test_labels(equilibrium_nested_boundary_input_${family} fast CLASSES apps
         TARGETS nested_oracle_export test_nested_boundary_input)
 endforeach()
-foreach(name circular-tokamak circular-tokamak-current)
+foreach(name circular-tokamak circular-tokamak-current circular-tokamak-hermite
+        circular-tokamak-current-hermite doubled-boundary)
     milca_test_labels(equilibrium_nested_${name} fast CLASSES apps
         TARGETS nested_equilibrium test_nested_equilibrium_app)
 endforeach()
+milca_test_labels(equilibrium_nested_qi-nfp2-current-free slow CLASSES apps equilibrium
+    TARGETS nested_equilibrium test_nested_equilibrium_app)
 foreach(k 2 3)
     milca_test_labels(equilibrium_core_map_state_p${k} fast CLASSES mhd
         TARGETS test_map_equilibrium)
@@ -869,6 +872,8 @@ milca_test_labels(ideal_seed_3d_boundary_profiles fast CLASSES mhd
     TARGETS test_ideal_seed_3d)
 milca_test_labels(ideal_map_field_angle fast CLASSES mhd
     TARGETS test_ideal_map_field_angle)
+milca_test_labels(ideal_seed_3d_hermite_profile fast CLASSES mhd
+    TARGETS test_toroidal_profile_hermite)
 milca_test_labels(ideal_seed_3d_nested_input fast CLASSES mhd
     TARGETS test_nested_seed_input)
 if(TARGET gen_homma)
