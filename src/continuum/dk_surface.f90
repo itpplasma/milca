@@ -12,8 +12,9 @@
 !! streaming coefficient of each node, C_l the collision rows of degree l);
 !! S acts on all m at once as two dense surface matrices per degree.
 !! FGMRES is right-preconditioned by one dk_mono factorisation per eigenmode
-!! of R^-1 C_4, with the diagonal of V^-1 R^-1 C_l V as the rate of degree l:
-!! exact for pitch-angle scattering. Memory is that of n_x n_s monoenergetic
+!! of R^-1 C_4 (complex pairs by their real and imaginary parts), with the
+!! diagonal of V^-1 R^-1 C_l V as the rate of degree l: exact for pitch-angle
+!! scattering. Memory is that of n_x n_s monoenergetic
 !! surface problems; the modes are factorised and solved in parallel.
 module milca_dk_surface
     use, intrinsic :: iso_fortran_env, only: dp => real64
@@ -570,7 +571,8 @@ contains
             end do
             call dgeev('N', 'V', nm, w, nm, wr, wi, vl, 1, v, nm, work, size(work), info)
             if (info /= 0) return
-            if (any(abs(wi) > 1e-10_dp*maxval(abs(wr)))) return
+            ! A complex pair enters V as its real and imaginary parts, a real
+            ! basis in which the mode block is 2 x 2 and its diagonal the real part.
             w = v
             vu = 0
             do m = 1, nm

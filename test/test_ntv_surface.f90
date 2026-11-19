@@ -31,7 +31,9 @@
 !!   real           surface_transport, the real-arithmetic solver with the
 !!                  dk_mono factorisation per collision mode, equals the direct
 !!                  solve (pairs = all) for pitch-angle scattering (1e-8) and the
-!!                  full operator of deuterium and electrons (1e-6);
+!!                  full operator of deuterium and electrons (1e-6), also for
+!!                  edge species on four speed elements, where R^-1 C_4 has
+!!                  a complex eigenvalue pair;
 !!   exact          with pitch-angle scattering every preconditioner is the
 !!                  inverse, so each GMRES solve converges in one iteration:
 !!                  the modal chain with 0 and 1 exact pair blocks here, and
@@ -446,6 +448,28 @@ contains
         print '(a,i0)', 'FGMRES iterations: ', its
         do a = 1, 2
             ok = matrix_close('real solver, full operator, diagonal species block', &
+                              dr(a, a, :, :), d(a, a, :, :), 1e-6_dp) .and. ok
+        end do
+        ok = cross_close(dr, d, 1e-6_dp) .and. ok
+        ! Edge electrons and deuterium (T_e/T_D = 2/3) on four speed elements
+        ! give a complex pair of R^-1 C_4 eigenvalues.
+        call plasma(1e-1_dp, sp(1:1), l1, grid, 4, 4)
+        sp(1) = collop_species_t(3.3435837768e-27_dp, 1.0_dp, 9e18_dp, 0.6_dp*kev)
+        sp(2) = collop_species_t(9.1093837015e-31_dp, -1.0_dp, 9e18_dp, 0.4_dp*kev)
+        do a = 1, 2
+            lnl(a, :) = 3*sqrt(pi)/8*collop_vth(sp(a))*1e-2_dp/collop_nuhat(sp(a), sp(a), &
+                                                                         1.0_dp)
+        end do
+        call ntv_surface_coefficients(helical(nt, nz), 1, q, ig, 1/(q*rmajor), sp, lnl, &
+                                      grid, COLLOP_FULL, 12, d, its, st)
+        ok = ok .and. st == NTV_OK
+        call surface_transport(helical(nt, nz), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
+                               COLLOP_FULL, 12, dr, its, st)
+        print '(a,i0)', 'four speed elements, surface_transport status: ', st
+        ok = ok .and. st == SURFACE_OK
+        if (.not. ok) return
+        do a = 1, 2
+            ok = matrix_close('real solver, four speed elements, diagonal species block', &
                               dr(a, a, :, :), d(a, a, :, :), 1e-6_dp) .and. ok
         end do
         ok = cross_close(dr, d, 1e-6_dp) .and. ok
