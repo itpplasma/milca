@@ -488,10 +488,11 @@ contains
             real(dp), allocatable :: node_r(:, :, :, :)
             integer, allocatable :: mid(:, :)
             real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2), x_cut, y_lost, y_ok
-            integer :: aa, kx, nx, ks, its, attempt
+            integer :: aa, kx, nx, ks, its, attempt, a_lost
             ! Speed grids tried while orbits of the top nodes leave the model.
             integer, parameter :: max_attempts = 6
             st = DEVICE_SOLVE
+            a_lost = 0
             do aa = 1, nsp
                 csp(aa) = collop_species_t(species(aa)%mass, species(aa)%z, &
                     prof%density(is, aa), prof%temperature(is, aa))
@@ -522,6 +523,7 @@ contains
                             call orbit_setup(is, aa, grid%x(kx + 1)**2, go(kx, aa), &
                                 ops(kx, aa), ks)
                             if (ks == DEVICE_ORBIT_LOST) then
+                                if (grid%x(kx + 1) < y_lost) a_lost = aa
                                 y_lost = min(y_lost, grid%x(kx + 1))
                                 cycle
                             end if
@@ -551,6 +553,7 @@ contains
                     ! Orbits that leave the file between the samples of
                     ! hp_orbit_confined: the speed grid ends below that node.
                     y_lost = grid%x(sys%invalid(1) + 1)
+                    a_lost = sys%invalid(2)
                     y_ok = maxval(grid%x, mask=grid%x < y_lost)
                     x_cut = (y_ok + y_lost)/2
                 else
@@ -559,7 +562,15 @@ contains
                 end if
                 st = DEVICE_ORBIT_LOST
                 ! The last attempt, or most of the transport weight would be lost.
-                if (attempt == max_attempts .or. x_cut < 1) return
+                if (attempt == max_attempts .or. x_cut < 1) then
+                    ! All species share the speed grid, so one species' lost
+                    ! orbits end it for every species of the surface.
+                    write (error_unit, '(a,f8.4,a,i0,a,f6.3,a,f6.3,a)') 'ntv_device: s = ', &
+                        prof%s(is), ', species ', a_lost, ': no orbit point at v/v_th = ', &
+                        y_lost, ' (outside the file or stopped by the E x B potential),', &
+                        x_cut, ' would be the end of the speed grid, below 1'
+                    return
+                end if
                 st = DEVICE_SOLVE
             end do
             if (ks == HP_NO_MEMORY) st = DEVICE_MEMORY
