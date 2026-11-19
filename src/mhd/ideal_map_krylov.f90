@@ -86,6 +86,9 @@ contains
         do iterations = 1, max_iterations
             call apply_a(p, q)
             pq = dot_product(p, q)
+            ! p = 0 (the residual lies in span(W) or is exhausted) is a
+            ! breakdown, not negative curvature
+            if (.not. norm2(p) > 0) exit
             if (.not. pq > 0) then
                 negative = .true.
                 exit

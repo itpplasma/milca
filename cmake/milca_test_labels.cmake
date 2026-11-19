@@ -883,6 +883,8 @@ milca_test_labels(ideal_map_hvp fast CLASSES mhd
     TARGETS test_ideal_map_hvp)
 milca_test_labels(ideal_map_mode_pc fast CLASSES mhd
     TARGETS test_ideal_map_mode_pc)
+milca_test_labels(ideal_map_matrix_free fast CLASSES mhd
+    TARGETS test_ideal_map_matrix_free)
 milca_test_labels(ideal_seed_3d_winslow fast CLASSES mhd
     TARGETS test_winslow_seed)
 milca_test_labels(ideal_seed_3d_winslow_helias slow CLASSES mhd
