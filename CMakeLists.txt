@@ -503,7 +503,7 @@ target_link_libraries(test_equilibrium_harness PRIVATE milca)
 add_test(NAME equilibrium_d8_registry_contract COMMAND test_equilibrium_harness)
 # N1: nonlinear 3D frozen-in energy map (fixed boundary), DESIGN 3D lane.
 target_sources(milca_mhd PRIVATE src/generated/milca_ideal_map_leaves.f90
-    src/mhd/ideal_map.f90 src/mhd/ideal_map_mode_pc.f90 src/mhd/ideal_map_krylov.f90 src/mhd/map_3d_equilibrium.f90
+    src/mhd/ideal_map.f90 src/mhd/ideal_map_mode_pc.f90 src/mhd/ideal_map_krylov.f90 src/mhd/ideal_map_matrix_free.f90 src/mhd/map_3d_equilibrium.f90
     src/mhd/equilibrium_3d_driver.f90
     src/generated/milca_map_3d_readback_leaves.f90 src/mhd/ideal_seed.f90
     src/generated/milca_ideal_field_angle_leaves.f90
@@ -686,6 +686,11 @@ add_executable(test_ideal_map_mode_pc test/test_ideal_map_mode_pc.f90)
 target_link_libraries(test_ideal_map_mode_pc PRIVATE milca)
 add_test(NAME ideal_map_mode_pc COMMAND test_ideal_map_mode_pc)
 set_tests_properties(ideal_map_mode_pc PROPERTIES PROCESSORS 4
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_ideal_map_matrix_free test/test_ideal_map_matrix_free.f90)
+target_link_libraries(test_ideal_map_matrix_free PRIVATE milca)
+add_test(NAME ideal_map_matrix_free COMMAND test_ideal_map_matrix_free)
+set_tests_properties(ideal_map_matrix_free PROPERTIES PROCESSORS 4
     ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 add_executable(test_winslow_seed test/test_winslow_seed.f90)
 target_link_libraries(test_winslow_seed PRIVATE milca)

@@ -25,7 +25,7 @@ module milca_ideal_map_mode_pc
     implicit none
     private
     public :: ideal_map_mode_pc_t, ideal_map_mode_pc_build, ideal_map_mode_pc_apply, &
-        ideal_map_mode_pc_destroy
+        ideal_map_mode_pc_destroy, ideal_map_mode_pc_refactor
 
     type :: subdomain_t
         ! reduced dofs of the subdomain and their weights 1/sqrt(multiplicity)
@@ -34,6 +34,9 @@ module milca_ideal_map_mode_pc
         type(csr_matrix_t) :: matrix
         ! the Levenberg-Marquardt shift added to each subdomain dof
         real(dp), allocatable :: shift(:)
+        ! dofs held fixed and the largest free diagonal entry
+        logical, allocatable :: fixed(:)
+        real(dp) :: scale = 0
         type(sparse_solver_t) :: solver
         logical :: factored = .false.
     end type
@@ -41,7 +44,8 @@ module milca_ideal_map_mode_pc
     type :: ideal_map_mode_pc_t
         type(subdomain_t), allocatable :: part(:)
         integer, allocatable :: angle_rdof(:)
-        real(dp), allocatable :: angle_diag(:)
+        ! diagonal of the angle block (unshifted) and with the shift
+        real(dp), allocatable :: angle_h(:), angle_diag(:)
     end type
 contains
 
@@ -64,16 +68,77 @@ contains
             if (status /= IDEAL_MAP_OK) return
         end do
         if (map%nangle > 0) then
-            allocate (pc%angle_rdof(map%nangle), pc%angle_diag(map%nangle))
-            call ideal_map_angle_diagonal(map, map%x, pc%angle_diag)
+            allocate (pc%angle_rdof(map%nangle), pc%angle_h(map%nangle), &
+                pc%angle_diag(map%nangle))
+            call ideal_map_angle_diagonal(map, map%x, pc%angle_h)
             do k = 1, map%nangle
                 pc%angle_rdof(k) = ideal_map_angle_rdof(map, k)
             end do
-            pc%angle_diag = (1 + mu)*abs(pc%angle_diag) &
-                + epsilon(1.0_dp)*maxval(abs(pc%angle_diag))
-            where (.not. pc%angle_diag > 0) pc%angle_diag = 1
+            call angle_shift(pc, mu)
         end if
         status = IDEAL_MAP_OK
+    end subroutine
+
+    subroutine ideal_map_mode_pc_refactor(pc, mu, status)
+        ! The same subdomain matrices factored with the shift mu |diag| (raised
+        ! by 10 until positive definite), without a new assembly.
+        type(ideal_map_mode_pc_t), intent(inout) :: pc
+        real(dp), intent(in) :: mu
+        integer, intent(out) :: status
+        integer :: p
+        status = IDEAL_MAP_BAD_INPUT
+        if (.not. allocated(pc%part)) return
+        do p = lbound(pc%part, 1), ubound(pc%part, 1)
+            call part_factor(pc%part(p), mu, status)
+            if (status /= IDEAL_MAP_OK) return
+        end do
+        if (allocated(pc%angle_h)) call angle_shift(pc, mu)
+    end subroutine
+
+    subroutine angle_shift(pc, mu)
+        type(ideal_map_mode_pc_t), intent(inout) :: pc
+        real(dp), intent(in) :: mu
+        pc%angle_diag = (1 + mu)*abs(pc%angle_h) + epsilon(1.0_dp)*maxval(abs(pc%angle_h))
+        where (.not. pc%angle_diag > 0) pc%angle_diag = 1
+    end subroutine
+
+    subroutine part_factor(part, mu, status)
+        ! Cholesky factor of the subdomain matrix plus s (|diag| + 1e-12 scale)
+        ! on the free diagonal, s = mu raised by 10 until positive definite
+        type(subdomain_t), intent(inout) :: part
+        real(dp), intent(in) :: mu
+        integer, intent(out) :: status
+        type(fortsparse_status_t) :: st
+        real(dp), allocatable :: val(:)
+        real(dp) :: t
+        integer :: rr, kk, tries
+        status = IDEAL_MAP_SOLVE_FAILED
+        t = mu
+        do tries = 1, 40
+            val = part%matrix%val
+            part%shift = 0
+            do rr = 1, part%matrix%n
+                if (part%fixed(rr)) cycle
+                do kk = part%matrix%rowptr(rr), part%matrix%rowptr(rr + 1) - 1
+                    if (part%matrix%colidx(kk) /= rr) cycle
+                    part%shift(rr) = t*(abs(val(kk)) + 1.0e-12_dp*part%scale)
+                    val(kk) = val(kk) + part%shift(rr)
+                end do
+            end do
+            if (part%factored) call sparse_destroy(part%solver)
+            part%factored = .false.
+            part%solver%backend_id = FORTSPARSE_BACKEND_NATIVE
+            part%solver%options%symmetry = FORTSPARSE_SYM_SPD
+            part%solver%options%ordering = FORTSPARSE_ORDER_AMD
+            call sparse_factor(part%solver, part%matrix%n, part%matrix%n, size(val), &
+                part%matrix%rowptr, part%matrix%colidx, val, st)
+            part%factored = status_ok(st)
+            if (part%factored) then
+                status = IDEAL_MAP_OK
+                return
+            end if
+            t = max(10*t, 1.0e-12_dp)
+        end do
     end subroutine
 
     pure subroutine part_modes(ntor, p, mode)
@@ -101,9 +166,7 @@ contains
         real(dp), allocatable :: ke(:, :, :)
         integer, allocatable :: conn(:, :), mode(:), local(:)
         logical, allocatable :: fixed(:)
-        type(fortsparse_status_t) :: sstatus
-        real(dp) :: scale, sh
-        integer :: nm, ne, row, k, tries, e, node, i, c, n
+        integer :: nm, ne, row, k, e, node, i, c, n
         status = IDEAL_MAP_SOLVE_FAILED
         call part_modes(map%ntor, p, mode)
         nm = size(mode)
@@ -142,48 +205,16 @@ contains
             end do
         end do
         allocate (part%shift(part%matrix%n))
-        scale = 0
+        part%fixed = fixed
+        part%scale = 0
         do row = 1, part%matrix%n
             if (fixed(row)) cycle
             do k = part%matrix%rowptr(row), part%matrix%rowptr(row + 1) - 1
-                if (part%matrix%colidx(k) == row) scale = max(scale, abs(part%matrix%val(k)))
+                if (part%matrix%colidx(k) == row) part%scale = max(part%scale, &
+                    abs(part%matrix%val(k)))
             end do
         end do
-        sh = mu
-        do tries = 1, 40
-            call shifted_factor(sh, sstatus)
-            if (status_ok(sstatus)) then
-                status = IDEAL_MAP_OK
-                return
-            end if
-            sh = max(10*sh, 1.0e-12_dp)
-        end do
-    contains
-        subroutine shifted_factor(t, st)
-            ! factor of the matrix plus t (|diag| + 1e-12 scale) on the free diagonal
-            real(dp), intent(in) :: t
-            type(fortsparse_status_t), intent(out) :: st
-            real(dp), allocatable :: val(:)
-            integer :: rr, kk
-            val = part%matrix%val
-            part%shift = 0
-            do rr = 1, part%matrix%n
-                if (fixed(rr)) cycle
-                do kk = part%matrix%rowptr(rr), part%matrix%rowptr(rr + 1) - 1
-                    if (part%matrix%colidx(kk) /= rr) cycle
-                    part%shift(rr) = t*(abs(val(kk)) + 1.0e-12_dp*scale)
-                    val(kk) = val(kk) + part%shift(rr)
-                end do
-            end do
-            if (part%factored) call sparse_destroy(part%solver)
-            part%factored = .false.
-            part%solver%backend_id = FORTSPARSE_BACKEND_NATIVE
-            part%solver%options%symmetry = FORTSPARSE_SYM_SPD
-            part%solver%options%ordering = FORTSPARSE_ORDER_AMD
-            call sparse_factor(part%solver, part%matrix%n, part%matrix%n, size(val), &
-                part%matrix%rowptr, part%matrix%colidx, val, st)
-            part%factored = status_ok(st)
-        end subroutine
+        call part_factor(part, mu, status)
     end subroutine
 
     subroutine mode_element(map, store, e, mode, conn, ke)
@@ -297,6 +328,7 @@ contains
             deallocate (pc%part)
         end if
         if (allocated(pc%angle_rdof)) deallocate (pc%angle_rdof)
+        if (allocated(pc%angle_h)) deallocate (pc%angle_h)
         if (allocated(pc%angle_diag)) deallocate (pc%angle_diag)
     end subroutine
 end module

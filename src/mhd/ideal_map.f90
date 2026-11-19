@@ -1930,7 +1930,7 @@ contains
         call ideal_map_expand(map, direction, d)
         ! direction on the planes: dq(:, 1, j, node) values, dq(:, 2, j, node)
         ! toroidal derivatives
-        allocate (dq(3, 2, map%nphi, map%nodes), acc(3, 4, map%nphi, map%nodes))
+        allocate (dq(3, 2, map%nphi, map%nodes), acc(3, 2, map%nphi, map%nodes))
         !$omp parallel do default(shared) private(node, j, m, k) schedule(static)
         do node = 1, map%nodes
             dq(:, :, :, node) = 0
@@ -1951,7 +1951,7 @@ contains
         deta = d(nc + 1:nc + na); yeta = 0
         !$omp parallel default(shared) private(e, g, j, a, node, hp, hv, dv, r, w, &
         !$omp jac, gv, bp, weight, f, i, l, c, k, et, ep, hbb, hvb, h3, db, z) &
-        !$omp reduction(+: yeta)
+        !$omp reduction(+: yeta, acc)
         allocate (et(na), ep(na))
         !$omp do schedule(dynamic)
         do e = 1, map%cells
@@ -2000,10 +2000,8 @@ contains
                         f(0) = map%shape(a, g); f(1) = map%dshape(1, a, g)
                         f(2) = map%dshape(2, a, g)
                         do c = 1, 3
-                            !$omp atomic
                             acc(c, 1, j, node) = acc(c, 1, j, node) + f(0)*r(c) &
                                 + f(1)*r(3 + c) + f(2)*r(6 + c)
-                            !$omp atomic
                             acc(c, 2, j, node) = acc(c, 2, j, node) + f(0)*r(9 + c)
                         end do
                     end do
