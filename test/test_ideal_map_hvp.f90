@@ -2,9 +2,11 @@ program test_ideal_map_hvp
     ! The matrix-free Hessian-vector product ideal_map_hvp equals the
     ! assembled reduced Hessian times the same direction to roundoff, on the
     ! Landreman nested seed (P3, toroidal modes 2), on a perturbed map and with
-    ! field-angle coefficients (angle_mpol 2).
+    ! field-angle coefficients (angle_mpol 2), with and without stored point
+    ! Hessians.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use milca_ideal_map, only: ideal_map_hessian, ideal_map_hvp
+    use milca_ideal_map, only: ideal_map_hessian, ideal_map_hvp, ideal_map_hessian_store_t, &
+        ideal_map_store_hessians
     use milca_ideal_seed_3d, only: ideal_seed_3d_init, ideal_seed_disk_mesh
     use milca_equilibrium_3d_driver, only: equilibrium_3d_driver_t, nested_integer_driver
     use milca_nested_oracles, only: nested_oracle_t
@@ -40,11 +42,12 @@ contains
     subroutine compare(pass)
         integer, intent(in) :: pass
         type(csr_matrix_t) :: h
-        real(dp), allocatable :: d(:), y1(:), y2(:)
+        type(ideal_map_hessian_store_t) :: store
+        real(dp), allocatable :: d(:), y1(:), y2(:), y3(:)
         integer :: i, k, n, st
         real(dp) :: error
         n = driver%map%nred
-        allocate (d(n), y1(n), y2(n))
+        allocate (d(n), y1(n), y2(n), y3(n))
         d = [(sin(1.7_dp*i) + 0.3_dp*cos(5.1_dp*i), i=1, n)]
         call ideal_map_hessian(driver%map, driver%map%x, h)
         y1 = 0
@@ -59,5 +62,11 @@ contains
         print '(a,i2,a,i6,a,es10.3)', 'pass', pass, ' unknowns', n, &
             ' max |H d - hvp| / max |H d| ', error
         if (.not. error < 1e-12_dp) error stop 'hvp differs from the assembled Hessian'
+        call ideal_map_store_hessians(driver%map, driver%map%x, store)
+        call ideal_map_hvp(driver%map, driver%map%x, d, y3, st, store)
+        if (st /= 0) error stop 'stored hvp status'
+        error = maxval(abs(y1 - y3))/maxval(abs(y1))
+        print '(a,es10.3)', '        with stored point Hessians ', error
+        if (.not. error < 1e-12_dp) error stop 'stored hvp differs from the assembled Hessian'
     end subroutine
 end program
