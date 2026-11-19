@@ -4,7 +4,9 @@ program test_winslow_seed
     ! perturbed interior returns to it; (2) a bean section whose harmonic
     ! extension folds is admitted with the Winslow seed, which has positive
     ! determinants in every plane; (3) a doubled boundary is not a simple curve,
-    ! has no injective map and is rejected before any solve.
+    ! has no injective map and is rejected before any solve. With the argument
+    ! helias: (4) the STELLOPT helias boundary, whose harmonic extension folds,
+    ! is admitted on 48 boundary nodes.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
         ideal_seed_3d_init, ideal_seed_disk_mesh
@@ -20,7 +22,13 @@ program test_winslow_seed
     type(gs_state_t) :: mesh
     real(dp) :: coefficients(4, -1:1, 0:2), x(2, 4096), energy, min_det, error
     integer :: status, a, j
+    character(16) :: argument
     profile%iota = [0.4_dp]; profile%pressure = [0.0_dp]
+    call get_command_argument(1, argument)
+    if (argument == 'helias') then
+        call helias()
+        stop
+    end if
     call ideal_seed_disk_mesh(mesh, 16, 3, status)
     if (status /= 0) error stop 'disk mesh'
 
@@ -73,4 +81,63 @@ program test_winslow_seed
     call winslow_seed(map, status)
     if (status /= WINSLOW_NOT_SIMPLE) error stop 'doubled boundary not found self-intersecting'
     print '(a)', 'PASS Winslow seed'
+contains
+    subroutine helias()
+        real(dp) :: boundary(4, -2:2, 0:4)
+        ! (4) STELLOPT Benchmarks helias boundary (nfp 5) on the 48-node mesh: with a
+        ! negative quadrature weight the regularised energy is unbounded below and
+        ! the untangling of the folded harmonic start diverges
+        call ideal_seed_disk_mesh(mesh, 48, 3, status)
+        if (status /= 0) error stop 'disk mesh 48'
+        boundary = 0
+        boundary(1, -2, 1) = -5.5065e-06_dp
+        boundary(1, -2, 2) = 0.00013721_dp
+        boundary(1, -2, 3) = -4.5004e-06_dp
+        boundary(1, -2, 4) = -1.7779e-05_dp
+        boundary(1, -1, 1) = -0.033546_dp
+        boundary(1, -1, 2) = -0.00069546_dp
+        boundary(1, -1, 3) = -2.6698e-06_dp
+        boundary(1, -1, 4) = 1.0769e-05_dp
+        boundary(1, 0, 0) = 11.503_dp
+        boundary(1, 0, 1) = 0.90127_dp
+        boundary(1, 0, 2) = 0.046345_dp
+        boundary(1, 0, 3) = -0.0012482_dp
+        boundary(1, 0, 4) = 6.5712e-05_dp
+        boundary(1, 1, 0) = 0.80319_dp
+        boundary(1, 1, 1) = -0.32415_dp
+        boundary(1, 1, 2) = 0.23898_dp
+        boundary(1, 1, 3) = -0.0035903_dp
+        boundary(1, 1, 4) = 0.00016903_dp
+        boundary(1, 2, 0) = -0.0030723_dp
+        boundary(1, 2, 1) = -0.00054414_dp
+        boundary(1, 2, 2) = 0.069391_dp
+        boundary(1, 2, 3) = -1.115e-05_dp
+        boundary(1, 2, 4) = 0.0042559_dp
+        boundary(4, -2, 1) = 0.00072356_dp
+        boundary(4, -2, 2) = 0.00070613_dp
+        boundary(4, -2, 3) = -4.5004e-06_dp
+        boundary(4, -2, 4) = -1.7779e-05_dp
+        boundary(4, -1, 1) = -0.033114_dp
+        boundary(4, -1, 2) = -0.0010401_dp
+        boundary(4, -1, 3) = -2.6698e-06_dp
+        boundary(4, -1, 4) = 1.0769e-05_dp
+        boundary(4, 0, 1) = 1.1035_dp
+        boundary(4, 0, 2) = 0.044242_dp
+        boundary(4, 0, 3) = -0.0012482_dp
+        boundary(4, 0, 4) = 6.5712e-05_dp
+        boundary(4, 1, 0) = -0.40019_dp
+        boundary(4, 1, 1) = 0.25749_dp
+        boundary(4, 1, 2) = 0.23357_dp
+        boundary(4, 1, 3) = -0.0035903_dp
+        boundary(4, 1, 4) = 0.00016903_dp
+        boundary(4, 2, 0) = 0.0022219_dp
+        boundary(4, 2, 1) = 0.0012622_dp
+        boundary(4, 2, 2) = -0.066797_dp
+        boundary(4, 2, 3) = -1.115e-05_dp
+        boundary(4, 2, 4) = 0.0042559_dp
+        call ideal_seed_3d_init(map, seed, mesh, boundary, 5, 3.142_dp, profile, status, &
+            winslow=.true.)
+        if (status /= 0) error stop 'helias: Winslow seed not admitted'
+        print '(a)', 'helias: Winslow seed admitted'
+    end subroutine
 end program

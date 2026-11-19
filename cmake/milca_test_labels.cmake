@@ -880,6 +880,8 @@ milca_test_labels(equilibrium_map_3d_loop fast CLASSES mhd
     TARGETS test_map_3d_loop)
 milca_test_labels(ideal_seed_3d_winslow fast CLASSES mhd
     TARGETS test_winslow_seed)
+milca_test_labels(ideal_seed_3d_winslow_helias slow CLASSES mhd
+    TARGETS test_winslow_seed)
 milca_test_labels(ideal_seed_3d_hermite_profile fast CLASSES mhd
     TARGETS test_toroidal_profile_hermite)
 milca_test_labels(ideal_seed_3d_nested_input fast CLASSES mhd

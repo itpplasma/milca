@@ -132,7 +132,12 @@ otherwise the seed returns `WINSLOW_NOT_SIMPLE` and the initializer
 the second form, used where det < 0, being free of cancellation. FortSym
 proves the two equal. eps starts at the section area per reference area and
 is reduced to 0 (Escobar et al., Comput. Methods Appl. Mech. Engrg. 192, 2775
-(2003)). A non-finite energy or gradient fails the plane. Newton with exact
+(2003)). The energy grows like 1/h, so its quadrature weights must be
+positive: with the map's symmetric degree-7 rule, whose centroid weight is
+negative, a folded centroid lowers the energy without bound (the STELLOPT
+helias plane at 48 boundary nodes reached E = -9e10 with det = -131). The
+plane uses a collapsed Gauss-Legendre rule of degree max(7, 2p + 1) instead.
+A non-finite energy or gradient fails the plane. Newton with exact
 FortSym-generated Hessians (`gen/gen_winslow_seed.f90`) and
 Levenberg-Marquardt damping stops at a gradient of 1e-10 times the energy per
 length of the section, judging steps below the roundoff of the energy by the
@@ -141,8 +146,9 @@ are projected onto the map's toroidal modes by least squares. CTest
 `ideal_seed_3d_winslow` checks that a perturbed circular section returns to
 the conformal map to 1e-8, that a bean section with the boundary
 z + 0.4 z^2 + 0.15 conj(z)^2, whose harmonic extension folds, is admitted with
-positive determinants in every plane, and that a doubled boundary is rejected
-as not simple.
+positive determinants in every plane, that a doubled boundary is rejected
+as not simple, and that the STELLOPT helias boundary is admitted on 48
+boundary nodes.
 
 `ideal_seed_disk_mesh` builds the common P2/P3 reference mesh. Generated
 leaves include primal/JVP/VJP; the initializer parallelizes independent nodal

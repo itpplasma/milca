@@ -15,6 +15,8 @@ module milca_winslow_seed
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use milca_ideal_map, only: ideal_map_t
+    use milca_triangle_basis, only: triangle_basis_jet
+    use fortfem_triangle_duffy_quadrature, only: triangle_duffy_quadrature
     use milca_winslow_seed_leaves, only: winslow_density, winslow_gradient, &
         winslow_hessian, winslow_folded_density, winslow_folded_gradient, &
         winslow_folded_hessian
@@ -32,6 +34,7 @@ module milca_winslow_seed
     type :: plane_t
         ! reference gradients dny(2, nloc, nq, cells) and weights wq(nq, cells)
         real(dp), allocatable :: dny(:, :, :, :), wq(:, :)
+        integer :: nq = 0
         ! unknown index of (component, node), 0 for fixed boundary nodes
         integer, allocatable :: dof(:, :)
         integer :: n = 0
@@ -109,21 +112,32 @@ contains
     end subroutine
 
     subroutine plane_setup(map, plane)
+        ! The energy grows like 1/det A, so its quadrature weights must be
+        ! positive: a negative weight (the centroid of the map's symmetric
+        ! degree-7 rule) rewards a vanishing determinant there, the energy is
+        ! unbounded below and the untangling diverges. The plane therefore
+        ! takes a collapsed Gauss-Legendre rule of the map's degree, 2 p + 1.
         type(ideal_map_t), intent(in) :: map
         type(plane_t), intent(out) :: plane
-        real(dp) :: jr(2, 2), inv(2, 2), det
-        integer :: e, g, a, b, k, l, n, row, nnz
+        real(dp) :: jr(2, 2), inv(2, 2), det, shape(map%nloc), dshape(2, map%nloc)
+        real(dp), allocatable :: qxi(:), qeta(:), qw(:)
+        integer :: e, g, a, b, k, l, n, row, nnz, p, info
         integer, allocatable :: count(:), mark(:), cols(:, :)
-        allocate (plane%dny(2, map%nloc, map%nq, map%cells), plane%wq(map%nq, map%cells))
-        do e = 1, map%cells
-            do g = 1, map%nq
+        p = nint((sqrt(8.0_dp*map%nloc + 1) - 3)/2)
+        call triangle_duffy_quadrature(max(7, 2*p + 1), qxi, qeta, qw, info)
+        if (info /= 0) error stop 'winslow_seed: plane quadrature'
+        plane%nq = size(qw)
+        allocate (plane%dny(2, map%nloc, plane%nq, map%cells), plane%wq(plane%nq, map%cells))
+        do g = 1, plane%nq
+            call triangle_basis_jet([qxi(g), qeta(g)], shape, dshape)
+            do e = 1, map%cells
                 ! jr(i, r) = dy_i/dxi_r
-                jr = matmul(map%reference(:, map%conn(:, e)), transpose(map%dshape(:, :, g)))
+                jr = matmul(map%reference(:, map%conn(:, e)), transpose(dshape))
                 det = jr(1, 1)*jr(2, 2) - jr(1, 2)*jr(2, 1)
                 inv = reshape([jr(2, 2), -jr(2, 1), -jr(1, 2), jr(1, 1)], [2, 2])/det
                 ! dN/dy = jr^-t dN/dxi
-                plane%dny(:, :, g, e) = matmul(transpose(inv), map%dshape(:, :, g))
-                plane%wq(g, e) = map%weight(g)*abs(det)
+                plane%dny(:, :, g, e) = matmul(transpose(inv), dshape)
+                plane%wq(g, e) = qw(g)*abs(det)
             end do
         end do
         plane%area = sum(plane%wq)
@@ -209,7 +223,7 @@ contains
         integer :: e, g
         energy = 0; min_det = huge(1.0_dp)
         do e = 1, map%cells
-            do g = 1, map%nq
+            do g = 1, plane%nq
                 call cell_jet(map, plane, x, e, g, amat)
                 if (amat(1, 1)*amat(2, 2) - amat(1, 2)*amat(2, 1) < 0) then
                     call winslow_folded_density(amat(1, 1), amat(2, 1), amat(1, 2), &
@@ -237,7 +251,7 @@ contains
             7, 8, 9, 10], [4, 4])
         gradient = 0; values = 0
         do e = 1, map%cells
-            do g = 1, map%nq
+            do g = 1, plane%nq
                 call cell_jet(map, plane, x, e, g, amat)
                 if (amat(1, 1)*amat(2, 2) - amat(1, 2)*amat(2, 1) < 0) then
                     call winslow_folded_gradient(amat(1, 1), amat(2, 1), amat(1, 2), &
