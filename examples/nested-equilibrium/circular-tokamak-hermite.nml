@@ -1,0 +1,9 @@
+&nested_input
+  nfp = 1, mpol = 1, ntor = 0, phiedge = 1.0,
+  rbc(0,0) = 3.0, rbc(0,1) = 1.0, zbs(0,1) = 1.0,
+  iota_type = 'hermite', pressure_type = 'hermite', n_knots = 3,
+  profile_knots = 0.0, 0.4, 1.0,
+  iota_values = 0.4, 0.48, 0.6, iota_slopes = 0.2, 0.2, 0.2,
+  pressure_values = 0.0, 0.0, 0.0, pressure_slopes = 0.0, 0.0, 0.0,
+  boundary_nodes = 16, degree = 3, angle_mpol = 2, tolerance = 1e-8
+/

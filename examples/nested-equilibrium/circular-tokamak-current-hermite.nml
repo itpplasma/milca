@@ -1,0 +1,8 @@
+&nested_input
+  nfp = 1, mpol = 1, ntor = 0, phiedge = 1.0,
+  rbc(0,0) = 3.0, rbc(0,1) = 1.0, zbs(0,1) = 1.0,
+  iota(0) = 0.3, prescribe_current = .true., current_type = 'hermite', n_knots = 2,
+  profile_knots = 0.0, 1.0, current_values = 0.0, 340876.0,
+  current_slopes = 340876.0, 340876.0,
+  boundary_nodes = 16, degree = 3, angle_mpol = 2, tolerance = 1e-8
+/

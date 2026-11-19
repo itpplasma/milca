@@ -17,18 +17,25 @@ module milca_ideal_seed_3d
     use milca_grad_shafranov, only: gs_state_t, initialize_gs
     use milca_ideal_seed_3d_leaves, only: seed_complex_product, seed_boundary_mode, &
         seed_horner, seed_toroidal_form, seed_disk_coordinates, seed_disk_boundary, &
-        seed_primitive_coefficient, seed_primitive_finish
+        seed_primitive_coefficient, seed_primitive_finish, seed_hermite_profile
     implicit none
     private
     public :: toroidal_profile_t, toroidal_seed_t, ideal_seed_3d_init
+    public :: hermite_profile_evaluate
     public :: ideal_seed_disk_mesh, ideal_seed_boundary_coefficients
     public :: ideal_seed_3d_angle_density
     real(dp), parameter :: pi = acos(-1.0_dp)
     type :: toroidal_profile_t
         ! Ascending monomial coefficients in s, pressure in solver units.
         real(dp), allocatable :: iota(:), pressure(:)
+        ! Piecewise cubic Hermite profiles on knots 0 = s_1 < ... < s_K = 1
+        ! with values and s-slopes; each replaces the monomials when set by
+        ! set_hermite_iota or set_hermite_pressure.
+        real(dp), allocatable :: knots(:), iota_values(:), iota_slopes(:)
+        real(dp), allocatable :: iota_primitive(:), pressure_values(:), pressure_slopes(:)
     contains
         procedure :: evaluate => profile_evaluate
+        procedure :: set_hermite_iota, set_hermite_pressure, shift_iota, valid => profile_valid
     end type
     type, extends(ideal_frozen_t) :: toroidal_seed_t
         type(toroidal_profile_t) :: profile
@@ -44,6 +51,20 @@ contains
         real(dp) :: next, coefficient
         integer :: k
         iota = 0; pressure = 0; integral = 0
+        if (allocated(profile%pressure_values)) then
+            call hermite_profile_evaluate(profile%knots, profile%pressure_values, &
+                profile%pressure_slopes, s, pressure, next)
+        else
+            do k = size(profile%pressure), 1, -1
+                call seed_horner(s, profile%pressure(k), pressure, next)
+                pressure = next
+            end do
+        end if
+        if (allocated(profile%iota_values)) then
+            call hermite_profile_evaluate(profile%knots, profile%iota_values, &
+                profile%iota_slopes, s, iota, integral, profile%iota_primitive)
+            return
+        end if
         do k = size(profile%iota), 1, -1
             call seed_horner(s, profile%iota(k), iota, next)
             iota = next
@@ -53,11 +74,121 @@ contains
         end do
         call seed_primitive_finish(s, integral, next)
         integral = next
-        do k = size(profile%pressure), 1, -1
-            call seed_horner(s, profile%pressure(k), pressure, next)
-            pressure = next
+    end subroutine
+
+    pure subroutine hermite_profile_evaluate(knots, values, slopes, s, value, primitive, &
+            cumulative)
+        ! Value and integral from 0 of the piecewise cubic Hermite profile at s;
+        ! cumulative(k) is the integral up to knots(k) when known. Outside
+        ! [knots(1), knots(K)] the end pieces continue as cubics.
+        real(dp), intent(in) :: knots(:), values(:), slopes(:), s
+        real(dp), intent(out) :: value, primitive
+        real(dp), intent(in), optional :: cumulative(:)
+        real(dp) :: h, piece, unused
+        integer :: low, high, mid, k
+        low = 1; high = size(knots)
+        do while (high - low > 1)
+            mid = (low + high)/2
+            if (s < knots(mid)) then
+                high = mid
+            else
+                low = mid
+            end if
+        end do
+        h = knots(low + 1) - knots(low)
+        call seed_hermite_profile((s - knots(low))/h, h, values(low), slopes(low), &
+            values(low + 1), slopes(low + 1), value, piece)
+        if (present(cumulative)) then
+            primitive = cumulative(low) + piece
+            return
+        end if
+        primitive = piece
+        do k = 1, low - 1
+            h = knots(k + 1) - knots(k)
+            call seed_hermite_profile(1.0_dp, h, values(k), slopes(k), values(k + 1), &
+                slopes(k + 1), unused, piece)
+            primitive = primitive + piece
         end do
     end subroutine
+
+    subroutine set_hermite_iota(profile, knots, values, slopes)
+        class(toroidal_profile_t), intent(inout) :: profile
+        real(dp), intent(in) :: knots(:), values(:), slopes(:)
+        profile%knots = knots
+        profile%iota_values = values; profile%iota_slopes = slopes
+        call hermite_iota_primitive(profile)
+    end subroutine
+
+    subroutine set_hermite_pressure(profile, knots, values, slopes)
+        class(toroidal_profile_t), intent(inout) :: profile
+        real(dp), intent(in) :: knots(:), values(:), slopes(:)
+        profile%knots = knots
+        profile%pressure_values = values; profile%pressure_slopes = slopes
+    end subroutine
+
+    subroutine hermite_iota_primitive(profile)
+        class(toroidal_profile_t), intent(inout) :: profile
+        real(dp) :: unused
+        integer :: k
+        if (allocated(profile%iota_primitive)) deallocate (profile%iota_primitive)
+        allocate (profile%iota_primitive(size(profile%knots)))
+        profile%iota_primitive(1) = 0
+        do k = 2, size(profile%knots)
+            call hermite_profile_evaluate(profile%knots(:k), profile%iota_values(:k), &
+                profile%iota_slopes(:k), profile%knots(k), unused, &
+                profile%iota_primitive(k), profile%iota_primitive(:k))
+        end do
+    end subroutine
+
+    subroutine shift_iota(profile, delta)
+        ! iota -> iota + delta in either representation
+        class(toroidal_profile_t), intent(inout) :: profile
+        real(dp), intent(in) :: delta
+        if (allocated(profile%iota_values)) then
+            profile%iota_values = profile%iota_values + delta
+            call hermite_iota_primitive(profile)
+        else
+            profile%iota(1) = profile%iota(1) + delta
+        end if
+    end subroutine
+
+    logical function profile_valid(profile)
+        ! one representation per quantity, finite, and Hermite knots strictly
+        ! increasing from 0 to 1
+        class(toroidal_profile_t), intent(in) :: profile
+        integer :: n
+        profile_valid = .false.
+        if (allocated(profile%iota_values) .or. allocated(profile%pressure_values)) then
+            if (.not. allocated(profile%knots)) return
+            n = size(profile%knots)
+            if (n < 2) return
+            if (.not. all(ieee_is_finite(profile%knots))) return
+            if (profile%knots(1) /= 0 .or. profile%knots(n) /= 1) return
+            if (any(profile%knots(2:) <= profile%knots(:n - 1))) return
+        end if
+        if (allocated(profile%iota_values)) then
+            if (.not. hermite_ok(profile%iota_values, profile%iota_slopes)) return
+        else
+            if (.not. allocated(profile%iota)) return
+            if (size(profile%iota) < 1 .or. .not. all(ieee_is_finite(profile%iota))) return
+        end if
+        if (allocated(profile%pressure_values)) then
+            if (.not. hermite_ok(profile%pressure_values, profile%pressure_slopes)) return
+        else
+            if (.not. allocated(profile%pressure)) return
+            if (size(profile%pressure) < 1 .or. .not. all(ieee_is_finite(profile%pressure))) &
+                return
+        end if
+        profile_valid = .true.
+    contains
+        logical function hermite_ok(values, slopes)
+            real(dp), allocatable, intent(in) :: values(:), slopes(:)
+            hermite_ok = .false.
+            if (.not. allocated(slopes)) return
+            if (size(values) /= n .or. size(slopes) /= n) return
+            hermite_ok = all(ieee_is_finite(values)) .and. all(ieee_is_finite(slopes))
+        end function
+    end function
 
     subroutine frozen_evaluate(field, point, chi, chi_gradient, b3, pressure)
         class(toroidal_seed_t), intent(in) :: field
@@ -161,11 +292,7 @@ contains
         end if
         if (mod(size(coefficients, 2), 2) /= 1) return
         if (.not. all(ieee_is_finite(coefficients))) return
-        if (.not. allocated(profile%iota)) return
-        if (.not. allocated(profile%pressure)) return
-        if (min(size(profile%iota), size(profile%pressure)) < 1) return
-        if (.not. all(ieee_is_finite(profile%iota))) return
-        if (.not. all(ieee_is_finite(profile%pressure))) return
+        if (.not. profile%valid()) return
         previous = 0
         do a = 0, 128
             call profile%evaluate(a/128.0_dp, iota, pressure, integral)
