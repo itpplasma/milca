@@ -41,8 +41,9 @@ if(NCDUMP)
         output/test_result_io.nc)
     foreach(pattern "scale = 2\\.5 ;" "double cube\\(cube_dim3, cube_dim2, cube_dim1\\)"
             "double grid\\(pair, w\\)" "scale:milca_status = \"certified-discrete\""
-            "weights:units = \"m\"" ":milca_config_literal = \"! probe override"
-            ":milca_config_resolved = \"&PROBE" ":fortio_revision = \"${FORTIO_PIN}\""
+            "weights:units = \"m\"" "char milca_config_literal\\(milca_config_literal_length\\)"
+            "char milca_config_resolved\\(milca_config_resolved_length\\)"
+            ":fortio_revision = \"${FORTIO_PIN}\""
             ":fortsparse_revision = \"${FORTSPARSE_PIN}\""
             ":libneo_revision = \"${LIBNEO_PIN}\""
             ":milca_git_commit = \"[0-9a-f]+\"" ":created_utc = \"[0-9-]+T[0-9:]+Z\""
@@ -51,6 +52,8 @@ if(NCDUMP)
             message(FATAL_ERROR "ncdump lacks /${pattern}/:\n${last_output}")
         endif()
     endforeach()
+    run_expect(TRUE "milca_config_literal = \"! probe override" "${NCDUMP}" -v
+        milca_config_literal output/test_result_io.nc)
     run_expect(TRUE "cube =" "${NCDUMP}" -v cube output/test_result_io.nc)
     # cube(i,j,k) = 2.5*(i + 10 j + 100 k); C order lists i fastest.
     string(REGEX REPLACE "[ \n]+" " " flat "${last_output}")
