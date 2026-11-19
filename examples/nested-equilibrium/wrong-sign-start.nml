@@ -1,0 +1,8 @@
+! circular tokamak with I = 681.752 s + 340876 s^2 A (iota(0) ~ 1e-3), started
+! from iota of the wrong sign: the full Newton step makes iota change sign
+&nested_input
+  nfp = 1, mpol = 1, ntor = 0, phiedge = 1.0,
+  rbc(0,0) = 3.0, rbc(0,1) = 1.0, zbs(0,1) = 1.0,
+  iota(0) = -0.3, prescribe_current = .true., current(1) = 681.752, current(2) = 340876.0,
+  boundary_nodes = 16, degree = 3, angle_mpol = 2, tolerance = 1e-8
+/

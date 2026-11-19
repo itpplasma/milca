@@ -1301,11 +1301,13 @@ add_executable(test_nested_equilibrium_app test/test_nested_equilibrium_app.f90)
 target_link_libraries(test_nested_equilibrium_app PRIVATE milca_io)
 # PARVMEC (ns 101, mpol 8) on the same inputs: raxis, wb and, for iota, the
 # exact volume 2 pi^2 R a^2; GVEC gives raxis 3.03683 m for the iota case.
+# wrong-sign-start: the same deck started from iota = +0.3.
 foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "circular-tokamak-hermite|3.0366;0.0750949;59.2176264"
         "circular-tokamak-current|3.04266;0.0755050"
         "circular-tokamak-current-hermite|3.04266;0.0755050"
-        "doubled-boundary|failure" "axis-current-free|failure")
+        "doubled-boundary|failure" "axis-current-free|failure"
+        "wrong-sign-start|3.02142;0.0746517" "vanishing-current|failure")
     string(REPLACE "|" ";" parts "${case}")
     list(GET parts 0 name)
     list(SUBLIST parts 1 -1 expected)
