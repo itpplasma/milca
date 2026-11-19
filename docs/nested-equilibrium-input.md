@@ -25,7 +25,6 @@ entry for cross-code comparison with VMEC-class codes; converting a VMEC
 | `ladder_nodes(:)`, `ladder_degree(:)` | coarser levels solved first; each corrects the next seed (`ideal_map_prolong_correction`) | none |
 | `angle_mpol` | poloidal modes of the boundary field-line angle; -1 pins the boundary angle | -1 |
 | `tolerance`, `max_iterations` | free reduced-gradient reduction and Newton limit per level | 1e-8, 200 |
-| `raxis_cc(n)`, `raxis_cs(n)`, `zaxis_cc(n)`, `zaxis_cs(n)` | initial magnetic axis in VMEC's convention (the boundary's m = 0 convention); all zero: the seed's axis is the boundary's m = 0 curve | 0 |
 | `prescribe_current` | match the enclosed toroidal current `current(k)` (A, coefficients of s^k) instead of keeping `iota` | false |
 | `max_current_iterations`, `current_tolerance` | iota updates and the largest current error relative to the largest prescribed current (at least the largest current per unit iota of the starting map, so that for a current-free target the error is an iota error); with `map_ntor = -1` at most `fourier_tolerance`/10 | 30, 1e-5 |
 | `current_nodes` | Chebyshev-Gauss surfaces at which the current is matched, 2 to 64 | 16 |
@@ -59,12 +58,12 @@ wb (relative), raxis/aminor_p and iota on axis and edge between the last two
 levels, is at most `fourier_tolerance`. Axisymmetric data (`ntor = 0`) keep
 `map_ntor = 0`.
 
-The seed is the harmonic extension of the boundary (mode m like rho^m), with
-the axis blended into the m = 0 part as (1 - s)(axis - boundary m = 0). When the
-seed folds (the m = 0 curve of a bean-shaped stellarator lies near or outside
-its concave side), the app guesses the axis as VMEC's guess_axis does: in each
-toroidal plane the grid point that maximises the smallest seed Jacobian, fitted
-with the axis Fourier modes, and seeds again.
+The seed of every toroidal plane is the Winslow map of its cross-section
+(`milca_winslow_seed`, [ideal-seed-3d](ideal-seed-3d.md)): the interior that
+minimises the Dirichlet energy of the inverse map, which is injective for any
+simply connected section and needs no initial axis. A boundary without an
+injective interior map, such as a curve traversed twice, ends the run with
+`failure = "the seed is not admitted ..."`.
 
 The boundary must run counterclockwise in (R, Z) for increasing theta. A
 boundary given in an arbitrary poloidal angle (every VMEC input) needs

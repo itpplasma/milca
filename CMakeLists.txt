@@ -507,7 +507,8 @@ target_sources(milca_mhd PRIVATE src/generated/milca_ideal_map_leaves.f90
     src/mhd/equilibrium_3d_driver.f90
     src/generated/milca_map_3d_readback_leaves.f90 src/mhd/ideal_seed.f90
     src/generated/milca_ideal_field_angle_leaves.f90
-    src/generated/milca_ideal_seed_3d_leaves.f90 src/mhd/ideal_seed_3d.f90
+    src/generated/milca_ideal_seed_3d_leaves.f90
+    src/generated/milca_winslow_seed_leaves.f90 src/mhd/winslow_seed.f90 src/mhd/ideal_seed_3d.f90
     src/mhd/nested_seed_input.f90)
 set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
@@ -666,6 +667,11 @@ add_executable(test_ideal_map_field_angle test/test_ideal_map_field_angle.f90)
 target_link_libraries(test_ideal_map_field_angle PRIVATE milca)
 add_test(NAME ideal_map_field_angle COMMAND test_ideal_map_field_angle)
 set_tests_properties(ideal_map_field_angle PROPERTIES PROCESSORS 4 TIMEOUT 120
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_winslow_seed test/test_winslow_seed.f90)
+target_link_libraries(test_winslow_seed PRIVATE milca)
+add_test(NAME ideal_seed_3d_winslow COMMAND test_winslow_seed)
+set_tests_properties(ideal_seed_3d_winslow PROPERTIES PROCESSORS 4 TIMEOUT 120
     ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 add_executable(test_toroidal_profile_hermite test/test_toroidal_profile_hermite.f90)
 target_link_libraries(test_toroidal_profile_hermite PRIVATE milca)
@@ -1514,7 +1520,7 @@ if(MILCA_FORTSYM_BUILD)
     foreach(generator vrmhd_leaves gs_error grad_shafranov ideal_map ideal_gll ideal_xi
             ideal_response_error equilibrium_core curve_chart ideal_seed_3d map_3d_readback
             ideal_field_angle nonnested islands metriplectic vacuum_shell fold_barrier
-            landreman nested_oracles
+            landreman nested_oracles winslow_seed
             response_strip_jets
             response_fluid
             gs_coarea gs_inverse boozer_file boozer_orbit dk_pitch dk_mono dk_hp dk_ntv dk_collop ntv_boozer
@@ -1680,6 +1686,12 @@ if(MILCA_FORTSYM_BUILD)
         -DLEAF=milca_ideal_map_leaves.f90
         -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_ideal_map_leaves.f90
         -DWORK=${CMAKE_BINARY_DIR}/ideal-map-regeneration
+        -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
+    add_test(NAME winslow_seed_regeneration COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:gen_winslow_seed>
+        -DLEAF=milca_winslow_seed_leaves.f90
+        -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_winslow_seed_leaves.f90
+        -DWORK=${CMAKE_BINARY_DIR}/winslow-seed-regeneration
         -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
     add_test(NAME ideal_seed_3d_regeneration COMMAND ${CMAKE_COMMAND}
         -DGENERATOR=$<TARGET_FILE:gen_ideal_seed_3d>

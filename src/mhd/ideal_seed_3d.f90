@@ -15,6 +15,7 @@ module milca_ideal_seed_3d
     use milca_equilibrium_chart, only: cylindrical_chart_t
     use milca_triangle_basis, only: TRIANGLE_MAX_DEGREE
     use milca_grad_shafranov, only: gs_state_t, initialize_gs
+    use milca_winslow_seed, only: winslow_seed, WINSLOW_OK, WINSLOW_NOT_SIMPLE
     use milca_ideal_seed_3d_leaves, only: seed_complex_product, seed_boundary_mode, &
         seed_horner, seed_toroidal_form, seed_disk_coordinates, seed_disk_boundary, &
         seed_primitive_coefficient, seed_primitive_finish, seed_hermite_profile
@@ -261,7 +262,7 @@ contains
     end subroutine
 
     subroutine ideal_seed_3d_init(map, seed, mesh, coefficients, nfp, flux, &
-            profile, status, nphi, angle_mpol, angle_ntor, axis)
+            profile, status, nphi, angle_mpol, angle_ntor, axis, winslow)
         type(ideal_map_t), intent(out) :: map
         type(toroidal_seed_t), intent(out) :: seed
         type(gs_state_t), intent(in) :: mesh
@@ -278,6 +279,9 @@ contains
         ! Initial magnetic axis in the m = 0 layout of the coefficients
         ! (default: the boundary's m = 0 curve).
         real(dp), intent(in), optional :: axis(:, :)
+        ! Interior of every toroidal plane from the Winslow map of its
+        ! cross-section (milca_winslow_seed) instead of the harmonic extension.
+        logical, intent(in), optional :: winslow
         type(cylindrical_chart_t) :: chart
         real(dp) :: iota, pressure, integral, previous, energy, minimum_radius
         integer :: a, m, j, ntor, angles
@@ -316,14 +320,10 @@ contains
         call ideal_map_freeze(map, seed, status)
         if (status /= IDEAL_MAP_OK) return
         minimum_radius=huge(1.0_dp)
-        !$omp parallel do schedule(static) private(a,m,j) reduction(min:minimum_radius)
+        !$omp parallel do schedule(static) private(a,m)
         do a = 1, map%nodes
             call ideal_seed_boundary_coefficients(map%reference(:, a), &
                 coefficients, map%x(:, :, a), axis)
-            do j=1,map%nphi
-                minimum_radius=min(minimum_radius, &
-                    dot_product(map%x(1,:,a),map%trig(:,j)))
-            end do
             if (.not. map%boundary(a)) cycle
             ! A nonaxisymmetric fixed wall is parametrized by phi-hat. A
             ! boundary omega would move its points off that prescribed wall.
@@ -332,6 +332,23 @@ contains
             end do
         end do
         !$omp end parallel do
+        if (present(winslow)) then
+            if (winslow) then
+                call winslow_seed(map, m)
+                if (m == WINSLOW_NOT_SIMPLE) then
+                    status = IDEAL_MAP_BAD_INPUT
+                    return
+                else if (m /= WINSLOW_OK) then
+                    status = IDEAL_MAP_FOLDED
+                    return
+                end if
+            end if
+        end if
+        do a = 1, map%nodes
+            do j = 1, map%nphi
+                minimum_radius = min(minimum_radius, dot_product(map%x(1, :, a), map%trig(:, j)))
+            end do
+        end do
         if (.not. minimum_radius>0) then
             status=IDEAL_MAP_BAD_INPUT
             return

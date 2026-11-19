@@ -8,7 +8,7 @@ program nested_equilibrium
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
         ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate
     use milca_ideal_map, only: ideal_map_t, ideal_map_solve, ideal_map_solve_report_t, &
-        ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction
+        ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction, ideal_map_freeze
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
     use milca_equilibrium_state, only: EQ_VALUES, EQ_BR, EQ_BZ, EQ_BPHI, EQ_P
     use milca_grad_shafranov, only: gs_state_t
@@ -25,7 +25,7 @@ program nested_equilibrium
     integer :: map_ntor, ntor_level, level, current_nodes
     logical :: automatic_ntor, iota_crosses_zero = .false.
     real(dp) :: fourier_tolerance, fourier_error, observed(4), previous_observed(4)
-    real(dp), allocatable :: boundary_input(:, :, :), axis_input(:, :)
+    real(dp), allocatable :: boundary_input(:, :, :)
     type(ideal_map_t) :: previous_map
     real(dp), allocatable :: previous_seed(:, :, :)
     real(dp) :: phiedge, tolerance
@@ -37,9 +37,6 @@ program nested_equilibrium
     real(dp) :: profile_knots(knot_max), iota_values(knot_max), iota_slopes(knot_max)
     real(dp) :: pressure_values(knot_max), pressure_slopes(knot_max)
     real(dp) :: current_values(knot_max), current_slopes(knot_max)
-    real(dp) :: raxis_cc(0:nmax), raxis_cs(0:nmax), zaxis_cc(0:nmax), zaxis_cs(0:nmax)
-    real(dp), allocatable :: axis(:, :)
-    logical :: guessed = .false.
     logical :: prescribe_current
     integer :: max_current_iterations
     real(dp) :: current_tolerance, current_error, solve_tolerance
@@ -58,7 +55,7 @@ program nested_equilibrium
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
-        current_tolerance, raxis_cc, raxis_cs, zaxis_cc, zaxis_cs, iota_type, pressure_type, &
+        current_tolerance, iota_type, pressure_type, &
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, current_nodes
 
@@ -67,7 +64,6 @@ program nested_equilibrium
     boundary_nodes = 16; degree = 3; tolerance = 1e-8_dp; max_iterations = 200
     angle_mpol = -1; ladder_nodes = 0; ladder_degree = 0
     prescribe_current = .false.; current = 0; max_current_iterations = 30
-    raxis_cc = 0; raxis_cs = 0; zaxis_cc = 0; zaxis_cs = 0
     current_tolerance = 1e-5_dp
     map_ntor = -1; fourier_tolerance = 1e-4_dp; current_nodes = 16
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
@@ -103,15 +99,6 @@ program nested_equilibrium
     boundary_input(2, :, :) = rbs(-ntor:ntor, 0:mpol)
     boundary_input(3, :, :) = zbc(-ntor:ntor, 0:mpol)
     boundary_input(4, :, :) = zbs(-ntor:ntor, 0:mpol)
-    if (any([raxis_cc, raxis_cs, zaxis_cc, zaxis_cs] /= 0)) then
-        ! VMEC's axis arrays follow its boundary's m = 0 convention, the
-        ! layout cos/sin(-n nfp phi); negative n keep the boundary's values
-        allocate (axis_input(4, -ntor:ntor), source=boundary_input(:, :, 0))
-        do n = 0, ntor
-            axis_input(:, n) = [raxis_cc(n), raxis_cs(n), zaxis_cc(n), zaxis_cs(n)]
-        end do
-        axis_input(2:4:2, 0) = 0
-    end if
     profile%iota = iota(0:last(iota))
     ! the solver uses mu0 = 1 pressure units
     profile%pressure = mu0*pressure(0:last(pressure))
@@ -244,12 +231,6 @@ contains
             call ideal_seed_disk_mesh(mesh, nodes, order, status)
             if (status /= 0) error stop 'nested_equilibrium: disk mesh'
             call init_seed(status)
-            if (status /= 0 .and. .not. guessed) then
-                ! as VMEC does after a bad initial Jacobian: guess the axis
-                call guess_axis()
-                guessed = .true.
-                call init_seed(status)
-            end if
             if (status /= 0) call fail('the seed is not admitted (folded or invalid input)')
             reference = free_gradient()
             seed_x = map%x
@@ -276,16 +257,11 @@ contains
     end function
 
     subroutine set_toroidal_level(modes)
-        ! boundary and axis padded with zero coefficients up to the map's modes
+        ! boundary padded with zero coefficients up to the map's modes
         integer, intent(in) :: modes
         if (allocated(boundary)) deallocate (boundary)
         allocate (boundary(4, -modes:modes, 0:mpol), source=0.0_dp)
         boundary(:, -ntor:ntor, :) = boundary_input
-        if (allocated(axis_input)) then
-            if (allocated(axis)) deallocate (axis)
-            allocate (axis(4, -modes:modes), source=0.0_dp)
-            axis(:, -ntor:ntor) = axis_input
-        end if
     end subroutine
 
     subroutine observe(values)
@@ -375,103 +351,20 @@ contains
             ! intermediate maps need only the accuracy of the current mismatch
             solve_tolerance = max(tolerance, min(1e-4_dp, 1e-3_dp*error))
             call resolve(local)
-            if (local /= 0) call fail('the seed for an iota update is not admitted')
+            if (local /= 0) call fail('the map folded when frozen with the updated iota')
         end do
     end subroutine
 
     subroutine init_seed(status)
         integer, intent(out) :: status
-        ! an unallocated axis is an absent optional argument
+        ! every plane from the Winslow map of its cross-section
         if (angle_mpol >= 0) then
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
-                status, angle_mpol=angle_mpol, axis=axis)
+                status, angle_mpol=angle_mpol, winslow=.true.)
         else
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
-                status, axis=axis)
+                status, winslow=.true.)
         end if
-    end subroutine
-
-    subroutine guess_axis()
-        ! In each toroidal plane the axis point that maximises the smallest
-        ! Jacobian of the seed's harmonic extension (grid search, as VMEC's
-        ! guess_axis), then fitted with the axis Fourier modes.
-        integer, parameter :: nr = 16, nt = 96, ng = 41
-        integer :: nplane, k, i, j, m, nn, a, b, info
-        real(dp) :: phi, theta, rho, phase, xm(2, 0:mmax), dxm(2, 0:mmax), b0(2)
-        real(dp) :: best, worst, cand(2), jac, rr, rt, zr, zt, lo(2), hi(2)
-        real(dp), allocatable :: points(:, :), lsq(:, :), rhs(:, :), work(:)
-        nplane = max(8, 2*ntor + 2)
-        allocate (points(2, nplane), lsq(nplane, 2*ntor + 1), rhs(nplane, 2), work(64*nplane))
-        do k = 1, nplane
-            phi = 2*pi*(k - 1)/(nfp*nplane)
-            lo = huge(1.0_dp); hi = -huge(1.0_dp)
-            do j = 0, nt - 1
-                theta = 2*pi*j/nt
-                call plane_modes(theta, phi, xm, dxm)
-                lo = min(lo, sum(xm, dim=2)); hi = max(hi, sum(xm, dim=2))
-            end do
-            call plane_modes(0.0_dp, phi, xm, dxm); b0 = xm(:, 0)
-            best = -huge(1.0_dp)
-            do a = 1, ng
-                do b = 1, ng
-                    cand = lo + (hi - lo)*[real(a, dp), real(b, dp)]/(ng + 1)
-                    worst = huge(1.0_dp)
-                    do j = 0, nt - 1
-                        theta = 2*pi*j/nt
-                        call plane_modes(theta, phi, xm, dxm)
-                        do i = 1, nr
-                            rho = real(i, dp)/nr
-                            rr = -2*rho*(cand(1) - b0(1)); zr = -2*rho*(cand(2) - b0(2))
-                            rt = 0; zt = 0
-                            do m = 1, mpol
-                                rr = rr + m*rho**(m - 1)*xm(1, m); zr = zr + m*rho**(m - 1)*xm(2, m)
-                                rt = rt + rho**m*dxm(1, m); zt = zt + rho**m*dxm(2, m)
-                            end do
-                            jac = (rr*zt - rt*zr)/rho
-                            worst = min(worst, jac)
-                        end do
-                    end do
-                    if (worst > best) then
-                        best = worst; points(:, k) = cand
-                    end if
-                end do
-            end do
-            ! cos and sin of (-n nfp phi), the m = 0 layout
-            lsq(k, 1) = 1
-            do nn = 1, ntor
-                lsq(k, 2*nn) = cos(-nn*nfp*phi); lsq(k, 2*nn + 1) = sin(-nn*nfp*phi)
-            end do
-        end do
-        rhs = transpose(points)
-        call dgels('N', nplane, 2*ntor + 1, 2, lsq, nplane, rhs, nplane, work, size(work), info)
-        if (info /= 0) call fail('the axis guess fit failed')
-        if (allocated(axis_input)) deallocate (axis_input)
-        allocate (axis_input(4, -ntor:ntor), source=boundary_input(:, :, 0))
-        axis_input(:, 0) = [rhs(1, 1), 0.0_dp, rhs(1, 2), 0.0_dp]
-        do nn = 1, ntor
-            axis_input(:, nn) = [rhs(2*nn, 1), rhs(2*nn + 1, 1), rhs(2*nn, 2), rhs(2*nn + 1, 2)]
-            axis_input(:, -nn) = 0
-        end do
-        call set_toroidal_level(ntor_level)
-    end subroutine
-
-    subroutine plane_modes(theta, phi, xm, dxm)
-        ! (R, Z) of each poloidal mode m of the boundary at (theta, phi) and its
-        ! theta derivative
-        real(dp), intent(in) :: theta, phi
-        real(dp), intent(out) :: xm(2, 0:mmax), dxm(2, 0:mmax)
-        real(dp) :: phase
-        integer :: m, nn
-        xm = 0; dxm = 0
-        do m = 0, mpol
-            do nn = -ntor, ntor
-                phase = m*theta - nn*nfp*phi
-                xm(:, m) = xm(:, m) + boundary([1, 3], nn, m)*cos(phase) &
-                    + boundary([2, 4], nn, m)*sin(phase)
-                dxm(:, m) = dxm(:, m) + m*(boundary([2, 4], nn, m)*cos(phase) &
-                    - boundary([1, 3], nn, m)*sin(phase))
-            end do
-        end do
     end subroutine
 
     subroutine measure(s, values)
@@ -503,16 +396,11 @@ contains
     end subroutine
 
     subroutine resolve(local)
-        ! re-seed the frozen form with the new iota and keep the solved map
+        ! freeze the new iota on the solved map and solve again
         integer, intent(out) :: local
-        real(dp), allocatable :: x_saved(:, :, :), angle_saved(:)
-        x_saved = map%x
-        if (allocated(map%angle)) angle_saved = map%angle
-        call ideal_seed_disk_mesh(mesh, boundary_nodes, degree, local)
-        call init_seed(local)
+        seed%profile = profile
+        call ideal_map_freeze(map, seed, local)
         if (local /= 0) return
-        map%x = x_saved
-        if (allocated(angle_saved)) map%angle = angle_saved
         ! the same absolute target as the first solve, relative to its seed
         call ideal_map_solve(map, solve_tolerance, max_iterations, report, solve_status, &
             reference_gradient=reference)
