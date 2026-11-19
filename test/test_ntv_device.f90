@@ -26,7 +26,17 @@ program test_ntv_device
     real(dp), parameter :: jpol = -1.2e7_dp, itor_s = -3.0e5_dp, flux = -1.3_dp
     real(dp), parameter :: pi = 4*atan(1.0_dp), kev = 1.602176634e-16_dp
     integer :: failures = 0
+    character(32) :: only
 
+    ! The coupled finite-width kernel takes minutes: a test of its own.
+    only = ''
+    if (command_argument_count() > 0) call get_command_argument(1, only)
+    if (only == 'orbit_width_coupled') then
+        call orbit_width_coupled()
+        if (failures > 0) error stop 'FAIL'
+        print '(a)', 'All tests passed!'
+        stop
+    end if
     call lorentz_limit()
     call preconditioned_sweep()
     call energy_coupled()
@@ -682,6 +692,83 @@ contains
         prof%temperature_s = -1*kev*f
         prof%kappa = 3e-4_dp
     end subroutine deposit_profile
+
+    !> The energy-coupled hp kernel with finite orbit width on thin deuterons
+    !> (temperature and rotation scaled by 1e-4, as orbit_width_thin): with
+    !> pitch-angle scattering alone it reproduces the monoenergetic
+    !> finite-width coefficients (lumped speed nodes against Gauss-Laguerre
+    !> nodes), and with the full operator it equals the coupled kernel on the
+    !> thin Boozer line, which agrees with the Legendre coupled kernel.
+    subroutine orbit_width_coupled()
+        character(*), parameter :: eq_name = 'ntv_coupled_eq.bc', &
+            pert_name = 'ntv_coupled_pert.bc'
+        type(boozer_file_t), target :: eq, pert
+        type(ntv_species_t) :: sp(1)
+        type(ntv_profile_t) :: prof
+        type(ntv_resolution_t) :: res
+        type(ntv_species_result_t), allocatable :: mono(:, :), lorentz(:, :), wide(:, :), &
+            thin(:, :), legendre(:, :)
+        real(dp), parameter :: factor = 1e-4_dp
+        integer :: status
+        call write_file(eq_name, .false.)
+        call write_file(pert_name, .true.)
+        call load_boozer_file(eq_name, eq, status)
+        call load_boozer_file(pert_name, pert, status)
+        sp(1) = ntv_species_t(1.0_dp, 3.3435837768e-27_dp)
+        prof%s = [0.45_dp]
+        prof%omega_te = [3e4_dp]*factor
+        allocate (prof%density(1, 1), prof%temperature(1, 1), prof%density_s(1, 1), &
+            prof%temperature_s(1, 1), prof%kappa(1, 1))
+        prof%density = 3e19_dp
+        prof%temperature = 2*kev*factor
+        prof%density_s = -1e19_dp
+        prof%temperature_s = -1*kev*factor
+        prof%kappa = 3e-4_dp
+        res%x_tol = 0
+        res%n_theta = 65
+        res%n_leg = 300
+        res%n_x = 16
+        res%sources = .false.
+        res%orbit_width = .true.
+        res%hp_columns = 16
+        res%hp_rows = 6
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, mono, status)
+        call check('monoenergetic finite width', status == DEVICE_OK)
+        res%collisions = 1
+        res%nelem = 3
+        res%order = 4
+        res%x_max = 4
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, lorentz, status)
+        call check('coupled Lorentz finite width', status == DEVICE_OK)
+        res%collisions = 3
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, wide, status)
+        call check('coupled full operator finite width', status == DEVICE_OK)
+        res%orbit_width = .false.
+        res%hp_energy = .true.
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, thin, status)
+        call check('coupled full operator thin', status == DEVICE_OK)
+        res%hp_energy = .false.
+        res%thin_legendre = .true.
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, legendre, status)
+        call check('Legendre coupled full operator thin', status == DEVICE_OK)
+        if (failures > 0) return
+        print '(a,5es14.6)', 'K11 mono, Lorentz, full fow, full thin hp, Legendre ', &
+            mono(1, 1)%k11, lorentz(1, 1)%k11, wide(1, 1)%k11, thin(1, 1)%k11, &
+            legendre(1, 1)%k11
+        call close_to('coupled Lorentz K11', lorentz(1, 1)%k11, mono(1, 1)%k11, 2e-2_dp)
+        call close_to('coupled Lorentz K12', lorentz(1, 1)%k12, mono(1, 1)%k12, 2e-2_dp)
+        call close_to('coupled Lorentz K22', lorentz(1, 1)%k22, mono(1, 1)%k22, 2e-2_dp)
+        call close_to('coupled Lorentz K21 = K12', lorentz(1, 1)%k21, lorentz(1, 1)%k12, &
+            1e-6_dp)
+        call close_to('full K11 thin orbits', wide(1, 1)%k11, thin(1, 1)%k11, 2e-3_dp)
+        call close_to('full K12 thin orbits', wide(1, 1)%k12, thin(1, 1)%k12, 2e-3_dp)
+        call close_to('full torque thin orbits', wide(1, 1)%torque, thin(1, 1)%torque, &
+            2e-3_dp)
+        call close_to('thin hp against Legendre K11', thin(1, 1)%k11, legendre(1, 1)%k11, &
+            2e-2_dp)
+        call check('full operator counts its nodes', wide(1, 1)%factorisations > 1 .and. &
+            wide(1, 1)%mesh_unknowns > 0)
+    end subroutine orbit_width_coupled
 
     subroutine write_file(name, perturbation)
         character(*), intent(in) :: name

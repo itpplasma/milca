@@ -31,14 +31,17 @@
 !! fixed psi*, on the hp mesh of the resolution. It has neither of the two
 !! #192 sources: their sum is the first-order difference between the local
 !! and the canonical drive, which this kernel replaces, so its thin limit is
-!! the kernel with sources off.
+!! the kernel with sources off. With a collision model it is the
+!! energy-coupled hp kernel (milca_dk_hp_energy) with every speed node on the
+!! orbits of its energy, all collisions at fixed psi*; hp_energy selects that
+!! kernel for thin orbits too.
 !!
 !! Work units (species, energy node, chunk of consecutive surfaces) run
 !! under OpenMP with dynamic scheduling. Each unit factorises its first
 !! surface and solves the following ones by GMRES preconditioned with that
 !! factorisation, refactorising when the iteration count exceeds a bound.
 module milca_ntv_device
-    use, intrinsic :: iso_fortran_env, only: dp => real64, error_unit
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64, error_unit
     !$ use omp_lib, only: omp_get_max_threads
     use fortnum_quadrature, only: gauss_gen_laguerre, gauss_legendre
     use milca_boozer_file, only: boozer_file_t, boozer_surface_t, boozer_surface, &
@@ -49,7 +52,9 @@ module milca_ntv_device
             NTV_NO_CONVERGENCE, NTV_WEIGHT_FULL
     use milca_boozer_orbit, only: orbit_particle_t, orbit_set_potential, orbit_flux_p
     use milca_dk_hp, only: hp_operator_t, hp_mesh_t, hp_default_mesh, hp_ntv_kernel, HP_OK, &
-        HP_SINGULAR, hp_ntv_estimate, hp_refine, hp_geometry_t
+        HP_SINGULAR, HP_NO_CONVERGENCE, hp_ntv_estimate, hp_refine, hp_geometry_t, hp_mesh_join
+    use milca_dk_hp_energy, only: hp_energy_system_t, hp_energy_setup, &
+        hp_energy_coefficients, hp_energy_free, HP_NO_MEMORY
     use milca_ntv_hp_line, only: hp_line_field_t, hp_line_field
     use milca_ntv_orbit_geometry, only: hp_orbit_geometry_t, hp_orbit_geometry, &
         hp_orbit_perturbation, hp_orbit_confined
@@ -62,7 +67,7 @@ module milca_ntv_device
         ntv_device_axisymmetric, ntv_axisymmetric_result_t, ntv_omega_te_from_rotation, &
         ntv_indicator_t, ntv_device_indicators
     integer, parameter, public :: DEVICE_OK = 0, DEVICE_BAD_INPUT = 1, DEVICE_SOLVE = 2, &
-        DEVICE_NO_CONVERGENCE = 3, DEVICE_ORBIT_LOST = 4
+        DEVICE_NO_CONVERGENCE = 3, DEVICE_ORBIT_LOST = 4, DEVICE_MEMORY = 5
     ! Mesh refinement modes of one kernel evaluation (adapt_kernel).
     integer, parameter :: MESH_FIXED = 0, MESH_SETTLE = 1, MESH_CHECK = 2
 
@@ -101,6 +106,9 @@ module milca_ntv_device
         ! elements of the given order on [0, x_max] (energy-coupled kernel).
         integer :: collisions = 0, nelem = 4, order = 4
         real(dp) :: x_max = 5
+        ! Limit of the kink edges in a speed grid, kept by their weight
+        ! x^6 e^(-x^2); the Legendre energy-coupled kernel keeps every kink.
+        integer :: max_kink_edges = 8
         ! Monoenergetic energy integral: relative tolerance of adaptive
         ! composite Gauss-Legendre panels in x = v^2/v_th^2 on [0, 25]
         ! (0: n_x Gauss-Laguerre nodes). The E x B and precession resonance
@@ -111,6 +119,11 @@ module milca_ntv_device
         ! mesh of hp_default_mesh: element order, columns, bulk rows and the
         ! relative width of the layer at the separatrix.
         logical :: orbit_width = .false.
+        ! With collisions /= 0: the energy-coupled hp kernel (input line
+        ! hp_energy), also for thin orbits; finite orbit width always uses it.
+        ! Its node factors must fit hp_energy_memory GiB.
+        logical :: hp_energy = .false.
+        real(dp) :: hp_energy_memory = 64
         ! Thin orbits: the spectral-element kernel on the Boozer line, on the
         ! mesh below (default), or the Legendre kernel of milca_dk_ntv.
         logical :: thin_legendre = .false.
@@ -227,11 +240,30 @@ contains
         orbit_outside = st == DEVICE_ORBIT_LOST .or. st == HP_SINGULAR
     end function orbit_outside
 
+    !> int_c^inf y^6 exp(-y^2) dy over its value from 0, the share of the
+    !> K_11 weight above the speed c.
+    pure real(dp) function tail_weight(c) result(w)
+        real(dp), intent(in) :: c
+        w = (exp(-c*c)*(c**5/2 + 5*c**3/4 + 15*c/8) + 15*sqrt(pi)/16*erfc(c)) &
+            /(15*sqrt(pi)/16)
+    end function tail_weight
+
     !> Whether the thin-orbit kernel is the Legendre one (on request).
     pure logical function thin_legendre(res)
         type(ntv_resolution_t), intent(in) :: res
         thin_legendre = res%thin_legendre
     end function thin_legendre
+
+    !> The band of energy x: band k spans seeds k to k + 1, the outer bands
+    !> extend to all lower and higher energies.
+    pure integer function band_of(band_seed, nband, x) result(k)
+        real(dp), intent(in) :: band_seed(:), x
+        integer, intent(in) :: nband
+        k = 1
+        if (nband < 2) return
+        k = count(band_seed(2:nband) <= x) + 1
+        k = min(max(k, 1), nband)
+    end function band_of
 
     subroutine ntv_device_profile(eq, pert, n_tor, species, prof, res, result, status)
         type(boozer_file_t), target, intent(in) :: eq, pert
@@ -268,7 +300,9 @@ contains
         nsp = size(species)
         status = DEVICE_BAD_INPUT
         if (ns < 1 .or. nsp < 1 .or. res%n_x < 1 .or. res%chunk < 1) return
-        if (res%orbit_width .and. res%collisions /= 0) return
+        ! The thin coupled hp kernel takes no quasilinear sources yet.
+        if (res%hp_energy .and. res%sources .and. .not. res%orbit_width .and. &
+            res%collisions /= 0) return
         allocate (sf(ns), j0(ns), dpsi_dr(ns), psi_pol_s(ns), b_ref(ns), phi(ns), vp(ns))
         do i = 1, ns
             call surface(eq, pert, n_tor, prof%s(i), res, sf(i), j0(i), dpsi_dr(i), &
@@ -290,6 +324,10 @@ contains
             phi(i) = phi(i - 1) + 0.5_dp*(prof%omega_te(i - 1) + prof%omega_te(i)) &
                 *orbit_flux_p(eq, prof%s(i - 1), prof%s(i))
         end do
+        if (res%collisions /= 0 .and. (res%orbit_width .or. res%hp_energy)) then
+            call coupled_profile()
+            return
+        end if
         allocate (band(max_bands, ns, nsp), band_seed(max_bands + 1, ns, nsp), nband(ns, nsp))
         nband = 0
         if (res%x_tol > 0) then
@@ -413,6 +451,146 @@ contains
             end do
         end subroutine real_space
 
+        !> The energy-coupled hp kernel (milca_dk_hp_energy) surface by
+        !> surface, OpenMP inside the kernel.
+        subroutine coupled_profile()
+            integer, allocatable :: cst(:)
+            integer :: is
+            allocate (result(ns, nsp), cst(ns))
+            do is = 1, ns
+                call coupled_surface(is, cst(is))
+                if (cst(is) /= DEVICE_OK) result(is, :) = ntv_species_result_t(status=cst(is))
+            end do
+            status = merge(DEVICE_OK, DEVICE_SOLVE, all(cst == DEVICE_OK))
+            call real_space()
+        end subroutine coupled_profile
+
+        !> Surface is with the collision model res%collisions coupling all
+        !> speed nodes and species: thin orbits on the Boozer line, one mesh;
+        !> with orbit_width every node on the orbit geometry of psi* = s and
+        !> its energy with its own mesh, the collisions at fixed psi*. Where
+        !> the orbits of a node leave the file, the speed grid ends below the
+        !> lowest such speed (0.98 of it, found by bisection) and lost_weight
+        !> is the share of the K_11 weight y^6 exp(-y^2) above it.
+        subroutine coupled_surface(is, st)
+            integer, intent(in) :: is
+            integer, intent(out) :: st
+            type(collop_species_t) :: csp(nsp)
+            type(collop_grid_t) :: grid
+            type(hp_orbit_geometry_t), allocatable :: go(:, :)
+            type(hp_line_field_t), allocatable :: gl(:, :)
+            type(hp_operator_t), allocatable :: ops(:, :)
+            type(hp_mesh_t), allocatable :: meshes(:)
+            type(hp_energy_system_t) :: sys
+            real(dp), allocatable :: node_r(:, :, :, :)
+            integer, allocatable :: mid(:, :)
+            real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2), x_cut, y_lost, y_ok
+            integer :: aa, kx, nx, ks, its, attempt
+            st = DEVICE_SOLVE
+            do aa = 1, nsp
+                csp(aa) = collop_species_t(species(aa)%mass, species(aa)%z, &
+                    prof%density(is, aa), prof%temperature(is, aa))
+            end do
+            do aa = 1, nsp
+                lnl(aa, :) = 3*sqrt(pi)/8*collop_vth(csp(aa))*prof%kappa(is, aa) &
+                    /collop_nuhat(csp(aa), csp(aa), 1.0_dp)
+            end do
+            x_cut = res%x_max
+            do attempt = 1, 2
+                call collop_make_grid(x_cut, res%nelem, res%order, grid, ks)
+                if (ks /= COLLOP_OK) return
+                nx = grid%n - 1
+                if (allocated(ops)) deallocate (ops, mid, meshes)
+                if (allocated(go)) deallocate (go)
+                if (allocated(gl)) deallocate (gl)
+                allocate (ops(nx, nsp), mid(nx, nsp))
+                y_lost = huge(1.0_dp)
+                if (res%orbit_width) then
+                    allocate (go(nx, nsp), meshes(nx*nsp))
+                else
+                    allocate (gl(nx, nsp), meshes(1))
+                end if
+                do aa = 1, nsp
+                    do kx = 1, nx
+                        if (res%orbit_width) then
+                            mid(kx, aa) = (aa - 1)*nx + kx
+                            call orbit_setup(is, aa, grid%x(kx + 1)**2, go(kx, aa), &
+                                ops(kx, aa), ks)
+                            if (ks == DEVICE_ORBIT_LOST) then
+                                y_lost = min(y_lost, grid%x(kx + 1))
+                                cycle
+                            end if
+                            if (ks /= HP_OK) return
+                            call start_mesh(go(kx, aa), meshes(mid(kx, aa)))
+                        else
+                            mid(kx, aa) = 1
+                            call thin_setup(is, aa, grid%x(kx + 1)**2, gl(kx, aa), &
+                                ops(kx, aa), ks)
+                            if (ks /= HP_OK) return
+                            ops(kx, aa)%source_dpar = .false.
+                            ops(kx, aa)%source_dlf10 = .false.
+                        end if
+                    end do
+                end do
+                if (y_lost == huge(1.0_dp)) exit
+                st = DEVICE_ORBIT_LOST
+                if (attempt == 2) return
+                y_ok = maxval(grid%x, mask=grid%x < y_lost)
+                x_cut = 0.98_dp*confined_speed(is, y_ok, y_lost)
+                ! Most of the transport weight would be lost.
+                if (x_cut < 1) return
+                st = DEVICE_SOLVE
+            end do
+            if (res%orbit_width) then
+                call hp_energy_setup(go, ops, meshes, mid, grid, csp, lnl, res%collisions, &
+                    int(res%hp_energy_memory*2.0_dp**30, int64), sys, ks, gid=mid)
+            else
+                call start_mesh(gl(1, 1), meshes(1))
+                call hp_energy_setup(gl, ops, meshes, mid, grid, csp, lnl, res%collisions, &
+                    int(res%hp_energy_memory*2.0_dp**30, int64), sys, ks)
+            end if
+            if (ks == HP_NO_MEMORY) st = DEVICE_MEMORY
+            if (ks /= HP_OK) return
+            call hp_energy_coefficients(sys, j0(is), kk, qq, node_r, its, ks)
+            call hp_energy_free(sys)
+            if (ks == HP_NO_CONVERGENCE) st = DEVICE_NO_CONVERGENCE
+            if (ks /= HP_OK) return
+            call energy_fluxes(kk, qq, is, species, prof, psi_pol_s, dpsi_dr, result(is, :))
+            result(is, :)%factorisations = sys%n_factors
+            result(is, :)%iterations = its
+            result(is, :)%mesh_unknowns = maxval(sys%node%n)
+            result(is, :)%lost_weight = tail_weight(x_cut)
+            st = DEVICE_OK
+        end subroutine coupled_surface
+
+        !> The speed between lo (confined) and hi (lost for some species) at
+        !> which the orbits of surface is start to leave the file, by bisection.
+        real(dp) function confined_speed(is, lo, hi) result(y)
+            integer, intent(in) :: is
+            real(dp), intent(in) :: lo, hi
+            type(hp_orbit_geometry_t) :: g
+            type(hp_operator_t) :: op
+            real(dp) :: a0, b0
+            integer :: it, aa, ks
+            logical :: lost_here
+            a0 = lo
+            b0 = hi
+            do it = 1, 20
+                y = (a0 + b0)/2
+                lost_here = .false.
+                do aa = 1, nsp
+                    call orbit_setup(is, aa, y*y, g, op, ks)
+                    lost_here = lost_here .or. ks /= HP_OK
+                end do
+                if (lost_here) then
+                    b0 = y
+                else
+                    a0 = y
+                end if
+            end do
+            y = a0
+        end function confined_speed
+
         subroutine sweep(a, k, first, last, st)
             integer, intent(in) :: a, k, first, last
             integer, intent(out) :: st
@@ -433,7 +611,8 @@ contains
                     end if
                     if (nband(i, a) > 0) then
                         r(i, k, a) = orbit_r(i, a, x(k), ks, &
-                            start=band(band_of(i, a, x(k)), i, a), dep=dk(:, i, k, a))
+                            start=band(band_of(band_seed(:, i, a), nband(i, a), x(k)), i, a), &
+                            dep=dk(:, i, k, a))
                     else
                         r(i, k, a) = orbit_r(i, a, x(k), ks, dep=dk(:, i, k, a))
                     end if
@@ -453,7 +632,7 @@ contains
                 do i = first, last
                     if (nband(i, a) > 0) then
                         r(i, k, a) = thin_r(i, a, x(k), ks, &
-                            start=band(band_of(i, a, x(k)), i, a))
+                            start=band(band_of(band_seed(:, i, a), nband(i, a), x(k)), i, a))
                     else
                         r(i, k, a) = thin_r(i, a, x(k), ks)
                     end if
@@ -504,8 +683,23 @@ contains
             type(hp_line_field_t) :: g
             type(hp_operator_t) :: op
             type(hp_mesh_t) :: mesh
-            real(dp) :: v, kappa
             rv = 0
+            call thin_setup(i, a, xv, g, op, st)
+            if (st /= HP_OK) return
+            call start_mesh(g, mesh, start)
+            call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
+            if (present(used)) call normalised(g, mesh, used)
+        end function thin_r
+
+        !> Line field and operator of species a on surface i at
+        !> x = v^2/v_th^2, thin orbits.
+        subroutine thin_setup(i, a, xv, g, op, st)
+            integer, intent(in) :: i, a
+            real(dp), intent(in) :: xv
+            type(hp_line_field_t), intent(out) :: g
+            type(hp_operator_t), intent(out) :: op
+            integer, intent(out) :: st
+            real(dp) :: v, kappa
             v = sqrt(2*prof%temperature(i, a)/species(a)%mass*xv)
             call hp_line_field(sf(i)%line, 4*res%n_theta + 1, g, kappa, st)
             if (st /= HP_OK) return
@@ -523,10 +717,7 @@ contains
                 prof%temperature(i, :), prof%kappa(i, :), a, xv)/v
             op%source_dpar = res%sources
             op%source_dlf10 = res%sources
-            call start_mesh(g, mesh, start)
-            call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
-            if (present(used)) call normalised(g, mesh, used)
-        end function thin_r
+        end subroutine thin_setup
 
         !> The refinement mode of a kernel: as given, else MESH_FIXED on a start
         !> mesh and MESH_SETTLE from the mesh of the resolution.
@@ -654,13 +845,33 @@ contains
             type(adapt_info_t), intent(out), optional :: info
             ! The deposit of rv in the bins de, when depositing.
             real(dp), intent(out), optional :: dep(:)
-            type(orbit_particle_t) :: p
             type(hp_orbit_geometry_t) :: g
             type(hp_operator_t) :: op
             type(hp_mesh_t) :: mesh
-            real(dp) :: v
             rv = 0
             if (present(dep)) dep = 0
+            call orbit_setup(i, a, xv, g, op, st)
+            if (st /= HP_OK) return
+            call start_mesh(g, mesh, start)
+            if (present(dep) .and. depositing) then
+                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info, dep)
+            else
+                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
+            end if
+            if (present(used)) call normalised(g, mesh, used)
+        end function orbit_r
+
+        !> Orbit geometry with the perturbation and operator of species a on
+        !> surface i at x = v^2/v_th^2; st is DEVICE_ORBIT_LOST for orbits
+        !> leaving the file.
+        subroutine orbit_setup(i, a, xv, g, op, st)
+            integer, intent(in) :: i, a
+            real(dp), intent(in) :: xv
+            type(hp_orbit_geometry_t), intent(out) :: g
+            type(hp_operator_t), intent(out) :: op
+            integer, intent(out) :: st
+            type(orbit_particle_t) :: p
+            real(dp) :: v
             v = sqrt(2*prof%temperature(i, a)/species(a)%mass*xv)
             p%mass = species(a)%mass
             p%charge = species(a)%z*elementary
@@ -687,14 +898,8 @@ contains
             op%wsign = 1
             op%nu = deflection_frequency(species, prof%density(i, :), &
                 prof%temperature(i, :), prof%kappa(i, :), a, xv)/v
-            call start_mesh(g, mesh, start)
-            if (present(dep) .and. depositing) then
-                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info, dep)
-            else
-                call adapt_kernel(g, mesh, op, rv, st, kernel_mode(start, mode), info)
-            end if
-            if (present(used)) call normalised(g, mesh, used)
-        end function orbit_r
+            st = HP_OK
+        end subroutine orbit_setup
 
         !> R of species a on surface i at x = v^2/v_th^2.
         real(dp) function kernel_r(i, a, xv, st, start, used, mode, info, dep) result(rv)
@@ -921,7 +1126,7 @@ contains
             real(dp), intent(in) :: dof
             type(hp_mesh_t) :: joined
             joined = mesh
-            call join(joined, m)
+            call hp_mesh_join(joined, m)
             if (dof*elements(joined) <= real(res%hp_max_unknowns, dp)) then
                 mesh = joined
             else if (elements(m) > elements(mesh)) then
@@ -946,59 +1151,6 @@ contains
                     ' |eta|/|R + eta| ', info(k)%eta_rel, ' unknowns ', info(k)%n_dof
             end do
         end subroutine note_adaptation
-
-        !> The band of energy x: band k spans seeds k to k + 1, the outer bands
-        !> extend to all lower and higher energies.
-        pure integer function band_of(i, a, x) result(k)
-            integer, intent(in) :: i, a
-            real(dp), intent(in) :: x
-            k = 1
-            if (nband(i, a) < 2) return
-            k = count(band_seed(2:nband(i, a), i, a) <= x) + 1
-            k = min(max(k, 1), nband(i, a))
-        end function band_of
-
-        !> Adds the breakpoints of m to mesh.
-        pure subroutine join(mesh, m)
-            type(hp_mesh_t), intent(inout) :: mesh
-            type(hp_mesh_t), intent(in) :: m
-            mesh%theta = merged(mesh%theta, m%theta)
-            mesh%lam = merged(mesh%lam, m%lam)
-            mesh%zeta = merged(mesh%zeta, m%zeta)
-        end subroutine join
-
-        !> Sorted union of two increasing breakpoint lists; points closer than
-        !> 1e-12 count as one.
-        pure function merged(u, v) result(w)
-            real(dp), intent(in) :: u(:), v(:)
-            real(dp), allocatable :: w(:)
-            real(dp) :: tmp(size(u) + size(v)), x
-            integer :: i, j, n
-            i = 1
-            j = 1
-            n = 0
-            do while (i <= size(u) .or. j <= size(v))
-                if (j > size(v)) then
-                    x = u(i)
-                    i = i + 1
-                else if (i > size(u)) then
-                    x = v(j)
-                    j = j + 1
-                else if (u(i) <= v(j)) then
-                    x = u(i)
-                    i = i + 1
-                else
-                    x = v(j)
-                    j = j + 1
-                end if
-                if (n > 0) then
-                    if (abs(x - tmp(n)) <= 1e-12_dp) cycle
-                end if
-                n = n + 1
-                tmp(n) = x
-            end do
-            w = tmp(1:n)
-        end function merged
 
         !> A kink lies in each run of adjacent panels the quadrature bisected at
         !> least once; its energy is the run's centre.
@@ -1071,8 +1223,8 @@ contains
                 if (nband(i, a) > 0) then
                     rs(q - (j - 1)*nq, j) = kernel_r(i, a, xs(q - (j - 1)*nq, j), &
                         sts(q - (j - 1)*nq, j), &
-                        start=band(band_of(i, a, xs(q - (j - 1)*nq, j)), i, a), &
-                        dep=ds(:, q - (j - 1)*nq, j))
+                        start=band(band_of(band_seed(:, i, a), nband(i, a), &
+                        xs(q - (j - 1)*nq, j)), i, a), dep=ds(:, q - (j - 1)*nq, j))
                 else
                     rs(q - (j - 1)*nq, j) = kernel_r(i, a, xs(q - (j - 1)*nq, j), &
                         sts(q - (j - 1)*nq, j), dep=ds(:, q - (j - 1)*nq, j))
@@ -1186,6 +1338,10 @@ contains
         if (index(adjustl(line), 'orbit_width') == 1) then
             res%orbit_width = .true.
             call read_mesh(line(index(line, 'orbit_width') + 11:), res)
+            read (u, '(a)') line
+        else if (index(adjustl(line), 'hp_energy') == 1) then
+            res%hp_energy = .true.
+            call read_mesh(line(index(line, 'hp_energy') + 9:), res)
             read (u, '(a)') line
         else if (index(adjustl(line), 'hp') == 1) then
             call read_mesh(line(index(line, 'hp') + 2:), res)
@@ -1417,12 +1573,16 @@ contains
         real(dp), intent(in), optional :: kink(:, :, :)
         integer, intent(in), optional :: nkink(:, :)
         type(collop_grid_t) :: grid
+        type(ntv_resolution_t) :: all_kinks
         integer, allocatable :: ustat(:)
         integer :: i, ns, nsp
         ns = size(prof%s)
         nsp = size(species)
         status = DEVICE_BAD_INPUT
         if (n_tor == 0 .or. .not. allocated(eq%spline%x)) return
+        ! This kernel puts an edge at every recorded kink.
+        all_kinks = res
+        if (present(kink)) all_kinks%max_kink_edges = size(kink, 1)*nsp
         call collop_make_grid(res%x_max, res%nelem, res%order, grid, i)
         if (i /= COLLOP_OK) return
         if (allocated(result)) deallocate (result)
@@ -1443,8 +1603,8 @@ contains
             type(collop_species_t) :: sp(nsp)
             type(ntv_surface_t) :: local
             type(collop_grid_t) :: local_grid
-            real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2), a1(nsp), a2(nsp)
-            integer :: a, b, its, ks
+            real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2)
+            integer :: a, its, ks
             st = DEVICE_SOLVE
             do a = 1, nsp
                 sp(a) = collop_species_t(species(a)%mass, species(a)%z, prof%density(i, a), &
@@ -1456,7 +1616,8 @@ contains
             end do
             local = sf(i)
             if (present(kink)) then
-                call kink_grid(i, local_grid, ks)
+                call kink_grid(all_kinks, nsp, kink(:, i, :), nkink(i, :), res%x_max, &
+                    local_grid, ks)
                 if (ks /= COLLOP_OK) return
             else
                 local_grid = grid
@@ -1465,85 +1626,108 @@ contains
                 -prof%omega_te(i), res%n_theta, res%n_leg, kk, its, ks, qq)
             if (ks == NTV_NO_CONVERGENCE) st = DEVICE_NO_CONVERGENCE
             if (ks /= NTV_OK) return
-            do a = 1, nsp
-                a2(a) = prof%temperature_s(i, a)/(prof%temperature(i, a)*psi_pol_s(i))
-                a1(a) = prof%density_s(i, a)/(prof%density(i, a)*psi_pol_s(i)) &
-                    + species(a)%z*elementary/prof%temperature(i, a)*prof%omega_te(i) &
-                    - 1.5_dp*a2(a)
-            end do
-            do a = 1, nsp
-                result(i, a)%k11 = kk(a, a, 1)
-                result(i, a)%k12 = kk(a, a, 2)
-                result(i, a)%k21 = qq(a, a, 1)
-                result(i, a)%k22 = qq(a, a, 2)
-                result(i, a)%dpsi_dr = dpsi_dr(i)
-                result(i, a)%gamma_psi = 0
-                result(i, a)%heat_flux = 0
-                do b = 1, nsp
-                    result(i, a)%gamma_psi = result(i, a)%gamma_psi &
-                        - prof%density(i, a)*(kk(a, b, 1)*a1(b) + kk(a, b, 2)*a2(b))
-                    result(i, a)%heat_flux = result(i, a)%heat_flux &
-                        - prof%density(i, a)*prof%temperature(i, a) &
-                        *(qq(a, b, 1)*a1(b) + qq(a, b, 2)*a2(b))
-                end do
-                result(i, a)%torque = species(a)%z*elementary*result(i, a)%gamma_psi
-                result(i, a)%offset_rotation = prof%omega_te(i) + result(i, a)%gamma_psi &
-                    /(prof%density(i, a)*sum(kk(a, :, 1)*species%z*elementary &
-                    /prof%temperature(i, :)))
-                result(i, a)%factorisations = 1
-                result(i, a)%iterations = its
-            end do
+            call energy_fluxes(kk, qq, i, species, prof, psi_pol_s, dpsi_dr, result(i, :))
+            result(i, :)%factorisations = 1
+            result(i, :)%iterations = its
             st = DEVICE_OK
         end subroutine energy_surface
+    end subroutine energy_profile
 
-        !> Uniform speed elements with extra edges at the kink speeds sqrt(x) of
-        !> every species on surface i; uniform edges close to a kink give way.
-        subroutine kink_grid(i, g, st)
-            integer, intent(in) :: i
-            type(collop_grid_t), intent(out) :: g
-            integer, intent(out) :: st
-            real(dp), parameter :: gap = 0.12_dp
-            real(dp) :: y(res%nelem + 1 + 16*nsp), e(res%nelem + 1 + 16*nsp), t
-            integer :: a, k, n, m
-            n = 0
-            do a = 1, nsp
-                do k = 1, nkink(i, a)
-                    t = sqrt(kink(k, i, a))
-                    if (t > gap .and. t < res%x_max - gap) then
-                        n = n + 1
-                        y(n) = t
-                    end if
-                end do
+    !> Coefficients, fluxes, torque and offset rotation of every species on
+    !> surface i from the species-coupled K(a, b, j) and energy-flux q(a, b, j).
+    subroutine energy_fluxes(kk, qq, i, species, prof, psi_pol_s, dpsi_dr, result)
+        real(dp), intent(in) :: kk(:, :, :), qq(:, :, :), psi_pol_s(:), dpsi_dr(:)
+        integer, intent(in) :: i
+        type(ntv_species_t), intent(in) :: species(:)
+        type(ntv_profile_t), intent(in) :: prof
+        type(ntv_species_result_t), intent(inout) :: result(:)
+        real(dp) :: a1(size(species)), a2(size(species))
+        integer :: a, b, nsp
+        nsp = size(species)
+        do a = 1, nsp
+            a2(a) = prof%temperature_s(i, a)/(prof%temperature(i, a)*psi_pol_s(i))
+            a1(a) = prof%density_s(i, a)/(prof%density(i, a)*psi_pol_s(i)) &
+                + species(a)%z*elementary/prof%temperature(i, a)*prof%omega_te(i) &
+                - 1.5_dp*a2(a)
+        end do
+        do a = 1, nsp
+            result(a)%k11 = kk(a, a, 1)
+            result(a)%k12 = kk(a, a, 2)
+            result(a)%k21 = qq(a, a, 1)
+            result(a)%k22 = qq(a, a, 2)
+            result(a)%dpsi_dr = dpsi_dr(i)
+            result(a)%gamma_psi = 0
+            result(a)%heat_flux = 0
+            do b = 1, nsp
+                result(a)%gamma_psi = result(a)%gamma_psi &
+                    - prof%density(i, a)*(kk(a, b, 1)*a1(b) + kk(a, b, 2)*a2(b))
+                result(a)%heat_flux = result(a)%heat_flux &
+                    - prof%density(i, a)*prof%temperature(i, a) &
+                    *(qq(a, b, 1)*a1(b) + qq(a, b, 2)*a2(b))
             end do
-            do k = 0, res%nelem
-                t = res%x_max*k/res%nelem
-                if (k == 0 .or. k == res%nelem .or. all(abs(y(1:n) - t) > gap)) then
+            result(a)%torque = species(a)%z*elementary*result(a)%gamma_psi
+            result(a)%offset_rotation = prof%omega_te(i) + result(a)%gamma_psi &
+                /(prof%density(i, a)*sum(kk(a, :, 1)*species%z*elementary &
+                /prof%temperature(i, :)))
+        end do
+    end subroutine energy_fluxes
+
+    !> Uniform speed elements on [0, x_max] with extra edges at the kink
+    !> speeds sqrt(x) of every species (kink(:, a), nkink(a)) on one surface;
+    !> uniform edges close to a kink give way.
+    subroutine kink_grid(res, nsp, kink, nkink, x_max, g, st)
+        type(ntv_resolution_t), intent(in) :: res
+        integer, intent(in) :: nsp, nkink(:)
+        real(dp), intent(in) :: kink(:, :), x_max
+        type(collop_grid_t), intent(out) :: g
+        integer, intent(out) :: st
+        real(dp), parameter :: gap = 0.12_dp
+        real(dp) :: y(res%nelem + 1 + size(kink)), e(res%nelem + 1 + size(kink)), t
+        integer :: a, k, n, m
+        n = 0
+        do a = 1, nsp
+            do k = 1, nkink(a)
+                t = sqrt(kink(k, a))
+                if (t > gap .and. t < x_max - gap) then
                     n = n + 1
                     y(n) = t
                 end if
             end do
-            do k = 2, n
-                t = y(k)
-                m = k - 1
-                do while (m >= 1)
-                    if (y(m) <= t) exit
-                    y(m + 1) = y(m)
-                    m = m - 1
-                end do
-                y(m + 1) = t
+        end do
+        ! The speed nodes stay bounded: the kinks of least weight go.
+        do while (n > max(res%max_kink_edges, 0))
+            m = minloc(y(1:n)**6*exp(-y(1:n)**2), 1)
+            y(m:n - 1) = y(m + 1:n)
+            n = n - 1
+        end do
+        do k = 0, res%nelem
+            t = x_max*k/res%nelem
+            if (k == 0 .or. k == res%nelem .or. all(abs(y(1:n) - t) > gap)) then
+                n = n + 1
+                y(n) = t
+            end if
+        end do
+        do k = 2, n
+            t = y(k)
+            m = k - 1
+            do while (m >= 1)
+                if (y(m) <= t) exit
+                y(m + 1) = y(m)
+                m = m - 1
             end do
-            m = 1
-            e(1) = y(1)
-            do k = 2, n
-                if (y(k) - e(m) > gap/2) then
-                    m = m + 1
-                    e(m) = y(k)
-                end if
-            end do
-            e(m) = res%x_max
-            call collop_make_grid(res%x_max, m - 1, res%order, g, st, e(1:m))
-        end subroutine kink_grid
-    end subroutine energy_profile
+            y(m + 1) = t
+        end do
+        m = 1
+        e(1) = y(1)
+        do k = 2, n
+            if (y(k) - e(m) > gap/2) then
+                m = m + 1
+                e(m) = y(k)
+            end if
+        end do
+        e(m) = x_max
+        call collop_make_grid(x_max, m - 1, res%order, g, st, e(1:m))
+    end subroutine kink_grid
 
     !> Kernel surface of label s: the equilibrium line, the perturbation
     !> harmonics of toroidal number n_tor resolved by the theta grid, and the

@@ -3,6 +3,11 @@
 !!   equilibrium .bc path
 !!   perturbation .bc path
 !!   n_tor n_theta n_leg n_x chunk max_iterations sources(0|1)
+!!   optionally a mesh line: orbit_width, hp or hp_energy, each followed by
+!!   order columns rows delta [adapt], or legendre; then optionally the
+!!   collision line: model(1 Lorentz, 2 test particle, 3 full) x_max nelem
+!!   order [x_tol]. A collision model with orbit_width, or with hp_energy for
+!!   thin orbits, solves the energy-coupled hp kernel (sources off).
 !!   n_species, then per species: Z mass[kg]
 !!   n_surfaces, then per surface: s Omega_tE[rad/s], followed by one line per
 !!   species: density[m^-3] T[J] dn/ds dT/ds kappa[1/m]
@@ -11,8 +16,9 @@
 !! K_21, K_22, the energy flux [J Wb/(m^3 s)], the offset rotation [rad/s], the
 !! share of the K_11 weight on energies whose finite-width orbits leave the file
 !! (zero without orbit_width) and the status (0 solved, 2 solve failed, 3 GMRES
-!! did not converge, 4 orbits leave the file with adaptive energy panels; the
-!! row is then zero), then with hp adaptation the largest final mesh error
+!! did not converge, 4 orbits leave the file with adaptive energy panels, 5 the
+!! node factors of the energy-coupled hp kernel exceed its memory; the row is
+!! then zero), then with hp adaptation the largest final mesh error
 !! estimate |eta|/|R + eta| and the number of seed and check energies whose
 !! refinement stopped before the tolerance, and the largest number of unknowns
 !! of their meshes (all 0 without it), then dV/ds up to a constant factor
