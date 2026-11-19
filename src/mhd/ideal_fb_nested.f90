@@ -446,7 +446,7 @@ contains
 
     subroutine fb_nested_layer_mesh(boundary, centre, axes, nodes, degree, layers, &
                                     distance, mesh, chain, positions, lines, line_t, &
-                                    status, spines, spine_origins)
+                                    status, spines, spine_origins, plasma_cells)
         !! Reference mesh of the plasma disc (the reference ellipse, nodes
         !! boundary nodes) and a layered shell around it for
         !! ideal_fb_init(positions, lines, line_t). Every Gamma_p chain node y_p
@@ -470,6 +470,8 @@ contains
         real(dp), allocatable, intent(out), optional :: spines(:, :)
         !> the guess's section point of every Gamma_p node: the spine origin
         real(dp), allocatable, intent(out), optional :: spine_origins(:, :)
+        !> the disc cells (the first ones)
+        logical, allocatable, intent(out), optional :: plasma_cells(:)
         type(gs_state_t) :: disc
         integer, allocatable :: ring(:), lattice(:, :), tri(:, :)
         real(dp), allocatable :: points(:, :), xc(:, :)
@@ -580,6 +582,11 @@ contains
         end do
         mesh%points = points
         mesh%triangles = tri
+        if (present(plasma_cells)) then
+            allocate (plasma_cells(size(tri, 2)))
+            plasma_cells = .false.
+            plasma_cells(:size(disc%triangles, 2)) = .true.
+        end if
         allocate (mesh%boundary(size(points, 2)))
         mesh%boundary = .false.
         mesh%boundary(lattice(:, nr)) = .true.

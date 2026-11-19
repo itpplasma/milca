@@ -415,7 +415,7 @@ contains
     subroutine ideal_fb_init(fb, mesh, chain, chart, field, nfp, ntor, f_vac, &
                              circulation, status, mu0, nphi, panels_per_edge, &
                              quadrature_order, exterior_from, positions, lines, &
-                             line_t, spines, spine_origins)
+                             line_t, spines, spine_origins, plasma_cells)
         ! mesh: curved P2/P3 mesh of the Gamma_c region with Gamma_p as the
         ! constrained internal chain (initialize_gs with interior_chain);
         ! chain: the Gamma_p vertices used for it; field: frozen plasma data.
@@ -440,6 +440,8 @@ contains
         type(ideal_fb_t), intent(in), optional :: exterior_from
         real(dp), intent(in), optional :: positions(:, :), line_t(:), spines(:, :)
         real(dp), intent(in), optional :: spine_origins(:, :)
+        !> cells of the plasma (default: centroid inside the chain polygon)
+        logical, intent(in), optional :: plasma_cells(:)
         integer, intent(in), optional :: lines(:, :)
         type(gs_state_t) :: sub
         logical, allocatable :: inside(:), in_plasma(:), in_shell(:)
@@ -475,6 +477,7 @@ contains
         do e = 1, cells
             centre = sum(mesh%points(:, mesh%triangles(1:3, e)), dim=2)/3
             inside(e) = point_in_polygon(chain, centre)
+            if (present(plasma_cells)) inside(e) = plasma_cells(e)
         end do
         in_plasma = .false.; in_shell = .false.
         do e = 1, cells
@@ -6010,7 +6013,7 @@ contains
         status = 0
     end subroutine
 
-    subroutine inertia_solve(fb, tolerance, max_iterations, report, status, talk, &
+    recursive subroutine inertia_solve(fb, tolerance, max_iterations, report, status, talk, &
                              res_tol)
         ! Inertia-controlled Newton on the reduced energy E_red(q) (shell map,
         ! Phi~ and lambda exact at every state, slide gauge bordered). The
@@ -6050,6 +6053,22 @@ contains
         call exact_blocks(fb, st)
         if (st /= IDEAL_FB_OK) then
             status = IDEAL_FB_FOLDED; return
+        end if
+        ! E_red decreases into shell folds (it is not coercive there), so
+        ! the solve carries the fold barrier of the escape while it runs.
+        fb%fold_mu = 0
+        if (fb%fold_barrier > 0) then
+            block
+                real(dp), allocatable :: gx(:, :, :), gf(:, :)
+                real(dp) :: ev, mins, volume
+                allocate (gx(3, fb%nmode, fb%ns), gf(fb%nmode, fb%ns))
+                call shell_energy(fb, fb%xs, fb%phi, ev, gx, gf, mins)
+                volume = sum(spread(fb%plasma%weight(1:fb%plasma%nq), 2, fb%ncell) &
+                    *fb%det(1:fb%plasma%nq, 1:fb%ncell))*2*pi/fb%nfp
+                if (ieee_is_finite(ev) .and. volume > 0) &
+                    fb%fold_mu = fb%fold_barrier*abs(ev)/volume
+            end block
+            call exact_blocks(fb, st)
         end if
         call state_energy(fb, grad, energy, minjac, st)
         if (st /= IDEAL_FB_OK) then
@@ -6124,9 +6143,10 @@ contains
                         accepted = gtrial_norm < gnorm
                     end if
                 end if
-                if (talk) print '(a,i3,a,es9.2,a,es9.2,a,es12.4,a,es12.4,a,l2)', &
+                if (talk) print '(a,i3,a,es9.2,a,es9.2,a,es12.4,a,es12.4,a,es9.2,a,i0,a,l2)', &
                     '   try', tries, ' delta', delta, ' |s|', min(disp, cap), &
-                    ' dE', etrial - energy, ' predicted', -predicted, ' accepted', accepted
+                    ' dE', etrial - energy, ' predicted', -predicted, ' min jac', minjac, &
+                    ' status ', st, ' accepted', accepted
                 if (accepted) exit
                 fb%plasma%x = x0; fb%xs = xs0; fb%phi = phi0; fb%lam = lam0
                 dmin = max(opt%delta_factor*delta, opt%delta_first)
@@ -6139,6 +6159,27 @@ contains
             report%damping = delta
         end do
         if (factored) call sparse_destroy(solver)
+        ! The returned state carries no barrier: a state that converged
+        ! with it (a shell cell below the activation ratio, not folded) is
+        ! the start of a second solve without it.
+        if (fb%fold_mu > 0) then
+            fb%fold_mu = 0
+            call exact_blocks(fb, st)
+            if (st /= IDEAL_FB_OK) then
+                status = IDEAL_FB_FOLDED
+            else if (status == IDEAL_FB_OK) then
+                block
+                    real(dp) :: barrier
+                    integer :: done
+                    barrier = fb%fold_barrier; fb%fold_barrier = 0
+                    done = report%iterations
+                    call inertia_solve(fb, tolerance, max_iterations, report, status, &
+                        talk, res_tol)
+                    report%iterations = report%iterations + done
+                    fb%fold_barrier = barrier
+                end block
+            end if
+        end if
     contains
         subroutine asymmetry_report()
             ! DEBUG: largest |K_ij - K_ji|/max|K| per block pair (plasma,

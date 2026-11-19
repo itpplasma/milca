@@ -135,15 +135,15 @@ contains
     logical function inertia_newton_accept(opt, merit, merit_trial, predicted, &
                                            gnorm, gnorm_trial) result(accept)
         !! Ratio test: (merit - merit_trial) >= eta_accept predicted, predicted
-        !! > 0. When the change is inside roundoff_band ulps of the merit,
-        !! the stationarity norm decides.
+        !! > 0. When the predicted change is inside roundoff_band ulps of the
+        !! merit, the merit cannot resolve it and the stationarity norm decides.
         type(inertia_newton_t), intent(in) :: opt
         real(dp), intent(in) :: merit, merit_trial, predicted, gnorm, gnorm_trial
         real(dp) :: band
         accept = .false.
         if (.not. ieee_is_finite(merit_trial)) return
         band = opt%roundoff_band*epsilon(1.0_dp)*max(abs(merit), abs(merit_trial))
-        if (abs(merit - merit_trial) <= band .and. predicted <= band) then
+        if (predicted <= band) then
             accept = gnorm_trial < gnorm
             return
         end if

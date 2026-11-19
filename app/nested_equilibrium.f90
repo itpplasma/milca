@@ -113,6 +113,7 @@ program nested_equilibrium
     real(dp), allocatable :: shell_positions(:, :), shell_t(:)
     integer, allocatable :: shell_lines(:, :)
     real(dp), allocatable :: shell_spines(:, :), shell_origins(:, :)
+    logical, allocatable :: shell_cells(:)
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -409,7 +410,7 @@ contains
             call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
                 shell_layers, shell_distance, mesh, chain, shell_positions, &
                 shell_lines, shell_t, local, spines=shell_spines, &
-                spine_origins=shell_origins)
+                spine_origins=shell_origins, plasma_cells=shell_cells)
             if (local /= 0) call fail('the free-boundary mesh failed')
             block
                 ! DEBUG: MILCA_FB_SPINES selects the spined shell
@@ -419,11 +420,13 @@ contains
                     call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
                         0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
                         positions=shell_positions, lines=shell_lines, line_t=shell_t, &
-                        spines=shell_spines, spine_origins=shell_origins)
+                        spines=shell_spines, spine_origins=shell_origins, &
+                        plasma_cells=shell_cells)
                 else
                     call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
                         0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
-                        positions=shell_positions, lines=shell_lines, line_t=shell_t)
+                        positions=shell_positions, lines=shell_lines, line_t=shell_t, &
+                        plasma_cells=shell_cells)
                 end if
             end block
         else
