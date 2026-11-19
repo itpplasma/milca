@@ -49,6 +49,7 @@ module milca_ideal_seed_3d
         real(dp) :: centre(2) = [2, 0], axes(2) = [1, 1]
     contains
         procedure :: evaluate => frozen_evaluate
+        procedure :: flux_label => seed_flux_label
     end type
 contains
     pure subroutine profile_evaluate(profile, s, iota, pressure, integral)
@@ -208,6 +209,17 @@ contains
             chi, gu, gv, bu, pressure)
         call seed_disc_pullback(gu, gv, bu, field%axes(1), field%axes(2), &
             chi_gradient(1), chi_gradient(2), b3)
+    end subroutine
+
+    subroutine seed_flux_label(field, point, s, status)
+        ! the reference disk radius squared is the normalised toroidal flux
+        class(toroidal_seed_t), intent(in) :: field
+        real(dp), intent(in) :: point(2)
+        real(dp), intent(out) :: s
+        integer, intent(out) :: status
+        real(dp) :: u, v
+        call seed_disk_coordinates(point(1), point(2), u, v, s)
+        status = 0
     end subroutine
 
     subroutine ideal_seed_disk_mesh(mesh, boundary_nodes, degree, status)
