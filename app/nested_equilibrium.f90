@@ -623,8 +623,11 @@ contains
         if (shell_layers > 0) start = fb
         fb%inertia_control = .false.
         last = huge(1.0_dp)
-        do restart = 0, 20
-            call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
+        ! the layered shell gives the fast path one attempt of 30 steps
+        ! (it converges in a few where it works) before the fallback
+        do restart = 0, merge(0, 20, shell_layers > 0)
+            call ideal_fb_solve(fb, 0.1_dp*target, merge(min(30, max_iterations), &
+                max_iterations, shell_layers > 0), fb_report, &
                 solve_status, verbose=free_boundary_verbose, residual_tolerance=target)
             if (solve_status == IDEAL_FB_OK .or. solve_status == IDEAL_FB_FOLDED) exit
             if (.not. fb_report%residual < 0.75_dp*last) exit
