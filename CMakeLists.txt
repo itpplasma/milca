@@ -509,7 +509,7 @@ target_sources(milca_mhd PRIVATE src/generated/milca_ideal_map_leaves.f90
     src/generated/milca_ideal_field_angle_leaves.f90
     src/generated/milca_ideal_seed_3d_leaves.f90
     src/generated/milca_winslow_seed_leaves.f90 src/mhd/winslow_seed.f90 src/mhd/ideal_seed_3d.f90
-    src/mhd/nested_seed_input.f90)
+    src/mhd/map_3d_loop.f90 src/mhd/nested_seed_input.f90)
 set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
@@ -668,6 +668,10 @@ target_link_libraries(test_ideal_map_field_angle PRIVATE milca)
 add_test(NAME ideal_map_field_angle COMMAND test_ideal_map_field_angle)
 set_tests_properties(ideal_map_field_angle PROPERTIES PROCESSORS 4 TIMEOUT 120
     ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_map_3d_loop test/test_map_3d_loop.f90)
+target_link_libraries(test_map_3d_loop PRIVATE milca)
+add_test(NAME equilibrium_map_3d_loop COMMAND test_map_3d_loop)
+set_tests_properties(equilibrium_map_3d_loop PROPERTIES PROCESSORS 1 TIMEOUT 60)
 add_executable(test_winslow_seed test/test_winslow_seed.f90)
 target_link_libraries(test_winslow_seed PRIVATE milca)
 add_test(NAME ideal_seed_3d_winslow COMMAND test_winslow_seed)
