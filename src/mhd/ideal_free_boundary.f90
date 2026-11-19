@@ -4053,7 +4053,6 @@ contains
         solver%backend_id = FORTSPARSE_BACKEND_NATIVE
         solver%options%symmetry = FORTSPARSE_SYM_INDEFINITE
         solver%options%ordering = FORTSPARSE_ORDER_AMD
-        solver%options%ldlt_blocked = .true.
         call sparse_factor(solver, nr, nr, size(values), rows, cols, scaled, sst)
         if (status_ok(sst)) then
             call sparse_inertia(solver, signs(1), signs(2), signs(3), &
@@ -4271,7 +4270,6 @@ contains
         solver%backend_id = FORTSPARSE_BACKEND_NATIVE
         solver%options%symmetry = FORTSPARSE_SYM_INDEFINITE
         solver%options%ordering = FORTSPARSE_ORDER_AMD
-        solver%options%ldlt_supernodal = .true.
         call sparse_factor(solver, n, n, size(shifted), pattern%rowptr, &
             pattern%colidx, shifted, sst)
         if (status_ok(sst)) call sparse_inertia(solver, signs(1), signs(2), &

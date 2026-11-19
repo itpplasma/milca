@@ -100,7 +100,7 @@ module milca_nonnested_beltrami
             integer, intent(out) :: status
         end subroutine
         module subroutine beltrami_mr_solve(system, mu, field, report, source, &
-            potential, dmu)
+                potential, dmu)
             type(beltrami_system_t), intent(in), target :: system
             real(dp), intent(in) :: mu
             type(free_b_field_t), intent(inout) :: field
@@ -109,7 +109,7 @@ module milca_nonnested_beltrami
             real(dp), allocatable, optional, intent(out) :: potential(:), dmu(:)
         end subroutine
         module subroutine beltrami_mr_helicity(system, target, bracket, tolerance, &
-            field, report)
+                field, report)
             type(beltrami_system_t), intent(in), target :: system
             real(dp), intent(in) :: target, bracket(2), tolerance
             type(free_b_field_t), intent(inout) :: field
@@ -352,7 +352,6 @@ contains
         solver%backend_id = FORTSPARSE_BACKEND_NATIVE
         solver%refine = .true.
         solver%options%symmetry = FORTSPARSE_SYM_INDEFINITE
-        solver%options%ldlt_blocked = .true.
         ! ND fills 8-9x less than AMD on 3-D mode-coupled systems (classical
         ! stellarator vacuum, 15k-44k unknowns); AMD remains the fallback.
         if (native_ordering_available(FORTSPARSE_ORDER_ND)) then
@@ -497,7 +496,7 @@ contains
     end subroutine
 
     subroutine beltrami_constraint(system, kind, target, bracket, tolerance, field, &
-        report)
+            report)
         type(beltrami_system_t), intent(in) :: system
         character(*), intent(in) :: kind
         real(dp), intent(in) :: target, bracket(2), tolerance

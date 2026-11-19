@@ -41,7 +41,7 @@ contains
 
     subroutine gs_direct_factor(direct, n, rowptr, colidx, val, ok, &
             symmetry, ordering, device)
-!$      use omp_lib
+        !$      use omp_lib
         ! Factor the full symmetric matrix given as CSR (identical to CSC by
         ! symmetry): positive definite Cholesky by default, LDL^T with
         ! symmetry = GS_DIRECT_INDEFINITE. A failure (for example a matrix that
@@ -102,7 +102,7 @@ contains
         if (present(ordering)) direct%solver%options%ordering = ordering
         ! Record the requested CPU thread budget for the retained factor.
         direct%solver%options%nthreads = 0
-!$      direct%solver%options%nthreads = omp_get_max_threads()
+        !$      direct%solver%options%nthreads = omp_get_max_threads()
         if (direct%solver%options%device >= 0) then
             ! The budgeted raw-conversion API is CPU-only. Use the canonical
             ! constructor so the GPU object represents the original CSR.
@@ -116,19 +116,8 @@ contains
             deallocate (matrix_rows)
             if (status_ok(status)) call sparse_factor(direct%solver, matrix, status)
         else
-            ! Real indefinite CPU factors use the supernodal LDL^T schedule;
-            ! its pivots stay inside each supernode, so a failure retries with
-            ! scalar Bunch--Kaufman, which may delay pivots.
-            direct%solver%options%ldlt_supernodal = &
-                direct%solver%options%symmetry == FORTSPARSE_SYM_INDEFINITE
             call sparse_factor(direct%solver, n, n, rowptr(n + 1) - 1, rowptr, &
                                colidx, val, status)
-            if (.not. status_ok(status) .and. &
-                    direct%solver%options%ldlt_supernodal) then
-                direct%solver%options%ldlt_supernodal = .false.
-                call sparse_factor(direct%solver, n, n, rowptr(n + 1) - 1, &
-                                   rowptr, colidx, val, status)
-            end if
         end if
         call record_factor(status)
     contains
@@ -147,9 +136,6 @@ contains
                 can_refactor = can_refactor .and. &
                     direct%solver%options%ordering == default_options%ordering
             end if
-            ! A retained scalar fallback is not the schedule a fresh factor tries.
-            can_refactor = can_refactor .and. (direct%solver%options%ldlt_supernodal &
-                .eqv. direct%solver%options%symmetry == FORTSPARSE_SYM_INDEFINITE)
         end function
 
         subroutine record_factor(factor_status)
