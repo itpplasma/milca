@@ -451,7 +451,8 @@ Verification (`test_surface_phi1`):
   ([fixture](../test/data/surface_phi1_sfincs.md)). Maximum local error
   relative to \(\max|u_\parallel|\): \(4.1\times10^{-4}\) and
   \(6.4\times10^{-5}\) with pitch-angle scattering (forces 1, 2),
-  \(4.9\times10^{-3}\) and \(3.3\times10^{-3}\) with the full operator.
+  \(1.9\times10^{-4}\) and \(1.7\times10^{-3}\) with the full operator (the
+  second is the cancelling case, 0.011 T m/s).
   \(\langle Bu_\parallel\rangle\) = 1.6358, 2.8757, 3.190 T m/s against SFINCS
   1.6376, 2.8762, 3.202 T m/s. Term by term, against SFINCS builds with the
   parallel-field term or both added terms removed (`populateMatrix.F90` and
@@ -464,12 +465,12 @@ Verification (`test_surface_phi1`):
   \(B^2(\iota\partial_\theta+\partial_\zeta)(u_\parallel/B) + G S = \mathrm{const}\),
   with \(S = (T/ZeB)\,d_\perp B\,(2f_1+5f_2)\) for the magnetic drift and
   \(S = d_\perp\Phi_1(f_1+\tfrac32 f_2) - \Phi_1(d_\perp B/B)(2f_1+3f_2)\) for
-  the \(\Phi_1\) sources. With pitch-angle scattering it holds to
-  \(10^{-14}\) for the magnetic drive and to \(1.9\times10^{-6}\),
-  \(1.6\times10^{-8}\), \(6.0\times10^{-11}\) at 12, 24, 48 speed elements for
-  the \(\Phi_1\) drive (the dropped \(x=0\) row of term 3). With the full
-  operator the residual is the operator's own density defect,
-  \(3.7\times10^{-3}\) at 12 elements.
+  the \(\Phi_1\) sources. It holds to \(10^{-9}\) or better for every drive with
+  both collision operators.
+- `axisymmetric`: on \(b(\theta)\) the local flow of every drive has the
+  incompressible form \(V_\parallel = \omega I/B + uB\); a two-parameter fit
+  of \(bU = c_1 + c_2 b^2\) leaves \(4\times10^{-12}\) or less (31 poloidal
+  points) with both collision operators.
 - `closure`: \(\langle bU\rangle\) reproduces the flow moments to
   \(10^{-15}\), and a constant \(\Phi_1\) equals the density rescaling to
   \(10^{-13}\).
@@ -483,6 +484,28 @@ Sources: [SFINCS](https://github.com/landreman/sfincs/tree/8df5453472e982df0f6ae
 \(\Phi_1\) source and parallel-field term);
 [NEO-2 pull request 240](https://github.com/itpplasma/NEO-2/pull/240)
 (misaligned-potential drive in NEO-2-QL, our code).
+
+### Isotropic part at zero speed
+
+The speed basis sets the solution to zero at \(x = 0\), exact for \(l\ge1\) by
+regularity. The isotropic part \(l = 0\) is finite there. With the speed
+masses lumped at the GLL nodes, its \(x=0\) test row carries collisions only,
+so the collision rows condense that node exactly,
+\(A_{KK} - A_{KZ}A_{ZZ}^{-1}A_{ZK}\) (`condensed_isotropic` in
+`dk_ntv_energy.inc`), and the Galerkin electric terms (full electric advection,
+the parallel field of \(\Phi_1\)) add their \(x=0\) test row to node 2. Every
+term then conserves density in the discrete equations. The NTV energy solvers
+keep \(h_0(0) = 0\): their drives and fluxes have zero weight at \(x = 0\),
+and with the condensation the pitch-element solver (`dk_hp_energy`) did not
+converge in 400 GMRES iterations at \(\nu_D/v = 3\,\mathrm{m^{-1}}\) (37
+without), presumably because the conserved density mode is then damped only
+by parallel streaming. `surface_transport(..., condense_isotropic=.false.)` reproduces
+their discretisation. Setting
+\(h_0(0) = 0\) had lost density to first order in the speed-element width:
+continuity residuals of \(2\times10^{-4}\) to \(4\times10^{-3}\) at 12 elements,
+halving at 24, and \(7.5\times10^{-6}\) in the axisymmetric flow form; now
+\(10^{-9}\) to \(10^{-12}\). The SFINCS \(\Phi_1\) comparison with the full
+operator improved from \(4.9\times10^{-3}\) to \(1.9\times10^{-4}\) (force 1).
 
 ### Helical-core surfaces from Boozer files (#222)
 

@@ -204,9 +204,19 @@ limit, three were input data and six were implementation defects.
   read memory out of bounds and made one force column change from run to run
   (19.4 and 103.2 T m/s). Two runs of the same input disagreeing is a
   memory defect, not a solver tolerance.
-- The energy-coupled full operator conserves density per surface point only
-  to first order in the speed-element width; the continuity identity of
-  `test_surface_phi1` measures it (2.1e-3 at 12, 1.0e-3 at 24 elements).
+- The speed basis set the isotropic part to zero at x = 0, which the drives
+  and fluxes do not see but conservation does: the full operator lost density
+  to first order in the element width (continuity residual 3.7e-3 at 12
+  elements, halving at 24). Condensing the isotropic x = 0 node, whose test
+  row carries collisions only with lumped masses, restores exact density
+  conservation. A defect that halves with the element width at high
+  polynomial order points to a boundary condition, not to resolution.
+- With the condensation in the pitch-element NTV solver, its collisional
+  case (nu_D/v = 3 per m) did not converge in 400 GMRES iterations (37
+  before), also with the l = 0 coupling in the Gauss-Seidel sweeps. Likely
+  cause, not tested: exact conservation leaves the density mode damped only
+  by parallel streaming. Check the solver conditioning before moving a
+  conservation fix into another solver.
 
 ## Rules from this campaign
 

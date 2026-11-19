@@ -1,5 +1,8 @@
 !> Prescribed in-surface potential Phi_1 in the 3D surface solver
 !! (surface_transport with phi1) and the local parallel flow:
+!!   axisymmetric  on b(theta) every drive's local flow has the incompressible
+!!            form V_par = omega I/B + u B, so b U = c1 + c2 b^2 with a residual
+!!            at solver tolerance (#220);
 !!   closure  <b U> of the local flow equals the parallel-flow moment of every
 !!            drive, including the phi1 drive, and a constant phi1 acts as
 !!            the density rescaling exp(-Z e Phi_1/T) of F (pitch-angle
@@ -37,6 +40,9 @@ program test_surface_phi1
     call get_command_argument(2, path)
     select case (trim(check))
     case ('closure'); ok = closure()
+    case ('axisymmetric')
+        ok = axisymmetric(COLLOP_LORENTZ)
+        ok = axisymmetric(COLLOP_FULL) .and. ok
     case ('sfincs'); ok = sfincs(trim(path))
     case ('continuity')
         ok = continuity(COLLOP_LORENTZ)
@@ -123,6 +129,56 @@ contains
         pass = st == SURFACE_OK .and. err < 1e-12_dp .and. null < 1e-10_dp
     end function closure
 
+    !> Least-squares fit of b U to c1 + c2 b^2 for the three drives, residual
+    !> relative to max |b U|.
+    logical function axisymmetric(model) result(pass)
+        integer, intent(in) :: model
+        type(collop_species_t) :: sp(1)
+        type(collop_grid_t) :: grid
+        integer, parameter :: na = 31
+        real(dp) :: lnl(1, 1), b(na, 1), d(1, 1, 3, 3), u(na, 1, 1, 3), bv(na), &
+            y(na), a(na, 2), c(2), err(3), th
+        integer :: its, st, jf, i, info
+        real(dp) :: work(64)
+        interface
+            subroutine dgels(trans, m, n, nrhs, a, lda, b, ldb, work, lwork, info)
+                import :: dp
+                character, intent(in) :: trans
+                integer, intent(in) :: m, n, nrhs, lda, ldb, lwork
+                real(dp), intent(inout) :: a(lda, *), b(ldb, *)
+                real(dp), intent(out) :: work(*)
+                integer, intent(out) :: info
+            end subroutine dgels
+        end interface
+        call plasma(sp, lnl, grid)
+        do i = 1, na
+            th = 2*pi*(i - 1)/na
+            b(i, 1) = 1 - 0.12_dp*cos(th) + 0.03_dp*sin(2*th)
+        end do
+        call surface_transport(b, nper, q, ig, kappa, sp, lnl, grid, model, n_leg, d, its, &
+            st, flow_local=u)
+        pass = st == SURFACE_OK
+        if (.not. pass) return
+        bv = b(:, 1)
+        do jf = 1, 3
+            y = bv*u(:, 1, 1, jf)
+            a(:, 1) = 1
+            a(:, 2) = bv**2
+            c = 0
+            block
+                real(dp) :: yy(na, 1), aa(na, 2)
+                yy(:, 1) = y
+                aa = a
+                call dgels('N', na, 2, 1, aa, na, yy, na, work, size(work), info)
+                c = yy(1:2, 1)
+            end block
+            err(jf) = maxval(abs(y - c(1) - c(2)*bv**2))/maxval(abs(y))
+        end do
+        print '(a,i0,a,3es10.2)', 'axisymmetric flow form, collision ', model, &
+            ': residual per drive ', err
+        pass = info == 0 .and. all(err < 1e-8_dp)
+    end function axisymmetric
+
     !> u_par(i) = 2 s U(i) f per unit force f, s = q/(1 + (I/G)/q), as the
     !> parallel flow of surface_fluxes; <B u_par> with B = b in tesla. The
     !> SFINCS response is the part linear in Phi_1 of runs at 0, Phi_1, 2 Phi_1.
@@ -159,9 +215,7 @@ contains
                 jf, ': <B u_par> ', computed_mean, ' T m/s (SFINCS ', expected_mean, ')'
             print '(a,es10.2,a,es10.2)', '  local u_par error ', err_local, &
                 ', <B u_par> error / max |u_par| ', err_mean
-            ! The full operator carries its speed-grid density defect (1e-3).
-            pass = pass .and. max(err_local, err_mean) &
-                < merge(1e-3_dp, 1e-2_dp, model == COLLOP_LORENTZ)
+            pass = pass .and. max(err_local, err_mean) < 2e-3_dp
         end do
         close (unit)
     end function sfincs
@@ -199,15 +253,10 @@ contains
         end do
         print '(a,i0,a,2es10.2,a,2es10.2)', 'continuity, collision ', model, &
             ': magnetic drive ', err(1:2), ', phi1 drive ', err(3:4)
-        ! The full operator conserves density only to its speed-element width
-        ! (3.7e-3 at 12 elements for the phi1 drive). The parallel electric
-        ! acceleration conserves density in the Galerkin form, but the dropped
-        ! x = 0 row leaves 1.9e-6, 1.6e-8, 6.0e-11 at 12, 24, 48 elements.
-        if (model == COLLOP_LORENTZ) then
-            pass = all(err(1:2) < 1e-10_dp) .and. all(err(3:4) < 1e-5_dp)
-        else
-            pass = all(err < 1e-2_dp)
-        end if
+        ! Exact up to the GMRES tolerance: the isotropic x = 0 node is
+        ! condensed in the collision rows and its test row joins node 2 in the
+        ! electric terms, so every term conserves density.
+        pass = all(err < 1e-8_dp)
     end function continuity
 
     function perp(f, dt, dz) result(v)

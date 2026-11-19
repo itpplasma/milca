@@ -11,9 +11,10 @@ reference for `test_surface_phi1 sfincs`.
 at 8df5453 (BSD 2-Clause), PETSc 3.18 with MUMPS, direct solve. SFINCS sets the
 MUMPS pivoting threshold to \(10^{-6}\), with which these solves leave relative
 residuals up to 1. The runs therefore pass `-mat_mumps_cntl_1 0.01` (the MUMPS
-default), which gives residuals of \(10^{-11}\) to \(10^{-15}\). The same change is
-the default of the itpplasma fork
-([fix/mumps-pivot-threshold](https://github.com/itpplasma/sfincs/tree/fix/mumps-pivot-threshold)).
+default), which gives residuals of \(10^{-11}\) to \(10^{-15}\). The
+[itpplasma fork](https://github.com/itpplasma/sfincs) with PETSc 3.23.4
+and MUMPS 5.7.3 and the threshold \(10^{-6}\) reproduces the full-operator cases of
+drive 1 to \(10^{-11}\).
 
 ## Case
 

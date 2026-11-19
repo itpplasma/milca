@@ -259,10 +259,13 @@ contains
     !> response to drive jf = 1..3, normalised so that <b U> = d(a, sb, 3, jf)
     !> with <.> of weight 1/b^2; flow_local_phi(i, a, sb, jf) the same for the
     !> phi1 drive, <b U> = d_phi(a, sb, 3, jf). Point i = i_theta +
-    !> n_theta (i_zeta - 1).
+    !> n_theta (i_zeta - 1). condense_isotropic (default true) condenses the
+    !> isotropic x = 0 node of the collision rows, which makes the collisions
+    !> conserve density exactly; false sets h_0(0) = 0 as the NTV energy
+    !> solvers do.
     subroutine surface_transport(b, nper, q, i_over_g, kappa, species, lnlambda, grid, &
             model, n_leg, d, iterations, status, electric_rate, d_drate, full_local_electric, &
-            phi1, d_phi, flow_local, flow_local_phi)
+            phi1, d_phi, flow_local, flow_local_phi, condense_isotropic)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa
         integer, intent(in) :: nper, n_leg
         type(collop_species_t), intent(in) :: species(:)
@@ -277,6 +280,7 @@ contains
         real(dp), intent(in), optional :: phi1(:, :)
         real(dp), intent(out), optional :: d_phi(:, :, :, :), flow_local(:, :, :, :), &
             flow_local_phi(:, :, :, :)
+        logical, intent(in), optional :: condense_isotropic
         type(mono_factor_t) :: geo
         type(mono_factor_t), allocatable :: modes(:)
         type(surface_full_exb_t) :: full_exb
@@ -288,9 +292,11 @@ contains
             pitch_a(:, :), pitch_b(:, :), d2(:, :), m1(:, :), unused(:, :), unused_v(:)
         real(dp) :: j0, rate
         integer :: n, lmax, ns, nx, nm, a, sb, jf, k, l, st, its
-        logical :: full
+        logical :: full, condense
 
         status = SURFACE_BAD_INPUT
+        condense = .true.
+        if (present(condense_isotropic)) condense = condense_isotropic
         iterations = 0
         ns = size(species)
         if (any(shape(d) /= [ns, ns, 3, 3]) .or. mod(n_leg, 2) /= 0) return
@@ -333,7 +339,7 @@ contains
             if (st /= SURFACE_OK) return
         end if
         call ntv_collision_rows(species, lnlambda, grid, model, n_leg, rows, ratio, d3, &
-            d4, d6, vt, tz, st)
+            d4, d6, vt, tz, st, condense_isotropic=condense)
         if (st /= NTV_OK) return
         n = geo%n
         lmax = geo%lmax
@@ -507,6 +513,8 @@ contains
                             + pitch_b(l + 1, j + 1)*matmul(samples(:, j, :), transpose(m1))
                     end do
                 end do
+                ! The x = 0 test function joins node 2 for l = 0 (density).
+                weak(:, 0, 2) = weak(:, 0, 2) + weak(:, 0, 1)
                 do k = 1, nx
                     m = (a - 1)*nx + k
                     do l = 0, lmax
@@ -702,6 +710,9 @@ contains
             do a = 1, ns
                 samples(:, :, 2:) = h(:, :, (a-1)*nx+1:a*nx)
                 call full_exb_action(full_exb, samples, weak)
+                ! The x = 0 test function joins node 2 for l = 0, so that the
+                ! kept test functions sum to one and the density is conserved.
+                weak(:, 0, 2) = weak(:, 0, 2) + weak(:, 0, 1)
                 do k = 1, nx
                     m = (a-1)*nx+k
                     do l = 0, lmax
