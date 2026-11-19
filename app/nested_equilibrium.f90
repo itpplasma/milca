@@ -15,12 +15,19 @@ program nested_equilibrium
     use milca_curved_triangle, only: triangle_locate
     use milca_result_io, only: run_t, result_file_t
     use fortnum_quadrature, only: gauss_legendre
+    use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
     implicit none
     integer, parameter :: mmax = 64, nmax = 32, kmax = 32, knot_max = 1024
     real(dp), parameter :: pi = acos(-1.0_dp), mu0 = 4e-7_dp*pi
     integer :: nfp, mpol, ntor, boundary_nodes, degree, max_iterations, angle_mpol
     integer :: unit, ios, status, solve_status, step, steps, nodes, order, n
     integer :: ladder_nodes(8), ladder_degree(8)
+    integer :: map_ntor, ntor_level, level, current_nodes
+    logical :: automatic_ntor, iota_crosses_zero = .false.
+    real(dp) :: fourier_tolerance, fourier_error, observed(4), previous_observed(4)
+    real(dp), allocatable :: boundary_input(:, :, :), axis_input(:, :)
+    type(ideal_map_t) :: previous_map
+    real(dp), allocatable :: previous_seed(:, :, :)
     real(dp) :: phiedge, tolerance
     real(dp) :: rbc(-nmax:nmax, 0:mmax), rbs(-nmax:nmax, 0:mmax)
     real(dp) :: zbc(-nmax:nmax, 0:mmax), zbs(-nmax:nmax, 0:mmax)
@@ -53,7 +60,7 @@ program nested_equilibrium
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
         current_tolerance, raxis_cc, raxis_cs, zaxis_cc, zaxis_cs, iota_type, pressure_type, &
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
-        pressure_slopes, current_values, current_slopes
+        pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, current_nodes
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -62,6 +69,7 @@ program nested_equilibrium
     prescribe_current = .false.; current = 0; max_current_iterations = 30
     raxis_cc = 0; raxis_cs = 0; zaxis_cc = 0; zaxis_cs = 0
     current_tolerance = 1e-5_dp
+    map_ntor = -1; fourier_tolerance = 1e-4_dp; current_nodes = 16
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -80,22 +88,29 @@ program nested_equilibrium
     if (any([iota_type, pressure_type, current_type] == 'hermite') .and. &
         (n_knots < 2 .or. n_knots > knot_max)) &
         error stop 'nested_equilibrium: hermite profiles need 2 to 1024 knots'
+    if (map_ntor > nmax .or. (map_ntor >= 0 .and. map_ntor < ntor)) &
+        error stop 'nested_equilibrium: map_ntor below the boundary ntor or above 32'
+    if (.not. fourier_tolerance > 0) error stop 'nested_equilibrium: fourier_tolerance'
+    if (current_nodes < 2 .or. current_nodes > 64) &
+        error stop 'nested_equilibrium: current_nodes from 2 to 64'
     call run%open_resolved(unit)
     write (unit, nml=nested_input)
     call run%close_resolved(unit)
 
     ! boundary(1:4, n, m) = (rc, rs, zc, zs) of cos/sin(m theta - n nfp phi)
-    allocate (boundary(4, -ntor:ntor, 0:mpol))
-    boundary(1, :, :) = rbc(-ntor:ntor, 0:mpol); boundary(2, :, :) = rbs(-ntor:ntor, 0:mpol)
-    boundary(3, :, :) = zbc(-ntor:ntor, 0:mpol); boundary(4, :, :) = zbs(-ntor:ntor, 0:mpol)
+    allocate (boundary_input(4, -ntor:ntor, 0:mpol))
+    boundary_input(1, :, :) = rbc(-ntor:ntor, 0:mpol)
+    boundary_input(2, :, :) = rbs(-ntor:ntor, 0:mpol)
+    boundary_input(3, :, :) = zbc(-ntor:ntor, 0:mpol)
+    boundary_input(4, :, :) = zbs(-ntor:ntor, 0:mpol)
     if (any([raxis_cc, raxis_cs, zaxis_cc, zaxis_cs] /= 0)) then
         ! VMEC's axis arrays follow its boundary's m = 0 convention, the
         ! layout cos/sin(-n nfp phi); negative n keep the boundary's values
-        allocate (axis(4, -ntor:ntor), source=boundary(:, :, 0))
+        allocate (axis_input(4, -ntor:ntor), source=boundary_input(:, :, 0))
         do n = 0, ntor
-            axis(:, n) = [raxis_cc(n), raxis_cs(n), zaxis_cc(n), zaxis_cs(n)]
+            axis_input(:, n) = [raxis_cc(n), raxis_cs(n), zaxis_cc(n), zaxis_cs(n)]
         end do
-        axis(2:4:2, 0) = 0
+        axis_input(2:4:2, 0) = 0
     end if
     profile%iota = iota(0:last(iota))
     ! the solver uses mu0 = 1 pressure units
@@ -107,40 +122,47 @@ program nested_equilibrium
     call profile%evaluate(0.0_dp, iota_axis, p_axis, unused)
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
 
-    ! Resolution ladder (docs/equilibrium-harness.md): each level starts from its
-    ! own seed plus the correction of the solved coarser level and stops at the
-    ! same absolute gradient relative to its uncorrected seed.
-    steps = count(ladder_nodes > 0)
-    do step = 1, steps + 1
-        nodes = boundary_nodes; order = degree
-        if (step <= steps) then
-            nodes = ladder_nodes(step); order = ladder_degree(step)
-        end if
-        call ideal_seed_disk_mesh(mesh, nodes, order, status)
-        if (status /= 0) error stop 'nested_equilibrium: disk mesh'
-        call init_seed(status)
-        if (status /= 0 .and. .not. guessed) then
-            ! as VMEC does after a bad initial Jacobian: guess the axis
-            call guess_axis()
-            guessed = .true.
+    ! Interior toroidal modes: the solution of a 3D boundary needs more
+    ! toroidal harmonics than the boundary has. With map_ntor < 0 they are
+    ! chosen by the change of the observables between levels ntor_level - 2
+    ! and ntor_level (fourier_error); axisymmetric data keep ntor = 0.
+    automatic_ntor = map_ntor < 0 .and. ntor > 0
+    ! the change between levels estimates the truncation error only when each
+    ! level's current is matched well below it
+    if (automatic_ntor) current_tolerance = min(current_tolerance, fourier_tolerance/10)
+    ntor_level = merge(ntor, map_ntor, map_ntor < 0)
+    fourier_error = 0
+    level = 0
+    do
+        call set_toroidal_level(ntor_level)
+        if (level == 0) then
+            call mesh_ladder()
+        else
+            ! seed with the new modes plus the correction of the solved level
+            call ideal_seed_disk_mesh(mesh, boundary_nodes, degree, status)
+            if (status /= 0) error stop 'nested_equilibrium: disk mesh'
             call init_seed(status)
+            if (status /= 0) error stop 'nested_equilibrium: toroidal level seed'
+            reference = free_gradient()
+            seed_x = map%x
+            call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
+            if (status /= 0) error stop 'nested_equilibrium: toroidal level correction'
+            call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
+                reference_gradient=reference)
         end if
-        if (status /= 0) then
-            print '(a,i0)', 'nested_equilibrium: seed status ', status
-            error stop 'nested_equilibrium: seed'
-        end if
-        reference = free_gradient()
-        seed_x = map%x
-        if (step > 1) then
-            call ideal_map_prolong_correction(map, coarse, coarse_seed, status)
-            if (status /= 0) error stop 'nested_equilibrium: ladder correction'
-        end if
-        call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-            reference_gradient=reference)
-        coarse = map; coarse_seed = seed_x
+        current_error = 0; current_iterations = 0; solve_tolerance = tolerance
+        if (prescribe_current) call match_current(current_error)
+        call observe(observed)
+        if (level > 0) fourier_error = max(abs(observed(1)/previous_observed(1) - 1), &
+            maxval(abs(observed(2:) - previous_observed(2:))))
+        print '(a,i3,a,es10.3)', 'toroidal modes ', ntor_level, ': fourier error ', &
+            fourier_error
+        if (iota_crosses_zero .or. .not. automatic_ntor) exit
+        if (level > 0 .and. fourier_error <= fourier_tolerance) exit
+        if (ntor_level + 2 > nmax) exit
+        previous_map = map; previous_seed = seed_x; previous_observed = observed
+        ntor_level = ntor_level + 2; level = level + 1
     end do
-    current_error = 0; current_iterations = 0; solve_tolerance = tolerance
-    if (prescribe_current) call match_current(current_error)
     call profile%evaluate(0.0_dp, iota_axis, unused, unused)
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
     residual = free_gradient()/max(tiny(1.0_dp), reference)
@@ -154,7 +176,9 @@ program nested_equilibrium
     call result%create(run)
     call result%attribute('physical_model', 'fixed-boundary nested ideal MHD, prescribed iota')
     call result%attribute('converged', merge('true ', 'false', &
-        solve_status == 0 .and. residual <= tolerance .and. current_error <= current_tolerance))
+        solve_status == 0 .and. residual <= tolerance .and. current_error <= current_tolerance &
+        .and. .not. iota_crosses_zero &
+        .and. (.not. automatic_ntor .or. fourier_error <= fourier_tolerance)))
     call result%write('volume_p', volume, 'm^3', 'plasma volume')
     call result%write('aminor_p', sqrt(area/pi), 'm', 'sqrt of mean cross-section area / pi')
     call result%write('rmajor_p', volume/(2*pi*area), 'm', 'volume / (2 pi mean area)')
@@ -168,11 +192,17 @@ program nested_equilibrium
     call result%write('betatotal', kinetic/magnetic, '1', 'int p dV / int B^2/2 dV')
     call result%write('ctor', ctor, 'A', 'enclosed toroidal current at the edge')
     if (prescribe_current) then
+        call result%attribute('current_status', merge('iota crosses zero', 'matched          ', &
+            iota_crosses_zero))
         call result%write('current_error', current_error, '1', &
             'largest enclosed-current error relative to the largest prescribed current')
         call result%write('current_iterations', real(current_iterations, dp), '1', &
             'iota updates to match the prescribed current')
     end if
+    call result%write('map_ntor', real(ntor_level, dp), '1', 'interior toroidal modes')
+    if (automatic_ntor) call result%write('fourier_error', fourier_error, '1', &
+        'largest change of wb (relative), raxis/aminor_p and iota on axis and edge' &
+        //' from map_ntor - 2')
     call result%write('force_residual', residual, '1', 'relative free reduced-gradient l2')
     call result%write('tolerance', tolerance, '1', 'requested force_residual')
     call result%write('iterations', real(report%iterations, dp), '1', 'Newton iterations')
@@ -188,20 +218,96 @@ program nested_equilibrium
 
 contains
 
+    subroutine mesh_ladder()
+        ! Resolution ladder (docs/equilibrium-harness.md): each level starts from
+        ! its own seed plus the correction of the solved coarser level and stops
+        ! at the same absolute gradient relative to its uncorrected seed.
+        steps = count(ladder_nodes > 0)
+        do step = 1, steps + 1
+            nodes = boundary_nodes; order = degree
+            if (step <= steps) then
+                nodes = ladder_nodes(step); order = ladder_degree(step)
+            end if
+            call ideal_seed_disk_mesh(mesh, nodes, order, status)
+            if (status /= 0) error stop 'nested_equilibrium: disk mesh'
+            call init_seed(status)
+            if (status /= 0 .and. .not. guessed) then
+                ! as VMEC does after a bad initial Jacobian: guess the axis
+                call guess_axis()
+                guessed = .true.
+                call init_seed(status)
+            end if
+            if (status /= 0) then
+                print '(a,i0)', 'nested_equilibrium: seed status ', status
+                error stop 'nested_equilibrium: seed'
+            end if
+            reference = free_gradient()
+            seed_x = map%x
+            if (step > 1) then
+                call ideal_map_prolong_correction(map, coarse, coarse_seed, status)
+                if (status /= 0) error stop 'nested_equilibrium: ladder correction'
+            end if
+            call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
+                reference_gradient=reference)
+            coarse = map; coarse_seed = seed_x
+        end do
+    end subroutine
+
+    logical function single_signed()
+        ! the seed's admission rule: iota without zeros on [0, 1]
+        real(dp) :: value, first, unused1, unused2
+        integer :: a
+        call profile%evaluate(0.0_dp, first, unused1, unused2)
+        single_signed = abs(first) > tiny(1.0_dp)
+        do a = 1, 128
+            call profile%evaluate(a/128.0_dp, value, unused1, unused2)
+            single_signed = single_signed .and. value*first > 0
+        end do
+    end function
+
+    subroutine set_toroidal_level(modes)
+        ! boundary and axis padded with zero coefficients up to the map's modes
+        integer, intent(in) :: modes
+        if (allocated(boundary)) deallocate (boundary)
+        allocate (boundary(4, -modes:modes, 0:mpol), source=0.0_dp)
+        boundary(:, -ntor:ntor, :) = boundary_input
+        if (allocated(axis_input)) then
+            if (allocated(axis)) deallocate (axis)
+            allocate (axis(4, -modes:modes), source=0.0_dp)
+            axis(:, -ntor:ntor) = axis_input
+        end if
+    end subroutine
+
+    subroutine observe(values)
+        ! wb (relative), raxis relative to the minor radius, iota on axis and edge
+        real(dp), intent(out) :: values(4)
+        real(dp) :: v, a, w, k, r, i0, i1, unused1, unused2
+        integer :: local
+        call integrals(v, a, w, k, local)
+        if (local /= 0) error stop 'nested_equilibrium: integrals'
+        call axis_radius(r, local)
+        if (local /= 0) error stop 'nested_equilibrium: axis'
+        call profile%evaluate(0.0_dp, i0, unused1, unused2)
+        call profile%evaluate(1.0_dp, i1, unused1, unused2)
+        values = [w, r/sqrt(a/pi), i0, i1]
+    end subroutine
+
     subroutine match_current(error)
         ! Prescribed enclosed toroidal current I(s). For a fixed map I on each
         ! surface is affine in iota there; its slope is read on the solved map
-        ! with the frozen form's iota shifted by delta, so every update is a
-        ! Newton step on the current map, refitted and re-solved.
+        ! with the frozen form's iota shifted by delta, so every update is the
+        ! exact Newton step for that map at the current_nodes Chebyshev-Gauss
+        ! surfaces, interpolated (refit) and re-solved.
         real(dp), intent(out) :: error
-        integer, parameter :: ns = 12
         real(dp), parameter :: delta = 1e-3_dp
-        real(dp) :: s(ns), target(ns), measured(ns), shifted(ns), slope(ns)
-        real(dp) :: iota_s(ns), scale, unused1, unused2, update(ns)
+        real(dp) :: s(current_nodes), target(current_nodes), measured(current_nodes)
+        real(dp) :: shifted(current_nodes), slope(current_nodes), iota_s(current_nodes)
+        real(dp) :: scale, unused1, unused2
         type(toroidal_profile_t) :: previous
-        integer :: j, k, local
+        integer :: j, k, local, ns
+        ns = current_nodes
         do j = 1, ns
-            s(j) = real(j, dp)/ns
+            s(j) = (1 - cos((2*j - 1)*pi/(2*ns)))/2
             if (current_type == 'hermite') then
                 call hermite_profile_evaluate(profile_knots(:n_knots), &
                     current_values(:n_knots), current_slopes(:n_knots), s(j), target(j), &
@@ -243,19 +349,17 @@ contains
             do j = 1, ns
                 call profile%evaluate(s(j), iota_s(j), unused1, unused2)
             end do
-            ! MILCA's frozen field needs iota without zeros: halve an update
-            ! that would change its sign
-            update = (target - measured)/slope
-            do j = 1, 30
-                if (all(iota_s*(iota_s + update) > 0)) exit
-                update = update/2
-            end do
-            iota_s = iota_s + update
+            ! Newton step on the solved map, where the current is affine in iota
+            ! on each surface. The frozen map admits iota of one sign only
+            ! (docs/ideal-seed-3d.md); the step may reverse that sign.
+            iota_s = iota_s + (target - measured)/slope
             previous = profile
             call refit(s, iota_s)
             if (.not. single_signed()) then
                 profile = previous
-                print '(a)', 'current iteration: the refitted iota changes sign'
+                iota_crosses_zero = .true.
+                print '(a)', 'current iteration: the matched iota crosses zero, which the' &
+                    //' frozen map does not admit'
                 exit
             end if
             ! intermediate maps need only the accuracy of the current mismatch
@@ -331,13 +435,14 @@ contains
         rhs = transpose(points)
         call dgels('N', nplane, 2*ntor + 1, 2, lsq, nplane, rhs, nplane, work, size(work), info)
         if (info /= 0) error stop 'nested_equilibrium: axis fit'
-        if (allocated(axis)) deallocate (axis)
-        allocate (axis(4, -ntor:ntor), source=boundary(:, :, 0))
-        axis(:, 0) = [rhs(1, 1), 0.0_dp, rhs(1, 2), 0.0_dp]
+        if (allocated(axis_input)) deallocate (axis_input)
+        allocate (axis_input(4, -ntor:ntor), source=boundary_input(:, :, 0))
+        axis_input(:, 0) = [rhs(1, 1), 0.0_dp, rhs(1, 2), 0.0_dp]
         do nn = 1, ntor
-            axis(:, nn) = [rhs(2*nn, 1), rhs(2*nn + 1, 1), rhs(2*nn, 2), rhs(2*nn + 1, 2)]
-            axis(:, -nn) = 0
+            axis_input(:, nn) = [rhs(2*nn, 1), rhs(2*nn + 1, 1), rhs(2*nn, 2), rhs(2*nn + 1, 2)]
+            axis_input(:, -nn) = 0
         end do
+        call set_toroidal_level(ntor_level)
     end subroutine
 
     subroutine plane_modes(theta, phi, xm, dxm)
@@ -359,18 +464,6 @@ contains
         end do
     end subroutine
 
-    logical function single_signed()
-        ! the seed's admission rule: iota without zeros on [0, 1]
-        real(dp) :: value, first, unused1, unused2
-        integer :: a
-        call profile%evaluate(0.0_dp, first, unused1, unused2)
-        single_signed = abs(first) > tiny(1.0_dp)
-        do a = 1, 128
-            call profile%evaluate(a/128.0_dp, value, unused1, unused2)
-            single_signed = single_signed .and. value*first > 0
-        end do
-    end function
-
     subroutine measure(s, values)
         ! enclosed toroidal current on the surfaces s
         real(dp), intent(in) :: s(:)
@@ -383,24 +476,20 @@ contains
     end subroutine
 
     subroutine refit(s, values)
-        ! least-squares iota monomials through the sampled surfaces and the value
-        ! extrapolated to the axis
+        ! iota as the polynomial interpolant of the matched values at the
+        ! Chebyshev-Gauss surfaces s, which exclude the axis where the matched
+        ! iota is only a limit; stored as values and slopes on 65 Hermite knots
         real(dp), intent(in) :: s(:), values(:)
-        integer, parameter :: order = 8
-        real(dp) :: a(size(s) + 1, 0:order), rhs(size(s) + 1), work(64*(size(s) + 1))
-        integer :: i, k, n, info
-        n = size(s)
-        do i = 1, n
-            a(i, :) = s(i)**[(k, k=0, order)]
-            rhs(i) = values(i)
+        integer, parameter :: knots = 65
+        real(dp) :: t(knots), value(knots), slope(knots), w(size(s)), dw(size(s))
+        integer :: k
+        do k = 1, knots
+            t(k) = real(k - 1, dp)/(knots - 1)
+            call lagrange_weights(size(s), t(k), s, w)
+            call lagrange_deriv_weights(size(s), t(k), s, dw)
+            value(k) = dot_product(w, values); slope(k) = dot_product(dw, values)
         end do
-        a(n + 1, :) = 0; a(n + 1, 0) = 1
-        rhs(n + 1) = 2*values(1) - values(2)
-        call dgels('N', n + 1, order + 1, 1, a, n + 1, rhs, n + 1, work, size(work), info)
-        if (info /= 0) error stop 'nested_equilibrium: iota fit'
-        profile%iota = rhs(1:order + 1)
-        if (allocated(profile%iota_values)) deallocate (profile%iota_values, &
-            profile%iota_slopes, profile%iota_primitive)
+        call profile%set_hermite_iota(t, value, slope)
     end subroutine
 
     subroutine resolve(local)

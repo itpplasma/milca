@@ -1290,6 +1290,19 @@ foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
     set_tests_properties(equilibrium_nested_${name} PROPERTIES
         ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4)
 endforeach()
+# VMEC2000 (NTOR 6) on input.nfp2_QI of the VMEX examples at zero net current:
+# raxis, wb, volume and edge iota; the interior toroidal modes are chosen by
+# nested_equilibrium's own truncation estimate.
+add_test(NAME equilibrium_nested_qi-nfp2-current-free COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:nested_equilibrium>
+    -DCHECK=$<TARGET_FILE:test_nested_equilibrium_app>
+    -DCONFIG=${CMAKE_SOURCE_DIR}/examples/nested-equilibrium/qi-nfp2-current-free.nml
+    -DWORK=${CMAKE_BINARY_DIR}/nested-equilibrium-qi-nfp2-current-free
+    "-DEXPECTED=0.9846071 2.276210e-3 0.2904458 -0.4417404"
+    -P ${CMAKE_SOURCE_DIR}/test/check_nested_equilibrium.cmake)
+set_tests_properties(equilibrium_nested_qi-nfp2-current-free PROPERTIES
+    LABELS "equilibrium;slow" TIMEOUT 1800 PROCESSORS 8
+    ENVIRONMENT "OMP_NUM_THREADS=8;OPENBLAS_NUM_THREADS=1")
 add_executable(pp_fusion_eft_export app/pp_fusion_eft_export.f90)
 add_dependencies(pp_fusion_eft_export milca_build_info)
 target_include_directories(pp_fusion_eft_export PRIVATE ${CMAKE_BINARY_DIR}/result_include)
