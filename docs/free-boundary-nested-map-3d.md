@@ -458,6 +458,43 @@ axisymmetric Γ_c.
   inside Γ_c, with an n = 0 closure of 0.1 T m each; with it all 21 groups
   close to 1e-8 T m. A clearance squeezed between plasma and coils leaves a
   thin shell, and the mesh then takes cells of at most twice the narrowest gap.
+- Layered shell (default, `shell_layers` > 0). The harmonic extension of the
+  shell map folded on DIII-D, so the shell is built in layers instead
+  (`fb_nested_layer_mesh`). Γ_c is the convex hull of the guess's mean section
+  offset by d = min(g/2, `coupling_margin` × a), with g the gap of the hull to
+  the coils inside the grid and to the grid edge. The convex offset has no
+  reach limit from concave parts of the section. The segment of every Γ_p
+  chain node runs from that node along the ray from the section centroid
+  through its guess point to Γ_c. Rays do not cross while the section is star
+  shaped about its centroid, which holds for the DIII-D section (rays 2.4° to
+  14° apart at 16 boundary nodes, seed shell cells at least sin 29° from
+  degenerate). An interior shell node at segment parameter t carries the
+  constraint row x = (1 − t) x_p + t x_c instead of the harmonic extension.
+- Newton for the layered shell (`ideal_fb_t%inertia_control`). The KKT matrix
+  is factored with LDLᵀ and its inertia is read. The target is that of a
+  reduced Hessian with k negative directions (k = 0 for a stable state):
+  positive np + nx − k, negative nx + nslide + nf + k, because Φ~ is
+  maximised and the shell map and slide gauge pair with their multipliers.
+  δ |H_ii| is added to the plasma and shell rows only until the inertia
+  matches, trying δ = 0 first (`milca_inertia_newton`, IPOPT's update). Shell
+  map, Φ~ and λ are solved exactly at every state, so the merit is the
+  reduced energy E_red with a ratio test of actual to predicted decrease. The
+  assembled matrix is symmetrised bitwise (`symmetrize_csr`); its raw
+  asymmetry is roundoff (below 1e-15 of the largest entry). E_red decreases
+  into shell folds, so the solve carries the fold barrier of section 9,
+  measured against each shell cell's own Jacobian at the start (zero there by
+  construction). A state that converges with the barrier active is solved
+  again without it. If that fails, Γ_c is re-placed around the solved
+  boundary and the level is solved again from the transferred map (at most
+  three times).
+- Evidence (12 boundary nodes, synthetic coils). Circular section: raxis
+  0.937260 m, volume 1.027479 m³, as with the harmonic shell. D-shaped
+  section (κ 1.4, mpol 2): converged with the barrier inactive (smallest
+  shell Jacobian ratio 0.23) and δ = 0 at the end, quadratically, with Γ_c at
+  0.20 a and 0.21 a giving raxis within 3e-6 m and volume within 7e-6
+  (test `equilibrium_nested_free-boundary-dshape`). The solve takes 94 to 162
+  Newton steps, because δ > 0 is needed in most of them: the reduced Hessian
+  has negative directions away from the solution.
 - Plasma current. The multivalued part c θ/2π continues outside Γ_c as an
   axisymmetric filament of unit circulation at the reference centre
   (`filament_basis_t`), so that the traces are those of c times its field plus

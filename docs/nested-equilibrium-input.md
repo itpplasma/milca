@@ -35,7 +35,9 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `free_boundary` | the boundary is the initial guess of a free-boundary solve | false |
 | `mgrid_file`, `extcur(k)` | MAKEGRID mgrid file of the coil groups and the current of group k (VMEC's EXTCUR) | none, 0 |
 | `mgrid_degree` | interpolation degree of the mgrid in (R, Z), 1, 3 or 5 | 5 |
-| `coupling_margin` | clearance of the coupling surface around the guess, in units of the minor radius | 0.5 |
+| `coupling_margin` | largest distance of the coupling surface from the guess, in units of the minor radius | 0.5 |
+| `shell_layers` | layers of the layered vacuum shell between the plasma and the coupling surface; 0: harmonic-extension shell | 2 |
+| `free_boundary_verbose` | print every free-boundary Newton step | `.false.` |
 
 A `hermite` profile is C1 and cubic on each knot interval; the iota integral
 from the axis is exact on it. Any other profile form (VMEC's splines, sums of
@@ -149,6 +151,12 @@ interpolated in (R, Z) by the tensor Lagrange polynomial of degree
 `mgrid_degree` (error O(h^(degree + 1))), and across its planes by the exact
 discrete Fourier series. The toroidal flux is positive: a deck with a negative
 toroidal field reverses the signs of all `extcur` and of the current.
+
+With `shell_layers` > 0 (default) Gamma_c is the convex hull of the
+guess's mean section offset by half the gap to the coils and the grid edge,
+at most `coupling_margin` minor radii, and the shell between the plasma and
+Gamma_c is layered along straight segments (docs/free-boundary-nested-map-3d.md
+section 10). With `shell_layers = 0`:
 
 The coupling surface Gamma_c is an axisymmetric curve that keeps
 `coupling_margin` times the minor radius from every cross-section of the guess

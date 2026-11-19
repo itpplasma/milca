@@ -108,6 +108,8 @@ program nested_equilibrium
     ! Newton; 0: the harmonic-extension shell to the curve of
     ! fb_nested_geometry.
     integer :: shell_layers
+    ! Print every free-boundary Newton step.
+    logical :: free_boundary_verbose
     real(dp) :: shell_distance
     real(dp), allocatable :: shell_positions(:, :), shell_t(:)
     integer, allocatable :: shell_lines(:, :)
@@ -125,7 +127,7 @@ program nested_equilibrium
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
         iota_nodes, iota_tolerance, free_boundary, mgrid_file, extcur, mgrid_degree, &
-        coupling_margin, shell_layers
+        coupling_margin, shell_layers, free_boundary_verbose
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -137,7 +139,7 @@ program nested_equilibrium
     mesh_tolerance = 1e-4_dp
     iota_nodes = -1; iota_tolerance = 1e-4_dp
     free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
-    coupling_margin = 0.5_dp; shell_layers = 2
+    coupling_margin = 0.5_dp; shell_layers = 2; free_boundary_verbose = .false.
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -581,7 +583,7 @@ contains
         last = huge(1.0_dp)
         do restart = 0, 20
             call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
-                solve_status, verbose=.false., residual_tolerance=target)
+                solve_status, verbose=free_boundary_verbose, residual_tolerance=target)
             if (solve_status == IDEAL_FB_OK .or. solve_status == IDEAL_FB_FOLDED) exit
             if (.not. fb_report%residual < 0.75_dp*last) exit
             last = fb_report%residual

@@ -1047,52 +1047,52 @@ contains
             ! 2 above all cell Jacobian ratios); its generated gradient and
             ! Hessian enter through the vacuum density.
             do pass = 1, 2
-            fb%fold_mu = 0; fb%fold_threshold = 0.1_dp
-            if (pass == 2) then
+                fb%fold_mu = 0; fb%fold_threshold = 0.1_dp
+                if (pass == 2) then
+                    call ideal_fb_gradient(fb, g, st, l0)
+                    g0 = g
+                    fb%fold_mu = 1.0e10_dp; fb%fold_threshold = 2
+                end if
                 call ideal_fb_gradient(fb, g, st, l0)
-                g0 = g
-                fb%fold_mu = 1.0e10_dp; fb%fold_threshold = 2
-            end if
-            call ideal_fb_gradient(fb, g, st, l0)
-            if (pass == 2) then
-                lb = maxval(abs(g - g0))/maxval(abs(g0))
-                print '(a,i2,a,es9.2)', 'N =', ntor, ' barrier |dg|/|g|', lb
-                if (.not. lb > 1.0e-3_dp) error stop 'fold barrier inactive'
-            end if
-            if (st /= IDEAL_FB_OK) error stop 'base state folded'
-            h = 1.0e-6_dp
-            call ideal_fb_step(fb, v, h)
-            call ideal_fb_gradient(fb, gp, st, lp)
-            call ideal_fb_step(fb, v, -2*h)
-            call ideal_fb_gradient(fb, gm, st, lm)
-            call ideal_fb_step(fb, v, h)
-            fd = (lp - lm)/(2*h); an = dot_product(g, v)
-            err = abs(fd - an)/max(abs(an), 1.0e-30_dp)
-            print '(a,i2,a,2es16.8,a,es9.2)', 'N =', ntor, ' dL.v fd/an', fd, an, &
-                ' rel', err
-            if (err > 1.0e-6_dp) error stop 'gradient mismatch'
-            call ideal_fb_hessian(fb, rowptr, colidx, val)
-            hv = 0
-            do i = 1, fb%n
-                do p = rowptr(i), rowptr(i + 1) - 1
-                    hv(i) = hv(i) + val(p)*v(colidx(p))
+                if (pass == 2) then
+                    lb = maxval(abs(g - g0))/maxval(abs(g0))
+                    print '(a,i2,a,es9.2)', 'N =', ntor, ' barrier |dg|/|g|', lb
+                    if (.not. lb > 1.0e-3_dp) error stop 'fold barrier inactive'
+                end if
+                if (st /= IDEAL_FB_OK) error stop 'base state folded'
+                h = 1.0e-6_dp
+                call ideal_fb_step(fb, v, h)
+                call ideal_fb_gradient(fb, gp, st, lp)
+                call ideal_fb_step(fb, v, -2*h)
+                call ideal_fb_gradient(fb, gm, st, lm)
+                call ideal_fb_step(fb, v, h)
+                fd = (lp - lm)/(2*h); an = dot_product(g, v)
+                err = abs(fd - an)/max(abs(an), 1.0e-30_dp)
+                print '(a,i2,a,2es16.8,a,es9.2)', 'N =', ntor, ' dL.v fd/an', fd, an, &
+                    ' rel', err
+                if (err > 1.0e-6_dp) error stop 'gradient mismatch'
+                call ideal_fb_hessian(fb, rowptr, colidx, val)
+                hv = 0
+                do i = 1, fb%n
+                    do p = rowptr(i), rowptr(i + 1) - 1
+                        hv(i) = hv(i) + val(p)*v(colidx(p))
+                    end do
                 end do
-            end do
-            gp = (gp - gm)/(2*h)
-            scale = maxval(abs(hv))
-            err = maxval(abs(gp - hv))/scale
-            print '(a,i2,a,es9.2,a,es9.2)', 'N =', ntor, ' |Hv - fd|/|Hv|', err, &
-                '  |Hv|', scale
-            call block_report('plasma', gp(1:fb%np), hv(1:fb%np))
-            call block_report('shell map', gp(fb%np + 1:fb%np + fb%nx), &
-                hv(fb%np + 1:fb%np + fb%nx))
-            call block_report('multiplier', gp(fb%np + fb%nx + 1:fb%np + 2*fb%nx), &
-                hv(fb%np + fb%nx + 1:fb%np + 2*fb%nx))
-            call block_report('potential', gp(fb%np + 2*fb%nx + 1:), &
-                hv(fb%np + 2*fb%nx + 1:))
-            if (err > 1.0e-5_dp) error stop 'Hessian mismatch'
-            ! Symmetry of the assembled matrix.
-            call check_symmetry(rowptr, colidx, val)
+                gp = (gp - gm)/(2*h)
+                scale = maxval(abs(hv))
+                err = maxval(abs(gp - hv))/scale
+                print '(a,i2,a,es9.2,a,es9.2)', 'N =', ntor, ' |Hv - fd|/|Hv|', err, &
+                    '  |Hv|', scale
+                call block_report('plasma', gp(1:fb%np), hv(1:fb%np))
+                call block_report('shell map', gp(fb%np + 1:fb%np + fb%nx), &
+                    hv(fb%np + 1:fb%np + fb%nx))
+                call block_report('multiplier', gp(fb%np + fb%nx + 1:fb%np + 2*fb%nx), &
+                    hv(fb%np + fb%nx + 1:fb%np + 2*fb%nx))
+                call block_report('potential', gp(fb%np + 2*fb%nx + 1:), &
+                    hv(fb%np + 2*fb%nx + 1:))
+                if (err > 1.0e-5_dp) error stop 'Hessian mismatch'
+                ! Symmetry of the assembled matrix.
+                call check_symmetry(rowptr, colidx, val)
             end do
             fb%fold_mu = 0
             deallocate (g, gp, gm, v, hv, du)
