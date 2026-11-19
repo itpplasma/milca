@@ -3,6 +3,7 @@ program gen_ideal_seed_3d
     use fortsym_expr, only: expr_t, sym, operator(+), operator(-), &
         operator(*), operator(/), operator(**), sin, cos
     use fortsym_diff, only: diff
+    use fortsym_subs, only: subs
     use fortsym_engine, only: engine_result_t, VERDICT_TRUE
     use fortsym_engine_native, only: native_engine_t, make_native_engine
     use milca_gen_support, only: leaf_writer_t, fortsym_revision
@@ -13,6 +14,7 @@ program gen_ideal_seed_3d
     type(expr_t) :: u, v, a, b, rc, rs, zc, zs, s, c, value, flux, pi
     type(expr_t) :: integral, edge, iota, pressure, chi, gu, gv, b3
     type(expr_t) :: jet(3, 3), twisted(3, 3), bt, phase_s, density(3)
+    type(expr_t) :: t, h, f0, d0, f1, d1, hermite, primitive
     integer :: row, column
     character(3), parameter :: jets(3, 3) = reshape([character(3) :: &
         'd11', 'd21', 'd31', 'd12', 'd22', 'd32', 'd13', 'd23', 'd33'], [3, 3])
@@ -50,6 +52,22 @@ program gen_ideal_seed_3d
     s = sym('s'); c = sym('c'); value = sym('value')
     call w%emit('seed_horner', [character(5) :: 's', 'c', 'value'], &
         ['out'], [value*s + c], ad=.true.)
+    ! Cubic Hermite piece on [s0, s0 + h], t = (s - s0)/h, with values f
+    ! and s-slopes d at both ends; primitive = int_s0^s of it.
+    t = sym('t'); h = sym('h')
+    f0 = sym('f0'); d0 = sym('d0'); f1 = sym('f1'); d1 = sym('d1')
+    hermite = (2*t**3 - 3*t**2 + 1)*f0 + (t**3 - 2*t**2 + t)*h*d0 &
+        + (3*t**2 - 2*t**3)*f1 + (t**3 - t**2)*h*d1
+    primitive = h*((t**4/2 - t**3 + t)*f0 + (t**4/4 - 2*t**3/3 + t**2/2)*h*d0 &
+        + (t**3 - t**4/2)*f1 + (t**4/4 - t**3/3)*h*d1)
+    call prove(diff(primitive, t) - h*hermite, 'Hermite primitive')
+    call prove(subs(primitive, t, 0*t), 'Hermite primitive origin')
+    call prove(subs(hermite, t, 0*t) - f0, 'Hermite left value')
+    call prove(subs(hermite, t, 0*t + 1) - f1, 'Hermite right value')
+    call prove(subs(diff(hermite, t), t, 0*t) - h*d0, 'Hermite left slope')
+    call prove(subs(diff(hermite, t), t, 0*t + 1) - h*d1, 'Hermite right slope')
+    call w%emit('seed_hermite_profile', [character(2) :: 't', 'h', 'f0', 'd0', 'f1', 'd1'], &
+        ['value    ', 'primitive'], [hermite, primitive], ad=.true.)
     flux = sym('flux'); pi = sym('pi')
     integral = sym('integral'); edge = sym('edge')
     iota = sym('iota'); pressure = sym('pressure')
@@ -108,6 +126,14 @@ program gen_ideal_seed_3d
     call w%close()
     print '(a)', '[V] FortSym closed flux, iota and position/poloidal-phase gauge identities proved'
 contains
+    subroutine prove(expression, label)
+        type(expr_t), intent(in) :: expression
+        character(*), intent(in) :: label
+        type(engine_result_t) :: result
+        result = engine%zero_test(expression)
+        if (result%verdict /= VERDICT_TRUE) error stop label//' unproved'
+    end subroutine
+
     function dot(a, b) result(value)
         type(expr_t), intent(in) :: a(3), b(3)
         type(expr_t) :: value

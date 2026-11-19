@@ -6,7 +6,7 @@ program nested_equilibrium
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
-        ideal_seed_3d_init, ideal_seed_disk_mesh
+        ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate
     use milca_ideal_map, only: ideal_map_t, ideal_map_solve, ideal_map_solve_report_t, &
         ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
@@ -16,7 +16,7 @@ program nested_equilibrium
     use milca_result_io, only: run_t, result_file_t
     use fortnum_quadrature, only: gauss_legendre
     implicit none
-    integer, parameter :: mmax = 64, nmax = 32, kmax = 32
+    integer, parameter :: mmax = 64, nmax = 32, kmax = 32, knot_max = 1024
     real(dp), parameter :: pi = acos(-1.0_dp), mu0 = 4e-7_dp*pi
     integer :: nfp, mpol, ntor, boundary_nodes, degree, max_iterations, angle_mpol
     integer :: unit, ios, status, solve_status, step, steps, nodes, order, n
@@ -25,6 +25,11 @@ program nested_equilibrium
     real(dp) :: rbc(-nmax:nmax, 0:mmax), rbs(-nmax:nmax, 0:mmax)
     real(dp) :: zbc(-nmax:nmax, 0:mmax), zbs(-nmax:nmax, 0:mmax)
     real(dp) :: iota(0:kmax), pressure(0:kmax), current(0:kmax)
+    character(16) :: iota_type, pressure_type, current_type
+    integer :: n_knots
+    real(dp) :: profile_knots(knot_max), iota_values(knot_max), iota_slopes(knot_max)
+    real(dp) :: pressure_values(knot_max), pressure_slopes(knot_max)
+    real(dp) :: current_values(knot_max), current_slopes(knot_max)
     real(dp) :: raxis_cc(0:nmax), raxis_cs(0:nmax), zaxis_cc(0:nmax), zaxis_cs(0:nmax)
     real(dp), allocatable :: axis(:, :)
     logical :: guessed = .false.
@@ -46,7 +51,9 @@ program nested_equilibrium
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
-        current_tolerance, raxis_cc, raxis_cs, zaxis_cc, zaxis_cs
+        current_tolerance, raxis_cc, raxis_cs, zaxis_cc, zaxis_cs, iota_type, pressure_type, &
+        current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
+        pressure_slopes, current_values, current_slopes
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -55,6 +62,9 @@ program nested_equilibrium
     prescribe_current = .false.; current = 0; max_current_iterations = 30
     raxis_cc = 0; raxis_cs = 0; zaxis_cc = 0; zaxis_cs = 0
     current_tolerance = 1e-5_dp
+    iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
+    n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
+    pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
     call run%start('nested_equilibrium')
     call run%open_config(unit)
     ios = 0; message = ''
@@ -65,6 +75,11 @@ program nested_equilibrium
         error stop 'nested_equilibrium: mpol, ntor or nfp out of range'
     if (.not. phiedge > 0 .or. .not. ieee_is_finite(phiedge)) &
         error stop 'nested_equilibrium: phiedge must be positive'
+    if (.not. all([kind_ok(iota_type), kind_ok(pressure_type), kind_ok(current_type)])) &
+        error stop 'nested_equilibrium: profile types are power_series or hermite'
+    if (any([iota_type, pressure_type, current_type] == 'hermite') .and. &
+        (n_knots < 2 .or. n_knots > knot_max)) &
+        error stop 'nested_equilibrium: hermite profiles need 2 to 1024 knots'
     call run%open_resolved(unit)
     write (unit, nml=nested_input)
     call run%close_resolved(unit)
@@ -85,6 +100,10 @@ program nested_equilibrium
     profile%iota = iota(0:last(iota))
     ! the solver uses mu0 = 1 pressure units
     profile%pressure = mu0*pressure(0:last(pressure))
+    if (iota_type == 'hermite') call profile%set_hermite_iota(profile_knots(:n_knots), &
+        iota_values(:n_knots), iota_slopes(:n_knots))
+    if (pressure_type == 'hermite') call profile%set_hermite_pressure( &
+        profile_knots(:n_knots), mu0*pressure_values(:n_knots), mu0*pressure_slopes(:n_knots))
     call profile%evaluate(0.0_dp, iota_axis, p_axis, unused)
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
 
@@ -179,11 +198,17 @@ contains
         real(dp), parameter :: delta = 1e-3_dp
         real(dp) :: s(ns), target(ns), measured(ns), shifted(ns), slope(ns)
         real(dp) :: iota_s(ns), scale, unused1, unused2, update(ns)
-        real(dp), allocatable :: previous_iota(:)
+        type(toroidal_profile_t) :: previous
         integer :: j, k, local
         do j = 1, ns
             s(j) = real(j, dp)/ns
-            target(j) = sum(current*s(j)**[(k, k=0, kmax)])
+            if (current_type == 'hermite') then
+                call hermite_profile_evaluate(profile_knots(:n_knots), &
+                    current_values(:n_knots), current_slopes(:n_knots), s(j), target(j), &
+                    unused1)
+            else
+                target(j) = sum(current*s(j)**[(k, k=0, kmax)])
+            end if
         end do
         scale = maxval(abs(target))
         do k = 0, max_current_iterations
@@ -191,9 +216,9 @@ contains
             if (k == 0) then
                 ! the current per unit iota of the starting map scales a
                 ! current-free target, so that the error is an iota error there
-                seed%profile%iota(1) = seed%profile%iota(1) + delta
+                call seed%profile%shift_iota(delta)
                 call measure(s, shifted)
-                seed%profile%iota(1) = seed%profile%iota(1) - delta
+                call seed%profile%shift_iota(-delta)
                 scale = max(scale, maxval(abs(shifted - measured))/delta, tiny(1.0_dp))
             end if
             error = maxval(abs(measured - target))/scale
@@ -211,9 +236,9 @@ contains
                 if (error <= current_tolerance) exit
             end if
             current_iterations = k + 1
-            seed%profile%iota(1) = seed%profile%iota(1) + delta
+            call seed%profile%shift_iota(delta)
             call measure(s, shifted)
-            seed%profile%iota(1) = seed%profile%iota(1) - delta
+            call seed%profile%shift_iota(-delta)
             slope = (shifted - measured)/delta
             do j = 1, ns
                 call profile%evaluate(s(j), iota_s(j), unused1, unused2)
@@ -226,10 +251,10 @@ contains
                 update = update/2
             end do
             iota_s = iota_s + update
-            previous_iota = profile%iota
+            previous = profile
             call refit(s, iota_s)
             if (.not. single_signed()) then
-                profile%iota = previous_iota
+                profile = previous
                 print '(a)', 'current iteration: the refitted iota changes sign'
                 exit
             end if
@@ -374,6 +399,8 @@ contains
         call dgels('N', n + 1, order + 1, 1, a, n + 1, rhs, n + 1, work, size(work), info)
         if (info /= 0) error stop 'nested_equilibrium: iota fit'
         profile%iota = rhs(1:order + 1)
+        if (allocated(profile%iota_values)) deallocate (profile%iota_values, &
+            profile%iota_slopes, profile%iota_primitive)
     end subroutine
 
     subroutine resolve(local)
@@ -403,6 +430,11 @@ contains
         call ideal_map_reduce(map, gradient, reduced)
         where (map%fixed) reduced = 0
         free_gradient = norm2(reduced)
+    end function
+
+    logical function kind_ok(kind)
+        character(*), intent(in) :: kind
+        kind_ok = kind == 'power_series' .or. kind == 'hermite'
     end function
 
     integer function last(c)

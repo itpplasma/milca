@@ -16,6 +16,9 @@ entry for cross-code comparison with VMEC-class codes; converting a VMEC
 | `rbc(n,m)`, `rbs(n,m)`, `zbc(n,m)`, `zbs(n,m)` | boundary R, Z = sum C cos(m theta - n nfp phi) + S sin(m theta - n nfp phi), indexed (n, m) as in VMEC | 0 |
 | `phiedge` | total toroidal flux (Wb), positive | 1 |
 | `iota(k)`, `pressure(k)` | coefficients of s^k, s the normalized toroidal flux; pressure in Pa | 0 |
+| `iota_type`, `pressure_type`, `current_type` | `power_series` (the coefficients above and `current(k)`) or `hermite` | `power_series` |
+| `n_knots`, `profile_knots(:)` | knots 0 = s_1 < ... < s_K = 1 of the `hermite` profiles, K at most 1024 | 0 |
+| `iota_values(:)`, `iota_slopes(:)`, `pressure_values(:)`, `pressure_slopes(:)`, `current_values(:)`, `current_slopes(:)` | values and s-derivatives at the knots of a piecewise cubic Hermite profile; pressure in Pa, current in A | 0 |
 | `boundary_nodes`, `degree` | disc mesh of the final level | 16, 3 |
 | `ladder_nodes(:)`, `ladder_degree(:)` | coarser levels solved first; each corrects the next seed (`ideal_map_prolong_correction`) | none |
 | `angle_mpol` | poloidal modes of the boundary field-line angle; -1 pins the boundary angle | -1 |
@@ -23,6 +26,11 @@ entry for cross-code comparison with VMEC-class codes; converting a VMEC
 | `raxis_cc(n)`, `raxis_cs(n)`, `zaxis_cc(n)`, `zaxis_cs(n)` | initial magnetic axis in VMEC's convention (the boundary's m = 0 convention); all zero: the seed's axis is the boundary's m = 0 curve | 0 |
 | `prescribe_current` | match the enclosed toroidal current `current(k)` (A, coefficients of s^k) instead of keeping `iota` | false |
 | `max_current_iterations`, `current_tolerance` | iota updates and the largest current error relative to the largest prescribed current (at least the largest current per unit iota of the starting map, so that for a current-free target the error is an iota error) | 30, 1e-5 |
+
+A `hermite` profile is C1 and cubic on each knot interval; the iota integral
+from the axis is exact on it. Any other profile form (VMEC's splines, sums of
+arctangents, pedestals) is passed as values and slopes at enough knots; the
+interpolation error of that representation belongs to the converter.
 
 With a prescribed current, `iota` is the starting profile. For a fixed map the
 current enclosed by each surface is affine in iota there; its slope is read on
