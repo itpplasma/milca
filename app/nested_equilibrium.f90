@@ -18,6 +18,7 @@ program nested_equilibrium
     use fortnum_quadrature, only: gauss_legendre
     use milca_map_3d_loop, only: map_3d_loop_t, map_3d_loop_setup, map_3d_loop_integral
     use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
+    use milca_ideal_seed_3d_leaves, only: seed_hermite_profile_jvp
     implicit none
     integer, parameter :: mmax = 64, nmax = 32, kmax = 32, knot_max = 1024
     real(dp), parameter :: pi = acos(-1.0_dp), mu0 = 4e-7_dp*pi
@@ -124,6 +125,8 @@ program nested_equilibrium
         profile_knots(:n_knots), mu0*pressure_values(:n_knots), mu0*pressure_slopes(:n_knots))
     call profile%evaluate(0.0_dp, iota_axis, p_axis, unused)
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
+    if (prescribe_current .and. all(boundary_input(:, -ntor:-1, :) == 0) .and. &
+        all(boundary_input(:, 1:ntor, :) == 0)) call admit_axisymmetric_current()
 
     ! Resolution under error control: the mesh (boundary_nodes < 0), the
     ! interior toroidal modes (map_ntor < 0; a 3D boundary's interior needs more
@@ -589,6 +592,43 @@ contains
                 current_slopes(:n_knots), t, current_target, unused)
         else
             current_target = sum(current*t**[(k, k=0, kmax)])
+        end if
+    end function
+
+    subroutine admit_axisymmetric_current()
+        ! On an axisymmetric boundary Ampere's law on the surface s gives
+        ! mu0 I(s) = psi'(s) K(s) with K(s) = oint |grad s|/R dl > 0 and K ~ s
+        ! near the axis, so iota = psi'/Phi' has the zeros of I(s)/s: a zero of
+        ! I on (0, 1] or I'(0) = 0 makes iota vanish, which the frozen map does
+        ! not admit. Sampled on the grid of the seed's iota admission.
+        real(dp) :: slope, value
+        integer :: a
+        character(16) :: at
+        slope = current_slope_axis()
+        if (.not. abs(slope) > 0) call fail('on an axisymmetric boundary the prescribed' &
+            //' current has dI/ds = 0 on the axis, so iota vanishes there, which the' &
+            //' frozen map does not admit')
+        do a = 1, 128
+            value = current_target(a/128.0_dp)
+            if (value*slope > 0) cycle
+            write (at, '(f8.5)') a/128.0_dp
+            call fail('on an axisymmetric boundary the prescribed current changes sign' &
+                //' or vanishes by s = '//trim(adjustl(at))//', so iota does, which the' &
+                //' frozen map does not admit')
+        end do
+    end subroutine
+
+    real(dp) function current_slope_axis()
+        ! dI/ds at s = 0 of the prescribed current
+        real(dp) :: h, unused
+        if (current_type == 'hermite') then
+            h = profile_knots(2) - profile_knots(1)
+            call seed_hermite_profile_jvp(-profile_knots(1)/h, h, current_values(1), &
+                current_slopes(1), current_values(2), current_slopes(2), 1.0_dp, 0.0_dp, &
+                0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, current_slope_axis, unused)
+            current_slope_axis = current_slope_axis/h
+        else
+            current_slope_axis = current(1)
         end if
     end function
 

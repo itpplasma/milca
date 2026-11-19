@@ -68,7 +68,11 @@ step may reverse the sign of iota on every surface (a current-free
 stellarator started from the other handedness). A matched iota that changes
 sign inside [0, 1] is not admitted by the frozen map
 ([ideal-seed-3d](ideal-seed-3d.md)) and ends the solve with
-`current_status = "iota crosses zero"`.
+`current_status = "iota crosses zero"`. On an axisymmetric boundary Ampere's
+law on the surface s gives mu0 I(s) = psi'(s) oint |grad s|/R dl with a
+positive integral of order s near the axis, so iota has the zeros of
+I_T(s)/s. A prescribed current that vanishes on (0, 1], or has dI_T/ds = 0
+on the axis, is therefore reported as a `failure` before the seed.
 
 The current is matched pointwise because the energy weighs iota with s near
 the axis: for a large-aspect-ratio circle the poloidal field energy is

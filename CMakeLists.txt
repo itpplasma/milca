@@ -1303,7 +1303,7 @@ foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "circular-tokamak-hermite|3.0366;0.0750949;59.2176264"
         "circular-tokamak-current|3.04266;0.0755050"
         "circular-tokamak-current-hermite|3.04266;0.0755050"
-        "doubled-boundary|failure")
+        "doubled-boundary|failure" "axis-current-free|failure")
     string(REPLACE "|" ";" parts "${case}")
     list(GET parts 0 name)
     list(SUBLIST parts 1 -1 expected)
