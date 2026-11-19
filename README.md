@@ -2,32 +2,21 @@
 
 <a href="https://cloud.tugraz.at/index.php/s/cMDgzfagwJnEyiq/download?path=%2F&amp;files=milca.png"><img src="https://cloud.tugraz.at/index.php/s/cMDgzfagwJnEyiq/download?path=%2F&amp;files=milca_small.png" alt="MILCA" width="420"></a>
 
-MILCA is an experimental laboratory, written in Fortran, for the plasma
-physics models and algorithms used in our research group. It is a
-prototyping platform: existing and new models and numerical methods are
-implemented side by side, compared, checked with symbolic derivations, error
-bounds and benchmarks, and made fast, with little human development time.
-
-MILCA also serves as an independent cross-check for the field: it solves the
-problems of other codes, from their inputs where it can, with its own
-formulations, and reports where the results agree and where they differ, so
-that each code, MILCA included, can find and fix its discrepancies. Current
-work covers drift-kinetic and neoclassical transport and axisymmetric and
-three-dimensional MHD equilibria. Classical-particle and quantum-mechanical problems with known solutions serve
-as additional verification cases.
+MILCA is an experimental Fortran laboratory for plasma physics models and
+algorithms. Models and numerical methods are prototyped, verified with
+symbolic derivations, error bounds and cross-code benchmarks, and made fast.
+Current work covers drift-kinetic and neoclassical transport and
+axisymmetric and three-dimensional MHD equilibria.
 
 <a href="https://fortran-lang.org/"><img src="https://raw.githubusercontent.com/fortran-lang/assets/cc6fafc67918ea2daef46b965dcec67ed19ef585/powered_by_fortran/wide/powered_by_Fortran_wide.svg" alt="Powered by Fortran" width="240"></a>
 
 This is research software under active development: interfaces, inputs and
-outputs change frequently. Each documented case states its verification and
-error-bound status. Numerical kernels and their derivatives are generated with
-[FortSym](https://github.com/lazy-fortran/fortsym); generated sources are
-included, so ordinary builds do not require FortSym. Supported error bounds
+outputs change frequently. Numerical kernels and their derivatives are
+generated with [FortSym](https://github.com/lazy-fortran/fortsym); generated
+sources are included, so ordinary builds do not require FortSym. Error bounds
 use interval arithmetic from [FortNum](https://github.com/lazy-fortran/fortnum).
-
-Current priorities, the independent-code strategy and review policy are in
-[ROADMAP.md](ROADMAP.md); [the benchmark atlas](docs/benchmarks.md) records
-what each mathematical or cross-code comparison actually verifies.
+Priorities are in [ROADMAP.md](ROADMAP.md), verification cases in
+[the benchmark atlas](docs/benchmarks.md).
 
 ## Build
 
@@ -73,7 +62,8 @@ free streaming with a continuous error band:
 - [Documentation index](docs/README.md) and [figure gallery](docs/chapter-gallery.md)
 - [Grad–Shafranov equilibrium](docs/grad-shafranov.md) and
   [free boundary](docs/gs-free-boundary.md)
-- [3D ideal equilibria](docs/ideal-map-3d.md),
+- [3D nested equilibrium input](docs/nested-equilibrium-input.md),
+  [3D ideal equilibria](docs/ideal-map-3d.md),
   [3D free boundary](docs/ideal-free-boundary.md) and
   [equilibria with islands](docs/island-equilibrium.md)
 - [Linear MHD stability](docs/stability.md)
