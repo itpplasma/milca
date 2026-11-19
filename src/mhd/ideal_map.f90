@@ -67,7 +67,8 @@ module milca_ideal_map
     private
     public :: ideal_map_t, ideal_frozen_t
     public :: ideal_map_init, ideal_map_freeze, ideal_map_energy, ideal_map_hessian
-    public :: ideal_map_hvp
+    public :: ideal_map_hvp, ideal_map_point_hessian, ideal_map_angle_diagonal
+    public :: ideal_map_hessian_store_t, ideal_map_store_hessians
     public :: ideal_map_solve, ideal_map_point, ideal_map_dof, ideal_map_mode_norms
     public :: ideal_map_reduce, ideal_map_expand, ideal_map_rdof, ideal_map_axis_dof
     public :: ideal_map_prolong, ideal_map_residual, ideal_map_position_gauge
@@ -288,6 +289,16 @@ module milca_ideal_map
         ! Hessian assemblies and accepted quasi-Newton steps (map%lagged_hessian).
         integer :: hessians = 0, quasi_steps = 0
         type(factor_cache_t), private :: cache
+    end type
+
+    ! Point Hessians of the map energy at every quadrature point g, plane j and
+    ! cell e (without the quadrature weight): hp(78, g, j, e) packed as
+    ! point_hessian, and with field-angle coefficients hbb(6, ...) and
+    ! hvb(36, ...) of point_field. They make a Hessian-vector product a pass
+    ! of contractions (ideal_map_hvp with store). O(cells nq nphi) memory.
+    type :: ideal_map_hessian_store_t
+        logical :: ready = .false.
+        real(dp), allocatable :: hp(:, :, :, :), hbb(:, :, :, :), hvb(:, :, :, :)
     end type
 contains
     pure integer function ideal_map_dof(map, component, mode, node) result(dof)
@@ -1757,7 +1768,134 @@ contains
         hessian_stamp = hessian_stamp + 1
     end subroutine
 
-    subroutine ideal_map_hvp(map, x, direction, product, status)
+    subroutine ideal_map_point_hessian(map, e, g, j, x, hv)
+        ! Full symmetric d2w/dv2 (12 x 12) of v = (q, dq/ds) at quadrature point
+        ! g of cell e, plane j, with the frozen density including the field
+        ! angle; v(3 r + c) belongs to the test function f(r) of
+        ! test_functions.
+        type(ideal_map_t), intent(in) :: map
+        integer, intent(in) :: e, g, j
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), intent(out) :: hv(12, 12)
+        real(dp), allocatable :: et(:), ep(:)
+        real(dp) :: hp(78), w, jac, gv(12), bp(3)
+        integer :: k, pi, pj
+        allocate (et(map%nangle), ep(map%nangle))
+        call point_density(map, map%angle, e, g, j, bp, et, ep)
+        call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+        do k = 1, 78
+            call hessian_packed_pair(k, pi, pj)
+            hv(pi, pj) = hp(k); hv(pj, pi) = hp(k)
+        end do
+    end subroutine
+
+    subroutine ideal_map_angle_diagonal(map, x, diag)
+        ! Diagonal of the angle block of the Hessian, sum w B_k^T d2w/db2 B_k
+        ! over quadrature points and planes (hessian_angle without the mixed
+        ! rows).
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), intent(out) :: diag(:)
+        real(dp), allocatable :: et(:), ep(:), part(:)
+        real(dp) :: bp(3), hbb(6), hvb(12, 3), h3(3, 3), bk(3), weight, dphi
+        integer :: e, g, j, k
+        diag = 0
+        if (map%nangle == 0) return
+        dphi = 2*acos(-1.0_dp)/(map%nfp*map%nphi)
+        !$omp parallel default(shared) private(e, g, j, k, et, ep, part, bp, hbb, hvb, &
+        !$omp h3, bk, weight)
+        allocate (et(map%nangle), ep(map%nangle), part(map%nangle))
+        part = 0
+        !$omp do schedule(dynamic)
+        do e = 1, map%cells
+            do g = 1, map%nq
+                weight = map%weight(g)*dphi
+                do j = 1, map%nphi
+                    call point_density(map, map%angle, e, g, j, bp, et, ep)
+                    call point_field(map, e, g, j, x, bp, hbb, hvb)
+                    h3 = reshape([hbb(1), hbb(2), hbb(4), hbb(2), hbb(3), hbb(5), &
+                        hbb(4), hbb(5), hbb(6)], [3, 3])
+                    do k = 1, map%nangle
+                        bk = map%angle_form(:, 1, g, e)*et(k) + map%angle_form(:, 2, g, e)*ep(k)
+                        part(k) = part(k) + weight*dot_product(bk, matmul(h3, bk))
+                    end do
+                end do
+            end do
+        end do
+        !$omp end do
+        !$omp critical
+        diag = diag + part
+        !$omp end critical
+        deallocate (et, ep, part)
+        !$omp end parallel
+    end subroutine
+
+    pure subroutine hessian_packed_pair(n, pi, pj)
+        ! (row, column) of entry n of the hp packing (gen/gen_ideal_map.f90)
+        integer, intent(in) :: n
+        integer, intent(out) :: pi, pj
+        integer :: tt
+        if (n <= 45) then
+            pj = 1
+            do while (pj*(pj + 1)/2 < n)
+                pj = pj + 1
+            end do
+            pi = n - pj*(pj - 1)/2
+        else if (n <= 72) then
+            tt = n - 46
+            pj = 10 + tt/9
+            pi = 1 + mod(tt, 9)
+        else
+            tt = n - 73
+            pj = 10
+            do while ((pj - 9)*(pj - 8)/2 < tt + 1)
+                pj = pj + 1
+            end do
+            pi = 10 + tt - (pj - 10)*(pj - 9)/2
+        end if
+    end subroutine
+
+    subroutine ideal_map_store_hessians(map, x, store)
+        ! The weighted point Hessians of the energy at x (ideal_map_hessian_store_t).
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        type(ideal_map_hessian_store_t), intent(inout) :: store
+        real(dp), allocatable :: et(:), ep(:)
+        real(dp) :: w, jac, gv(12), bp(3), hp(78), hbb(6), hvb(12, 3)
+        integer :: e, g, j
+        if (.not. allocated(store%hp)) then
+            allocate (store%hp(78, map%nq, map%nphi, map%cells))
+        else if (any(shape(store%hp) /= [78, map%nq, map%nphi, map%cells])) then
+            deallocate (store%hp)
+            allocate (store%hp(78, map%nq, map%nphi, map%cells))
+        end if
+        if (allocated(store%hbb)) deallocate (store%hbb, store%hvb)
+        if (map%nangle > 0) allocate (store%hbb(6, map%nq, map%nphi, map%cells), &
+            store%hvb(36, map%nq, map%nphi, map%cells))
+        !$omp parallel default(shared) private(e, g, j, et, ep, w, jac, gv, bp, &
+        !$omp hp, hbb, hvb)
+        allocate (et(map%nangle), ep(map%nangle))
+        !$omp do schedule(dynamic)
+        do e = 1, map%cells
+            do j = 1, map%nphi
+                do g = 1, map%nq
+                    call point_density(map, map%angle, e, g, j, bp, et, ep)
+                    call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                    store%hp(:, g, j, e) = hp
+                    if (map%nangle == 0) cycle
+                    call point_field(map, e, g, j, x, bp, hbb, hvb)
+                    store%hbb(:, g, j, e) = hbb
+                    store%hvb(:, g, j, e) = reshape(hvb, [36])
+                end do
+            end do
+        end do
+        !$omp end do
+        deallocate (et, ep)
+        !$omp end parallel
+        store%ready = .true.
+    end subroutine
+
+    subroutine ideal_map_hvp(map, x, direction, product, status, store)
         ! Reduced Hessian-vector product P^T H P d of the energy at x without the
         ! assembled Hessian: the direction is evaluated on the toroidal planes,
         ! contracted with the point Hessians d2w/dv2 of v = (q, dq/ds) at every
@@ -1771,6 +1909,9 @@ contains
         real(dp), intent(in) :: x(:, :, :), direction(:)
         real(dp), intent(out) :: product(:)
         integer, intent(out) :: status
+        ! stored point Hessians of x (ideal_map_store_hessians)
+        type(ideal_map_hessian_store_t), intent(in), optional :: store
+        logical :: stored
         real(dp), allocatable :: d(:), y(:), dq(:, :, :, :), acc(:, :, :, :), et(:), ep(:)
         real(dp), allocatable :: deta(:), yeta(:)
         real(dp) :: hp(78), hv(12, 12), dv(12), r(12), w, jac, gv(12), bp(3), weight, dphi
@@ -1780,8 +1921,10 @@ contains
         status = IDEAL_MAP_BAD_INPUT
         product = 0
         if (size(direction) /= map%nred .or. size(product) /= map%nred) return
+        stored = .false.
+        if (present(store)) stored = store%ready
         do k = 1, 78
-            call packed_pair(k, pi_(k), pj_(k))
+            call hessian_packed_pair(k, pi_(k), pj_(k))
         end do
         allocate (d(map%ndof), y(map%ndof))
         call ideal_map_expand(map, direction, d)
@@ -1815,8 +1958,13 @@ contains
             do g = 1, map%nq
                 weight = map%weight(g)*dphi
                 do j = 1, map%nphi
-                    call point_density(map, map%angle, e, g, j, bp, et, ep)
-                    call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                    if (stored) then
+                        if (na > 0) call angle_basis(map, e, g, j, et, ep)
+                        hp = store%hp(:, g, j, e)
+                    else
+                        call point_density(map, map%angle, e, g, j, bp, et, ep)
+                        call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                    end if
                     do k = 1, 78
                         hv(pi_(k), pj_(k)) = hp(k); hv(pj_(k), pi_(k)) = hp(k)
                     end do
@@ -1832,7 +1980,12 @@ contains
                     if (na > 0) then
                         ! b = b0 + B eta: d2w/dv db B deta into the map rows,
                         ! B^T (d2w/db2 B deta + d2w/db dv dv) into the angle rows
-                        call point_field(map, e, g, j, x, bp, hbb, hvb)
+                        if (stored) then
+                            hbb = store%hbb(:, g, j, e)
+                            hvb = reshape(store%hvb(:, g, j, e), [12, 3])
+                        else
+                            call point_field(map, e, g, j, x, bp, hbb, hvb)
+                        end if
                         db = map%angle_form(:, 1, g, e)*dot_product(et, deta) &
                             + map%angle_form(:, 2, g, e)*dot_product(ep, deta)
                         h3 = reshape([hbb(1), hbb(2), hbb(4), hbb(2), hbb(3), hbb(5), &
@@ -1887,31 +2040,6 @@ contains
         end if
         call ideal_map_reduce(map, y, product)
         status = IDEAL_MAP_OK
-    contains
-        subroutine packed_pair(n, pi, pj)
-            ! (row, column) of entry n of the hp packing (gen/gen_ideal_map.f90)
-            integer, intent(in) :: n
-            integer, intent(out) :: pi, pj
-            integer :: tt
-            if (n <= 45) then
-                pj = 1
-                do while (pj*(pj + 1)/2 < n)
-                    pj = pj + 1
-                end do
-                pi = n - pj*(pj - 1)/2
-            else if (n <= 72) then
-                tt = n - 46
-                pj = 10 + tt/9
-                pi = 1 + mod(tt, 9)
-            else
-                tt = n - 73
-                pj = 10
-                do while ((pj - 9)*(pj - 8)/2 < tt + 1)
-                    pj = pj + 1
-                end do
-                pi = 10 + tt - (pj - 10)*(pj - 9)/2
-            end if
-        end subroutine
     end subroutine
 
     subroutine hessian_angle(map, x, nr, blocks)

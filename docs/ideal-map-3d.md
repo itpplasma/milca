@@ -314,6 +314,33 @@ contracted with the same point Hessians (and the field-angle blocks of
 the Fourier coefficients, in O(nodes nphi) memory. CTest `ideal_map_hvp`
 requires agreement with the assembled matrix to 1e-12 (observed 6e-16 to
 8e-16, with and without the field angle).
+`ideal_map_store_hessians` keeps the point Hessians of one state (78 values
+per quadrature point and plane, O(cells nq nphi)), so that a product is a
+pass of contractions. `milca_ideal_map_mode_pc` preconditions H by an
+overlapping additive Schwarz method in the toroidal number: subdomain p holds
+the modes of n = p and p + 1 with their exact couplings (a principal
+submatrix, positive definite where H is), each a 2D mesh matrix factored by
+Cholesky, weighted by 1/sqrt(multiplicity) for symmetry; an axisymmetric
+state gives H^-1 (CTest `ideal_map_mode_pc`: 3e-13). A plane-averaged
+n-diagonal operator loses the φ-dependent near-null relabellings and needed
+330 CG iterations against Jacobi's 900. `milca_ideal_map_krylov` runs
+deflated preconditioned CG (Saad et al. 2000) with the Ritz vectors of the
+smallest Ritz values recycled from the previous solve. CG iterations on
+H + mu |diag H| at the solved Landreman P3 map (ntor 2):
+
+| nodes | mu | Schwarz to 1e-8 | Jacobi to 1e-8 | Schwarz to 1e-3 | deflated (40) to 1e-3 |
+|---|---|---|---|---|---|
+| 8 | 1e-2 | 46 | 211 | 20 | 20 |
+| 8 | 1e-4 | 122 | 1045 | 54 | 49 |
+| 8 | 1e-6 | 149 | 1193 | 82 | 44 |
+| 16 | 1e-2 | 64 | 229 | 26 | 26 |
+| 16 | 1e-4 | 289 | 2028 | 117 | 116 |
+| 16 | 1e-6 | 499 | 4020 | 290 | 128 |
+
+The spectrum of the preconditioned operator is a broad band (Ritz values
+0.03 to 7 at 8 nodes, mu = 1e-4), not a few outliers, and its lower end
+moves down under refinement.
+
 Converged when the reduced free gradient falls by 1e-6 (tests; seed ladders
 stop at 1e-11 x the gradient of X0 = id). Element energy, gradient and
 Hessian blocks are OpenMP-parallel over cells. The report gives wall time for
