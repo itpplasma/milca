@@ -63,6 +63,14 @@ program gs_response_3d
     !! harmonic (-m, -n), q = -q_s and B_z = -F/R (docs/kinetic-layer-
     !! response.md). prefix_resist.dat is written as for 'resistive', with
     !! L the core half-width in psin, Q = 0 and b(0)/b0 = 1 (constant psi).
+    !! closure = 'reconnected' is the same matching with Delta_layer = 0: zero
+    !! net layer current and continuous reconnected flux A, the ideal outer
+    !! solution without shielding current; prefix_resist.dat as above with
+    !! L = Q = 0 and b(0)/b0 = 1.
+    !! prefix_helicity.dat gives per (phasing, rational) on the rational ring
+    !! the PEST flux harmonics of the coil field and of the total field (coil
+    !! and plasma currents) for m = n q and the opposite helicity -m, divided
+    !! by area (T, peak amplitudes as b_vac).
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_meridian_feec_n, only: meridian_feec_t, meridian_feec_build, &
         meridian_point_basis_t, meridian_point_basis_init
@@ -147,13 +155,13 @@ program gs_response_3d
     integer, allocatable :: err_cells(:)
     real(dp), allocatable :: err_ta(:), err_tb(:)
     type(ampere_n_t) :: amp
-    type(ring_angles_t), allocatable :: ra(:)
+    type(ring_angles_t), allocatable :: ra(:), rap(:)
     real(dp), allocatable :: w(:), ul(:), u_rat(:), psin_rat(:), q_rat(:)
     real(dp), allocatable :: xg(:, :), nds(:, :), thg(:), tau(:), wq(:), area(:)
     integer, allocatable :: tg(:), m_rat(:), ring_of(:), ipiv(:)
     complex(dp), allocatable :: f(:), a(:), b2(:, :), mm(:, :), lu(:, :)
     complex(dp), allocatable :: phivac(:), lam(:), bc(:, :, :), bn(:)
-    complex(dp), allocatable :: phil3(:), bs(:, :, :), bb(:, :)
+    complex(dp), allocatable :: phil3(:), bs(:, :, :), bb(:, :), hel_vac(:, :)
     complex(dp) :: bmn1(1), phimn1(1)
     real(dp), allocatable :: xs(:, :)
     type(sample_ring_t), allocatable :: rings(:)
@@ -163,14 +171,14 @@ program gs_response_3d
     type(rational_layer_t), allocatable :: lays(:)
     real(dp), allocatable :: di_rat(:), dq_rat(:), jump_unit(:), delta_rat(:)
     complex(dp), allocatable :: b2cl(:, :), phicl(:), phitot(:), lam_cl(:)
-    logical :: frob, resist, kinetic
+    logical :: frob, resist, kinetic, reconnected
     type(kl_profiles_t) :: kin_prof
     real(dp), allocatable :: prof_tab(:, :), lscale(:), qlay(:), gpsi(:)
     complex(dp), allocatable :: dlayer(:), lcen(:)
     real(dp), allocatable :: xr(:, :)
     complex(dp), allocatable :: bcr(:, :, :), avol(:)
     real(dp) :: qref, target, root, t0, t1, res
-    integer :: ulay, ures, unit, ur, st, i, j, k, nr, nrat, ip, nphase, info, kk, its, nsr
+    integer :: ulay, ures, uhel, unit, ur, st, i, j, k, nr, nrat, ip, nphase, info, kk, its, nsr
     logical :: found
     ! Discrete residual-energy indicator of the app's own unit-sheet Ampere
     ! solves (algebraic residual of the discrete system, not a discretization
@@ -220,18 +228,21 @@ program gs_response_3d
     nrat = k
     kinetic = trim(closure) == 'kinetic' .and. trim(model) == 'ideal'
     ! the kinetic closure shares the resistive matching and outputs
-    resist = (trim(closure) == 'resistive' .and. trim(model) == 'ideal') .or. kinetic
+    reconnected = trim(closure) == 'reconnected' .and. trim(model) == 'ideal'
+    resist = (trim(closure) == 'resistive' .and. trim(model) == 'ideal') .or. kinetic &
+        .or. reconnected
     frob = (trim(closure) == 'frobenius' .and. trim(model) == 'ideal') .or. resist
     if (trim(closure) /= 'sheet' .and. trim(closure) /= 'frobenius' .and. &
-        trim(closure) /= 'resistive' .and. trim(closure) /= 'kinetic') &
-        error stop 'closure must be sheet, frobenius, resistive or kinetic'
+        trim(closure) /= 'resistive' .and. trim(closure) /= 'kinetic' .and. &
+        trim(closure) /= 'reconnected') &
+        error stop 'closure must be sheet, frobenius, resistive, kinetic or reconnected'
     if (kinetic) then
         call kl_profiles_read(trim(kinetic_profiles), kin_prof, st)
         if (st /= KLW_OK) error stop 'kinetic_profiles'
         if (kinetic_btor == 0 .or. kinetic_r0 <= 0) &
             error stop 'kinetic closure needs kinetic_btor and kinetic_r0'
         write (*, '(a,i0,a)') 'kinetic closure: ', size(kin_prof%r), ' profile points'
-    else if (resist) then
+    else if (resist .and. .not. reconnected) then
         call read_profiles(trim(profiles), prof_tab)
         write (*, '(a,i0,a)') 'resistive closure: ', size(prof_tab, 2), &
             ' profile points'
@@ -371,11 +382,13 @@ program gs_response_3d
     end if
 
     ! ring angles and unit-sheet fields
-    allocate (ra(nrat), area(nrat), b2(fs%sp(2)%ndof, nrat), f(amp%nn), a(amp%nn))
+    allocate (ra(nrat), rap(nrat), area(nrat), b2(fs%sp(2)%ndof, nrat), f(amp%nn), &
+        a(amp%nn))
     do i = 1, nrat
         call surface_build(g, ul(ring_of(i))**2, nfine, surf, st)
         if (st /= 0) error stop 'rational surface'
         call ring_angles_set(surf%q, surf%theta_s(:, angle), surf%nu, ra(i))
+        call ring_angles_set(surf%q, surf%theta_s(:, angle_pest), surf%nu, rap(i))
         area(i) = ring_area(fm, ring_of(i))
         f = (0.0_dp, 0.0_dp)
         call ring_sheet_load(fs, pb, fm, ring_of(i), ra(i), n, m_rat(i), &
@@ -428,6 +441,8 @@ program gs_response_3d
         if (resist) then
             if (kinetic) then
                 call kinetic_layers()
+            else if (reconnected) then
+                call reconnected_layers()
             else
                 call resistive_layers()
             end if
@@ -464,7 +479,11 @@ program gs_response_3d
             'Re,Im lambda_in[A] Re,Im lambda_out[A] Re,Im lambda_eq[A] '// &
             'Re,Im jump_unit Re,Im jump_fit(spot)'
     end if
-    allocate (w(set%ncoil))
+    open (newunit=uhel, file=trim(prefix)//'_helicity.dat', status='replace')
+    write (uhel, '(a)') '# phasing q psin m area[m^2/rad] Re,Im b_vac(m) '// &
+        'Re,Im b_vac(-m) Re,Im b_tot(m) Re,Im b_tot(-m) [T]: PEST flux '// &
+        'harmonics per area on the rational ring, coil field and coil + plasma'
+    allocate (w(set%ncoil), hel_vac(2, nrat))
     do ip = 1, nphase
         call coil_read_currents(trim(currents(ip)), set%ncoil, w, st)
         if (st /= 0) error stop 'cannot read currents'
@@ -480,6 +499,8 @@ program gs_response_3d
                 bn(kk) = (bc(1, 1, kk)*nds(1, kk) + bc(3, 1, kk)*nds(2, kk))*xg(1, kk)
             end do
             phivac(i) = ring_flux_from_values(ra(i), n, m_rat(i), thg, bn, wq)
+            hel_vac(1, i) = ring_flux_from_values(rap(i), n, m_rat(i), thg, bn, wq)
+            hel_vac(2, i) = ring_flux_from_values(rap(i), n, -m_rat(i), thg, bn, wq)
             deallocate (bn)
             ! independent L3 path: coil field on the surface_build points and
             ! the phi_mn of milca_vacuum_surfaces
@@ -572,6 +593,7 @@ program gs_response_3d
             end if
         end if
         call export_l7(ip)
+        call helicity_report(ip)
         do i = 1, nrat
             write (ur, '(i3,f10.6,f14.10,i5,es16.8,10es16.8)') ip, q_rat(i), &
                 ul(ring_of(i))**2, m_rat(i), area(i), phivac(i), &
@@ -585,6 +607,7 @@ program gs_response_3d
         write (*, '(a,f10.2,a)') 'coil drive cpu ', t1 - t0, ' s'
     end do
     close (ur)
+    close (uhel)
     if (uerr /= 0) close (uerr)
     if (frob) close (ulay)
     if (resist) close (ures)
@@ -708,6 +731,11 @@ contains
                         ' |jump| ', abs(jedge), ' |A/Phi_vac| ', abs(arec/phivac(l)), &
                         ' matching |jump - Delta A|/|jump| ', &
                         abs(jedge - dlayer(l)*arec)/max(abs(jedge), tiny(1.0_dp))
+                    if (reconnected) write (*, '(a,f8.4,a,es10.2)') &
+                        '  reconnected q ', q_rat(l), &
+                        ' net layer current |jump|/(|jump_unit| sum|lambda|) ', &
+                        abs(jedge)/max(abs(jump_unit(l))*(abs(lam_cl(2*l - 1)) &
+                        + abs(lam_cl(2*l))), tiny(1.0_dp))
                 end block
             end if
         end do
@@ -721,26 +749,15 @@ contains
         type(perturbation_t), allocatable :: pr(:)
         type(surface_t) :: sx
         type(sample_ring_t) :: sr
-        complex(dp), allocatable :: b2tot(:), bt(:), bf(:, :), bcx(:, :, :), dbe(:, :)
+        complex(dp), allocatable :: b2tot(:), bf(:, :), bcx(:, :, :), dbe(:, :)
         character(len=512) :: fname
         integer :: ne, ie, js, s2, st2, ngood
         real(dp) :: ue
 
         ne = count(export_psin > 0.0_dp)
         if (ne == 0) return
-        allocate (b2tot(fs%sp(2)%ndof), pr(ne))
-        b2tot = (0.0_dp, 0.0_dp)
-        if (trim(model) == 'ideal') then
-            call ampere_n_curl(amp, avol, bt)
-            b2tot = bt
-            do s2 = 1, cl%ns
-                b2tot = b2tot + lam_cl(s2)*b2cl(:, s2)
-            end do
-        else
-            do s2 = 1, nrat
-                b2tot = b2tot + lam(s2)*b2(:, s2)
-            end do
-        end if
+        allocate (pr(ne))
+        b2tot = plasma_field()
         ngood = 0
         do ie = 1, ne
             ue = sqrt(export_psin(ie))
@@ -778,6 +795,62 @@ contains
         write (*, '(a,i0,a,a,a,i0)') 'L7 export: ', ngood, ' surfaces to ', &
             trim(fname), ', status ', st2
     end subroutine export_l7
+
+    function plasma_field() result(b2tot)
+        !! V2 coefficients of the field of all plasma currents (volume
+        !! response and sheets) of the current phasing.
+        complex(dp), allocatable :: b2tot(:), bt(:)
+        integer :: s2
+
+        allocate (b2tot(fs%sp(2)%ndof))
+        b2tot = (0.0_dp, 0.0_dp)
+        if (trim(model) == 'ideal') then
+            call ampere_n_curl(amp, avol, bt)
+            b2tot = bt
+            do s2 = 1, cl%ns
+                b2tot = b2tot + lam_cl(s2)*b2cl(:, s2)
+            end do
+        else
+            do s2 = 1, nrat
+                b2tot = b2tot + lam(s2)*b2(:, s2)
+            end do
+        end if
+    end function plasma_field
+
+    subroutine helicity_report(iph)
+        !! PEST flux harmonics m and -m of the coil and the total field on
+        !! every rational ring, per area (prefix_helicity.dat).
+        integer, intent(in) :: iph
+        complex(dp), allocatable :: b2tot(:)
+        complex(dp) :: tot(2)
+        integer :: l
+
+        b2tot = plasma_field()
+        do l = 1, nrat
+            tot(1) = hel_vac(1, l) + ring_flux_harmonic(fs, pb, fm, ring_of(l), &
+                rap(l), n, b2tot, m_rat(l))
+            tot(2) = hel_vac(2, l) + ring_flux_harmonic(fs, pb, fm, ring_of(l), &
+                rap(l), n, b2tot, -m_rat(l))
+            write (uhel, '(i3,f10.6,f14.10,i5,es16.8,8es16.8)') iph, q_rat(l), &
+                ul(ring_of(l))**2, m_rat(l), area(l), hel_vac(:, l)/area(l), &
+                tot/area(l)
+            write (*, '(a,i0,a,f8.4,4(a,es11.3))') 'phasing ', iph, ' q ', q_rat(l), &
+                ' |b_vac(m)| ', abs(hel_vac(1, l))/area(l), ' |b_vac(-m)| ', &
+                abs(hel_vac(2, l))/area(l), ' |b_tot(m)| ', abs(tot(1))/area(l), &
+                ' |b_tot(-m)| ', abs(tot(2))/area(l)
+        end do
+    end subroutine helicity_report
+
+    subroutine reconnected_layers()
+        !! Delta_layer = 0: no net layer current, the reconnected flux is that
+        !! of the ideal outer solution without shielding.
+        allocate (dlayer(nrat), lcen(nrat), lscale(nrat), qlay(nrat), gpsi(nrat))
+        dlayer = (0.0_dp, 0.0_dp)
+        lcen = (1.0_dp, 0.0_dp)
+        lscale = 0.0_dp
+        qlay = 0.0_dp
+        gpsi = 0.0_dp
+    end subroutine reconnected_layers
 
     subroutine read_profiles(path, tab)
         !! Columns psin, eta [Ohm m], rho [kg/m^3], Omega [rad/s].

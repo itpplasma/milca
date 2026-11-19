@@ -42,20 +42,20 @@ module milca_vacuum_surfaces
         real(dp) :: rleft = 0, dr = 0, zbot = 0, dz = 0
         real(dp) :: psi_axis = 0, psi_edge = 0, r_axis = 0, z_axis = 0
         real(dp) :: ip = 0, sgn_dpsi = 1, s_pol = 1
-        real(dp), allocatable :: coef(:, :)    ! B-spline coefficients (0:nr+1, 0:nz+1)
-        real(dp), allocatable :: fcoef(:)      ! F(psin) B-spline coefficients, (0:nf+1)
-        real(dp), allocatable :: pcoef(:)      ! p(psin) (Pa), set by eqdsk_read
+        real(dp), allocatable :: coef(:, :) ! B-spline coefficients (0:nr+1, 0:nz+1)
+        real(dp), allocatable :: fcoef(:) ! F(psin) B-spline coefficients, (0:nf+1)
+        real(dp), allocatable :: pcoef(:) ! p(psin) (Pa), set by eqdsk_read
     end type
 
     type, public :: surface_t
         integer :: n = 0
         real(dp) :: psin = 0, q = 0
         real(dp), allocatable :: theta_g(:), r(:), z(:)
-        real(dp), allocatable :: nr(:), nz(:)       ! outward unit normal
-        real(dp), allocatable :: dl(:)              ! |x'| (m per rad of theta_g)
-        real(dp), allocatable :: nu(:)              ! toroidal advance
-        real(dp), allocatable :: theta_s(:, :)      ! (n, 2) pest, hamada
-        real(dp), allocatable :: dtheta_s(:, :)     ! d theta_s / d theta_g
+        real(dp), allocatable :: nr(:), nz(:) ! outward unit normal
+        real(dp), allocatable :: dl(:) ! |x'| (m per rad of theta_g)
+        real(dp), allocatable :: nu(:) ! toroidal advance
+        real(dp), allocatable :: theta_s(:, :) ! (n, 2) pest, hamada
+        real(dp), allocatable :: dtheta_s(:, :) ! d theta_s / d theta_g
     end type
 
     public :: psi_grid_init, eqdsk_read, psi_eval, psin_of, f_of_psin, profiles_of_psin
@@ -80,7 +80,7 @@ contains
         ! unknowns u(i) = c(i+1), i = 1..n; interior rows u(i-1)+4u(i)+u(i+1) = 6 f(i)
         ! natural ends: u(1) = f(1), u(n) = f(n)
         d = 6*f
-        w = 1                                 ! scratch for the super-diagonal
+        w = 1 ! scratch for the super-diagonal
         c(1) = f(1)
         c(n) = f(n)
         ! Thomas algorithm for i = 2..n-1 with u(1), u(n) known
@@ -103,7 +103,7 @@ contains
     pure subroutine basis(t, b, db, d2b)
         real(dp), intent(in) :: t
         real(dp), intent(out) :: b(4), db(4), d2b(4)
-     b = [(1 - t)**3/6, (3*t**3 - 6*t**2 + 4)/6, (-3*t**3 + 3*t**2 + 3*t + 1)/6, t**3/6]
+        b = [(1 - t)**3/6, (3*t**3 - 6*t**2 + 4)/6, (-3*t**3 + 3*t**2 + 3*t + 1)/6, t**3/6]
         db = [-(1 - t)**2/2, (3*t**2 - 4*t)/2, (-3*t**2 + 2*t + 1)/2, t**2/2]
         d2b = [1 - t, 3*t - 2, -3*t + 1, t]
     end subroutine
@@ -115,7 +115,7 @@ contains
         type(psi_grid_t), intent(out) :: g
         real(dp), intent(in) :: psirz(:, :), rleft, rdim, zmid, zdim
         real(dp), intent(in) :: r_axis_guess, z_axis_guess, psi_edge, ip
-        real(dp), intent(in) :: fpol(:)   ! F on uniform psin = 0..1
+        real(dp), intent(in) :: fpol(:) ! F on uniform psin = 0..1
         integer, intent(out) :: status
         real(dp), intent(in), optional :: pressure(:)
         real(dp), allocatable :: tmp(:, :)
@@ -170,7 +170,7 @@ contains
         real(dp) :: u, v, tr, tz, br(4), dbr(4), d2br(4), bz(4), dbz(4), d2bz(4)
         real(dp) :: blk(4, 4)
         integer :: i0, j0
-        u = (r - g%rleft)/g%dr + 1       ! data point i sits at u = i
+        u = (r - g%rleft)/g%dr + 1 ! data point i sits at u = i
         v = (z - g%zbot)/g%dz + 1
         i0 = max(1, min(g%nr - 1, floor(u)))
         j0 = max(1, min(g%nz - 1, floor(v)))
@@ -266,8 +266,8 @@ contains
         allocate (fpol(nw), work(nw), psirz(nw, nh), pres(nw))
         read (unit, '(5e16.9)', iostat=ios) fpol
         read (unit, '(5e16.9)', iostat=ios) pres
-        read (unit, '(5e16.9)', iostat=ios) work       ! ffprim
-        read (unit, '(5e16.9)', iostat=ios) work       ! pprime
+        read (unit, '(5e16.9)', iostat=ios) work ! ffprim
+        read (unit, '(5e16.9)', iostat=ios) work ! pprime
         read (unit, '(5e16.9)', iostat=ios) psirz
         close (unit)
         if (ios /= 0) return
@@ -324,14 +324,16 @@ contains
         ok = .false.
         target = g%psi_axis + psin*(g%psi_edge - g%psi_axis)
         er = [cos(th), sin(th)]
-        ! longest ray that stays inside the grid (one cell margin)
+        ! longest ray that stays inside the grid: the interpolating spline is
+        ! defined up to the outer data points, and G-EQDSK grids may place the
+        ! boundary in the last cell
         hi_grid = huge(1.0_dp)
         if (er(1) > 1.0e-12_dp) hi_grid = &
-            min(hi_grid, (g%rleft + g%dr*(g%nr - 2) - g%r_axis)/er(1))
-        if (er(1) < -1.0e-12_dp) hi_grid = min(hi_grid, (g%rleft + g%dr - g%r_axis)/er(1))
+            min(hi_grid, (g%rleft + g%dr*(g%nr - 1) - g%r_axis)/er(1))
+        if (er(1) < -1.0e-12_dp) hi_grid = min(hi_grid, (g%rleft - g%r_axis)/er(1))
         if (er(2) > 1.0e-12_dp) hi_grid = &
-            min(hi_grid, (g%zbot + g%dz*(g%nz - 2) - g%z_axis)/er(2))
-        if (er(2) < -1.0e-12_dp) hi_grid = min(hi_grid, (g%zbot + g%dz - g%z_axis)/er(2))
+            min(hi_grid, (g%zbot + g%dz*(g%nz - 1) - g%z_axis)/er(2))
+        if (er(2) < -1.0e-12_dp) hi_grid = min(hi_grid, (g%zbot - g%z_axis)/er(2))
         ! march outward to the first crossing of the target level
         lo = 0
         ds = 0.02_dp
@@ -411,7 +413,7 @@ contains
             wj(j) = s%r(j)*s%dl(j)/norm2([pr, pz])
         end do
         call periodic_antiderivative(dnu, s%nu, numean)
-        s%q = numean       ! (1/2pi) * int dnu = mean of dnu
+        s%q = numean ! (1/2pi) * int dnu = mean of dnu
         s%dtheta_s(:, angle_pest) = dnu/numean
         s%theta_s(:, angle_pest) = s%nu/numean
         call hamada_angle(wj, s)

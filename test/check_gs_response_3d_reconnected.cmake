@@ -1,0 +1,51 @@
+# Reconnected closure (Delta_layer = 0) of the rational q = 2/1 of the A = 10
+# circular torus: the net layer current vanishes, the reconnected flux stays
+# finite (no shielding), and the PEST harmonic of the total field on the
+# rational ring is that flux.
+file(REMOVE_RECURSE "${WORK}")
+file(MAKE_DIRECTORY "${WORK}")
+file(WRITE "${WORK}/coils.txt"
+    "1\nloop 4\n8 -1 -0.5\n8 1 -0.5\n8 1 0.5\n8 -1 0.5\n")
+file(WRITE "${WORK}/currents.txt" "1000.0\n")
+file(WRITE "${WORK}/input.nml"
+    "&l4 eqdsk='${EQDSK}', coils='coils.txt', currents(1)='currents.txt', prefix='t', n=1, rat_num(1)=2, rat_den(1)=1, nrad=12, nth_max=64, order=2, nphi=32, nfine=256, np_sample=64, model='ideal', gmres_tol=1e-10, gmres_maxit=40, rat_auto=.false., closure='reconnected' /\n")
+execute_process(COMMAND "${APP}" input.nml WORKING_DIRECTORY "${WORK}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 200)
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "reconnected closure failed: ${out}${err}")
+endif()
+if(NOT out MATCHES "net layer current \\|jump\\|/\\(\\|jump_unit\\| sum\\|lambda\\|\\) +([0-9.]+E[-+][0-9]+)")
+    message(FATAL_ERROR "net layer current diagnostic missing: ${out}")
+endif()
+if(NOT CMAKE_MATCH_1 LESS 1e-8)
+    message(FATAL_ERROR "net layer current not zero: ${CMAKE_MATCH_1}")
+endif()
+if(NOT out MATCHES "\\|A/area\\| +([0-9])\\.([0-9][0-9][0-9])E([-+][0-9]+)")
+    message(FATAL_ERROR "reconnected flux missing: ${out}")
+endif()
+set(a_mant "${CMAKE_MATCH_1}${CMAKE_MATCH_2}")
+set(a_exp "${CMAKE_MATCH_3}")
+if(NOT out MATCHES "\\|A/Phi_vac\\| +([0-9.]+E[-+][0-9]+)")
+    message(FATAL_ERROR "reconnected flux ratio missing: ${out}")
+endif()
+# a shielded rational has |A/Phi_vac| below 1e-4 on this mesh
+if(CMAKE_MATCH_1 LESS 0.01)
+    message(FATAL_ERROR "reconnected flux shielded: |A/Phi_vac| = ${CMAKE_MATCH_1}")
+endif()
+if(NOT out MATCHES "\\|b_tot\\(m\\)\\| +([0-9])\\.([0-9][0-9][0-9])E([-+][0-9]+)")
+    message(FATAL_ERROR "total resonant harmonic missing: ${out}")
+endif()
+set(b_mant "${CMAKE_MATCH_1}${CMAKE_MATCH_2}")
+# |b_tot(m)| on the rational ring is the fitted large coefficient A/area to
+# the layer resolution of this coarse mesh (2 %)
+math(EXPR diff "${a_mant} - ${b_mant}")
+if(diff LESS 0)
+    math(EXPR diff "-(${diff})")
+endif()
+math(EXPR tol "${a_mant}/50")
+if(NOT CMAKE_MATCH_3 STREQUAL a_exp OR diff GREATER tol)
+    message(FATAL_ERROR "|b_tot(m)| and |A/area| differ: ${out}")
+endif()
+if(NOT EXISTS "${WORK}/t_helicity.dat")
+    message(FATAL_ERROR "t_helicity.dat not written")
+endif()

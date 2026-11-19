@@ -6,7 +6,7 @@ program test_vacuum_surfaces
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_coils_3d
     use milca_vacuum_surfaces
-!$  use omp_lib
+    !$  use omp_lib
     implicit none
     real(dp), parameter :: pi = 3.14159265358979323846_dp
     real(dp), parameter :: r0 = 6.5_dp, c = 0.8_dp, amax = 1.8_dp, fconst = 33.0_dp
@@ -19,6 +19,7 @@ program test_vacuum_surfaces
     call test_single_harmonic()
     call test_eqdsk_round_trip()
     call test_resolution_and_threads()
+    call test_boundary_in_last_cell()
     if (failures > 0) then
         print '(a,i0,a)', 'test_vacuum_surfaces: ', failures, ' failure(s)'
         error stop 1
@@ -56,16 +57,49 @@ contains
         real(dp), allocatable :: psirz(:, :), f(:)
         integer :: st
         call grid_arrays(psirz, f)
-       call psi_grid_init(gg, psirz, 4.5_dp, 4.0_dp, 0.0_dp, 4.0_dp, 6.45_dp, 0.05_dp, &
-                           c*amax**2, ip, f, st)
+        call psi_grid_init(gg, psirz, 4.5_dp, 4.0_dp, 0.0_dp, 4.0_dp, 6.45_dp, 0.05_dp, &
+                            c*amax**2, ip, f, st)
         if (st /= 0) error stop 'grid'
+    end subroutine
+
+    subroutine test_boundary_in_last_cell()
+        !! Boundary half a cell inside the grid edge (a tight G-EQDSK grid):
+        !! every ray reaches psin = 1 at the analytic radius amax.
+        integer, parameter :: ng = 41
+        type(psi_grid_t) :: gt
+        real(dp), allocatable :: psirz(:, :), f(:)
+        real(dp) :: w, rho, err
+        integer :: i, j, st
+        logical :: ok, all_ok
+        w = amax*(ng - 1)/(ng - 2.0_dp)
+        allocate (psirz(ng, ng), f(ng))
+        do j = 1, ng
+            do i = 1, ng
+                psirz(i, j) = c*((-w + 2*w*(i - 1)/(ng - 1))**2 &
+                                 + (-w + 2*w*(j - 1)/(ng - 1))**2)
+            end do
+        end do
+        f = fconst
+        call psi_grid_init(gt, psirz, r0 - w, 2*w, 0.0_dp, 2*w, r0 + 0.05_dp, 0.05_dp, &
+                           c*amax**2, ip, f, st)
+        if (st /= 0) error stop 'tight grid'
+        all_ok = .true.
+        err = 0
+        do i = 0, 7
+            call flux_ray_point(gt, 1.0_dp, i*pi/4, rho, ok)
+            all_ok = all_ok .and. ok
+            if (ok) err = max(err, abs(rho - amax)/amax)
+        end do
+        call check('psin = 1 rays found on a tight grid (failures)', &
+                   merge(0.0_dp, 1.0_dp, all_ok), 0.0_dp)
+        call check('psin = 1 radius on a tight grid (relative)', err, 1.0e-3_dp)
     end subroutine
 
     subroutine test_geometry()
         type(surface_t) :: s
         real(dp) :: r, kappa, qex, e_q, e_h, e_p, th, hp, pp
         integer :: j, st
-       call check('axis position error', abs(g%r_axis - r0) + abs(g%z_axis), 1.0e-12_dp)
+        call check('axis position error', abs(g%r_axis - r0) + abs(g%z_axis), 1.0e-12_dp)
         call surface_build(g, 0.5_dp, 96, s, st)
         r = amax*sqrt(0.5_dp)
         qex = -fconst/(2*c*sqrt(r0**2 - r**2))
@@ -109,7 +143,7 @@ contains
             bmn(m0) = 0
             err = max(err, maxval(abs(bmn)))
         end do
-       call check('single harmonic recovered in PEST and Hamada angle', err, 1.0e-12_dp)
+        call check('single harmonic recovered in PEST and Hamada angle', err, 1.0e-12_dp)
     end subroutine
 
     subroutine test_eqdsk_round_trip()
@@ -129,7 +163,7 @@ contains
         do j = 1, 3
             write (unit, '(5es16.9)') (0.0_dp, i=1, size(f))
         end do
-     write (unit, '(5es16.9)') ((psirz(i, j), i=1, size(psirz, 1)), j=1, size(psirz, 2))
+        write (unit, '(5es16.9)') ((psirz(i, j), i=1, size(psirz, 1)), j=1, size(psirz, 2))
         close (unit, status='keep')
         call eqdsk_read('test_vacuum_surfaces.eqdsk', h, st)
         call check('EQDSK read status', real(st, dp), 0.0_dp)
@@ -201,7 +235,7 @@ contains
         e1 = maxval(abs(a - ref))/scale
         e2 = maxval(abs(b - ref))/scale
         e3 = maxval(abs(cc - ref))/scale
-      print '(a,3es12.3)', 'b_mn error vs ntheta=128, ntheta = 32, 48, 64: ', e1, e2, e3
+        print '(a,3es12.3)', 'b_mn error vs ntheta=128, ntheta = 32, 48, 64: ', e1, e2, e3
         call check('b_mn error ntheta=48 below ntheta=32 (ratio)', e2/e1, 1.0e-3_dp)
         call check('b_mn converged at ntheta = 64 (relative)', e3, 1.0e-8_dp)
         call vacuum_bmn(set, w, 0.8_dp, 128, 96, 3, a, angle_pest)
@@ -215,9 +249,9 @@ contains
         call vacuum_bmn(set, w, 0.8_dp, 256, 192, 3, cc, angle_hamada)
         call check('Hamada b_mn converged ntheta 128 vs 256 (relative)', &
                    maxval(abs(b - cc))/maxval(abs(cc)), 1.0e-6_dp)
-!$      call omp_set_num_threads(1)
+        !$      call omp_set_num_threads(1)
         call vacuum_bmn(set, w, 0.8_dp, 128, 192, 3, t1, angle_pest)
-!$      call omp_set_num_threads(4)
+        !$      call omp_set_num_threads(4)
         call vacuum_bmn(set, w, 0.8_dp, 128, 192, 3, t4, angle_pest)
         call check('b_mn thread invariance max|diff|', maxval(abs(t1 - t4)), 0.0_dp)
     end subroutine
