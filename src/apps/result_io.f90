@@ -13,7 +13,7 @@ module milca_result_io
         compiler_options
     use netcdf, only: nf90_create, nf90_close, nf90_def_dim, nf90_def_var, &
         nf90_put_att, nf90_put_var, nf90_enddef, nf90_redef, nf90_strerror, &
-        NF90_NOERR, NF90_NETCDF4, NF90_CLOBBER, NF90_DOUBLE, NF90_GLOBAL
+        NF90_NOERR, NF90_NETCDF4, NF90_CLOBBER, NF90_DOUBLE, NF90_GLOBAL, NF90_CHAR
     implicit none
     private
     public :: runtime_git
@@ -21,7 +21,7 @@ module milca_result_io
 
     !> Directory that receives every application result.
     character(len=*), parameter, public :: result_directory = 'output'
-    character(len=*), parameter, public :: result_schema = 'milca-result-v1'
+    character(len=*), parameter, public :: result_schema = 'milca-result-v2'
     character(len=*), parameter :: no_config = &
         '(no configuration file; all defaults)'
 
@@ -199,8 +199,9 @@ contains
         call this%attribute('milca_application', run%name)
         call this%attribute('milca_command_line', run%command_line)
         call this%attribute('milca_config_path', nonempty(run%config_path))
-        call this%attribute('milca_config_literal', nonempty(run%literal))
-        call this%attribute('milca_config_resolved', run%resolved)
+        ! configurations can exceed the 64 kB limit of an HDF5 attribute
+        call text_variable(this, 'milca_config_literal', nonempty(run%literal))
+        call text_variable(this, 'milca_config_resolved', run%resolved)
         call this%attribute('milca_git_commit', milca_git_commit)
         call this%attribute('milca_git_tree', milca_git_dirty)
         call this%attribute('milca_git_runtime_commit', commit)
@@ -226,6 +227,18 @@ contains
         if (this%ncid < 0) return
         call check(nf90_close(this%ncid), this%path)
         this%ncid = -1
+    end subroutine
+
+    !> Text of any length as a character variable over `<name>_length`.
+    subroutine text_variable(this, name, text)
+        class(result_file_t), intent(inout) :: this
+        character(len=*), intent(in) :: name, text
+        integer :: dim, varid
+        call check(nf90_def_dim(this%ncid, name//'_length', len(text), dim), this%path)
+        call check(nf90_def_var(this%ncid, name, NF90_CHAR, [dim], varid), this%path)
+        call check(nf90_enddef(this%ncid), this%path)
+        call check(nf90_put_var(this%ncid, varid, text), this%path)
+        call check(nf90_redef(this%ncid), this%path)
     end subroutine
 
     !> Global text attribute (e.g. an application-level certificate summary).

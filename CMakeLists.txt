@@ -24,7 +24,7 @@ include_directories(${CMAKE_Fortran_MODULE_DIRECTORY})
 # Dependency pins: one source used by FetchContent and by result provenance.
 set(MILCA_FORTPLOT_REVISION "1645fa41c11b5786c71bc27e5b41dae7c7bbba23")
 set(MILCA_FORTNUM_REVISION "fe1e48772f7a41304d67ad626fa7158a452a8169")
-set(MILCA_FORTIO_REVISION 38add03dc691a7cd4715cd3e611ad42422e46091)
+set(MILCA_FORTIO_REVISION 32a486e1efa507503b456fe49be4b21e32832459)
 set(FORTPLOT_BUILD_FORTARRAY_ADAPTER OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(fortplot
     GIT_REPOSITORY https://github.com/lazy-fortran/fortplot.git

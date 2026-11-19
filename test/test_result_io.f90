@@ -8,6 +8,8 @@ program test_result_io
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortio, only: fortio_file_t, fortio_status_t, hdf5_attribute_t
     use milca_result_io, only: run_t, result_file_t
+    use netcdf, only: nf90_open, nf90_close, nf90_inq_varid, nf90_inq_dimid, &
+        nf90_inquire_dimension, nf90_get_var, nf90_strerror, NF90_NOWRITE, NF90_NOERR
     implicit none
     real(dp) :: scale = 1.5_dp
     integer :: count = 3
@@ -59,6 +61,8 @@ program test_result_io
     call result%write('cube', cube, 's', 'rank-3 probe')
     call result%close()
 
+    if (text('milca_config_resolved') /= run%resolved) error stop 'resolved configuration'
+    if (text('milca_config_literal') /= run%literal) error stop 'literal configuration'
     call file%open('output/test_result_io.nc', status)
     call require(status, 'open')
     call file%read('scale', back0, status); call require(status, 'scale')
@@ -76,14 +80,30 @@ program test_result_io
     call expect(attributes, 'milca_status', 'certified-discrete')
     call file%get_attributes('/', attributes, status); call require(status, 'globals')
     call expect(attributes, 'milca_application', 'test_result_io')
-    call expect(attributes, 'milca_config_resolved', run%resolved)
-    call expect(attributes, 'milca_config_literal', run%literal)
     call expect(attributes, 'probe_argument', trim(argument))
     call file%close(status)
     call require(status, 'close')
     print '(a)', 'result_io round trip PASS'
 
 contains
+
+    function text(name) result(value)
+        ! a character variable of the result file
+        character(len=*), intent(in) :: name
+        character(len=:), allocatable :: value
+        integer :: ncid, varid, dimid, n, code
+        code = nf90_open('output/test_result_io.nc', NF90_NOWRITE, ncid)
+        if (code /= NF90_NOERR) then
+            print '(a)', trim(nf90_strerror(code))
+            error stop 'open for text'
+        end if
+        if (nf90_inq_dimid(ncid, name//'_length', dimid) /= NF90_NOERR) error stop name
+        if (nf90_inquire_dimension(ncid, dimid, len=n) /= NF90_NOERR) error stop name
+        if (nf90_inq_varid(ncid, name, varid) /= NF90_NOERR) error stop name
+        allocate (character(len=n) :: value)
+        if (nf90_get_var(ncid, varid, value) /= NF90_NOERR) error stop name
+        if (nf90_close(ncid) /= NF90_NOERR) error stop 'close for text'
+    end function
 
     subroutine require(status, what)
         type(fortio_status_t), intent(in) :: status

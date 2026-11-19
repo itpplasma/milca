@@ -77,8 +77,11 @@ Status 2026-10-05. Every application in `app/` uses `milca_io`
 - The result is `output/<application>.nc` (NetCDF-4/HDF5). It holds named
   double variables (scalar to rank 3) with `units`, `long_name` and, where the
   application has one, `milca_status` (candidate, certified-discrete,
-  sampling interval, measurement, ...). Global attributes hold the literal
-  file text, the resolved namelist after automatic choices, the command line,
+  sampling interval, measurement, ...). The character variables
+  `milca_config_literal` and `milca_config_resolved` hold the literal file
+  text and the resolved namelist after automatic choices, because a
+  configuration can exceed the 64 kB of an HDF5 attribute (schema
+  `milca-result-v2`). Global attributes hold the command line,
   the build-time git commit and tree state and a runtime recheck of both, the
   build type/flags, `compiler_version()`/`compiler_options()`, the
   FortSym/FortNum/fortplot/FortIO revisions and the UTC creation time.
