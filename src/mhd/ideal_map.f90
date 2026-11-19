@@ -67,6 +67,7 @@ module milca_ideal_map
     private
     public :: ideal_map_t, ideal_frozen_t
     public :: ideal_map_init, ideal_map_freeze, ideal_map_energy, ideal_map_hessian
+    public :: ideal_map_hvp
     public :: ideal_map_solve, ideal_map_point, ideal_map_dof, ideal_map_mode_norms
     public :: ideal_map_reduce, ideal_map_expand, ideal_map_rdof, ideal_map_axis_dof
     public :: ideal_map_prolong, ideal_map_residual, ideal_map_position_gauge
@@ -1754,6 +1755,163 @@ contains
         call csr_assemble_blocks(matrix, map%redconn, blocks, symmetric=.true.)
         !$omp atomic
         hessian_stamp = hessian_stamp + 1
+    end subroutine
+
+    subroutine ideal_map_hvp(map, x, direction, product, status)
+        ! Reduced Hessian-vector product P^T H P d of the energy at x without the
+        ! assembled Hessian: the direction is evaluated on the toroidal planes,
+        ! contracted with the point Hessians d2w/dv2 of v = (q, dq/ds) at every
+        ! quadrature point and plane, and projected back onto the Fourier
+        ! coefficients, with the omega gauge of the cells. Memory O(nodes nphi);
+        ! the same point leaves as ideal_map_hessian, so the product agrees with
+        ! the assembled matrix to roundoff. Field-angle coefficients enter
+        ! through b = b0 + B eta with the mixed and angle blocks of
+        ! hessian_angle.
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :), direction(:)
+        real(dp), intent(out) :: product(:)
+        integer, intent(out) :: status
+        real(dp), allocatable :: d(:), y(:), dq(:, :, :, :), acc(:, :, :, :), et(:), ep(:)
+        real(dp), allocatable :: deta(:), yeta(:)
+        real(dp) :: hp(78), hv(12, 12), dv(12), r(12), w, jac, gv(12), bp(3), weight, dphi
+        real(dp) :: f(0:3), t, hbb(6), hvb(12, 3), h3(3, 3), db(3), z(3)
+        integer :: e, g, j, a, node, m, k, i, l, c
+        integer :: pi_(78), pj_(78), na, nc
+        status = IDEAL_MAP_BAD_INPUT
+        product = 0
+        if (size(direction) /= map%nred .or. size(product) /= map%nred) return
+        do k = 1, 78
+            call packed_pair(k, pi_(k), pj_(k))
+        end do
+        allocate (d(map%ndof), y(map%ndof))
+        call ideal_map_expand(map, direction, d)
+        ! direction on the planes: dq(:, 1, j, node) values, dq(:, 2, j, node)
+        ! toroidal derivatives
+        allocate (dq(3, 2, map%nphi, map%nodes), acc(3, 4, map%nphi, map%nodes))
+        !$omp parallel do default(shared) private(node, j, m, k) schedule(static)
+        do node = 1, map%nodes
+            dq(:, :, :, node) = 0
+            do j = 1, map%nphi
+                do m = 1, map%nmode
+                    k = ideal_map_dof(map, 1, m, node)
+                    dq(:, 1, j, node) = dq(:, 1, j, node) + d(k:k + 2)*map%trig(m, j)
+                    dq(:, 2, j, node) = dq(:, 2, j, node) + d(k:k + 2)*map%dtrig(m, j)
+                end do
+            end do
+        end do
+        !$omp end parallel do
+        acc = 0
+        dphi = 2*acos(-1.0_dp)/(map%nfp*map%nphi)
+        na = map%nangle
+        nc = 3*map%nmode*map%nodes
+        allocate (deta(na), yeta(na))
+        deta = d(nc + 1:nc + na); yeta = 0
+        !$omp parallel default(shared) private(e, g, j, a, node, hp, hv, dv, r, w, &
+        !$omp jac, gv, bp, weight, f, i, l, c, k, et, ep, hbb, hvb, h3, db, z) &
+        !$omp reduction(+: yeta)
+        allocate (et(na), ep(na))
+        !$omp do schedule(dynamic)
+        do e = 1, map%cells
+            do g = 1, map%nq
+                weight = map%weight(g)*dphi
+                do j = 1, map%nphi
+                    call point_density(map, map%angle, e, g, j, bp, et, ep)
+                    call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                    do k = 1, 78
+                        hv(pi_(k), pj_(k)) = hp(k); hv(pj_(k), pi_(k)) = hp(k)
+                    end do
+                    dv = 0
+                    do a = 1, map%nloc
+                        node = map%conn(a, e)
+                        dv(1:3) = dv(1:3) + map%shape(a, g)*dq(:, 1, j, node)
+                        dv(4:6) = dv(4:6) + map%dshape(1, a, g)*dq(:, 1, j, node)
+                        dv(7:9) = dv(7:9) + map%dshape(2, a, g)*dq(:, 1, j, node)
+                        dv(10:12) = dv(10:12) + map%shape(a, g)*dq(:, 2, j, node)
+                    end do
+                    r = weight*matmul(hv, dv)
+                    if (na > 0) then
+                        ! b = b0 + B eta: d2w/dv db B deta into the map rows,
+                        ! B^T (d2w/db2 B deta + d2w/db dv dv) into the angle rows
+                        call point_field(map, e, g, j, x, bp, hbb, hvb)
+                        db = map%angle_form(:, 1, g, e)*dot_product(et, deta) &
+                            + map%angle_form(:, 2, g, e)*dot_product(ep, deta)
+                        h3 = reshape([hbb(1), hbb(2), hbb(4), hbb(2), hbb(3), hbb(5), &
+                            hbb(4), hbb(5), hbb(6)], [3, 3])
+                        r = r + weight*matmul(hvb, db)
+                        z = weight*(matmul(h3, db) + matmul(transpose(hvb), dv))
+                        yeta = yeta + et*dot_product(map%angle_form(:, 1, g, e), z) &
+                            + ep*dot_product(map%angle_form(:, 2, g, e), z)
+                    end if
+                    do a = 1, map%nloc
+                        node = map%conn(a, e)
+                        f(0) = map%shape(a, g); f(1) = map%dshape(1, a, g)
+                        f(2) = map%dshape(2, a, g)
+                        do c = 1, 3
+                            !$omp atomic
+                            acc(c, 1, j, node) = acc(c, 1, j, node) + f(0)*r(c) &
+                                + f(1)*r(3 + c) + f(2)*r(6 + c)
+                            !$omp atomic
+                            acc(c, 2, j, node) = acc(c, 2, j, node) + f(0)*r(9 + c)
+                        end do
+                    end do
+                end do
+            end do
+        end do
+        !$omp end do
+        deallocate (et, ep)
+        !$omp end parallel
+        y = 0
+        y(nc + 1:nc + na) = yeta
+        !$omp parallel do default(shared) private(node, j, m, k, t) schedule(static)
+        do node = 1, map%nodes
+            do m = 1, map%nmode
+                k = ideal_map_dof(map, 1, m, node)
+                do j = 1, map%nphi
+                    y(k:k + 2) = y(k:k + 2) + acc(:, 1, j, node)*map%trig(m, j) &
+                        + acc(:, 2, j, node)*map%dtrig(m, j)
+                end do
+            end do
+        end do
+        !$omp end parallel do
+        ! omega gauge of the cells on (omega, mode 1)
+        if (allocated(map%omega_gauge)) then
+            do e = 1, map%cells
+                do a = 1, map%nloc
+                    i = ideal_map_dof(map, 3, 1, map%conn(a, e))
+                    do l = 1, map%nloc
+                        y(i) = y(i) + map%omega_gauge(a, l, e) &
+                            *d(ideal_map_dof(map, 3, 1, map%conn(l, e)))
+                    end do
+                end do
+            end do
+        end if
+        call ideal_map_reduce(map, y, product)
+        status = IDEAL_MAP_OK
+    contains
+        subroutine packed_pair(n, pi, pj)
+            ! (row, column) of entry n of the hp packing (gen/gen_ideal_map.f90)
+            integer, intent(in) :: n
+            integer, intent(out) :: pi, pj
+            integer :: tt
+            if (n <= 45) then
+                pj = 1
+                do while (pj*(pj + 1)/2 < n)
+                    pj = pj + 1
+                end do
+                pi = n - pj*(pj - 1)/2
+            else if (n <= 72) then
+                tt = n - 46
+                pj = 10 + tt/9
+                pi = 1 + mod(tt, 9)
+            else
+                tt = n - 73
+                pj = 10
+                do while ((pj - 9)*(pj - 8)/2 < tt + 1)
+                    pj = pj + 1
+                end do
+                pi = 10 + tt - (pj - 10)*(pj - 9)/2
+            end if
+        end subroutine
     end subroutine
 
     subroutine hessian_angle(map, x, nr, blocks)

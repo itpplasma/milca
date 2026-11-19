@@ -307,6 +307,13 @@ must not be positive (a plain gradient decrease test kept the damping at
 the near-null valleys). A trust
 region caps the nodal displacement at 5% of the reference extent and omega at
 1 rad per step, because the near-null directions carry large Newton components.
+`ideal_map_hvp` gives the reduced Hessian-vector product P^T H P d without
+the assembled matrix: the direction is evaluated on the toroidal planes,
+contracted with the same point Hessians (and the field-angle blocks of
+`hessian_angle`) at every quadrature point and plane, and projected back onto
+the Fourier coefficients, in O(nodes nphi) memory. CTest `ideal_map_hvp`
+requires agreement with the assembled matrix to 1e-12 (observed 6e-16 to
+8e-16, with and without the field angle).
 Converged when the reduced free gradient falls by 1e-6 (tests; seed ladders
 stop at 1e-11 x the gradient of X0 = id). Element energy, gradient and
 Hessian blocks are OpenMP-parallel over cells. The report gives wall time for
