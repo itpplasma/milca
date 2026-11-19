@@ -223,7 +223,7 @@ NEO-2-QL (tokamak, quasilinear NTV and neoclassical transport):
 | E_r from the radial force balance (`isw_calc_er = 1`) and the rotation profile | covered: Omega_tE within 1.4 %, V_phi/R within 1.1 % on device case |
 | local parallel flow and current over the surface | covered for the axisymmetric response (exact u_par B = omega G + K B^2 check) |
 | collision models: full operator, test particle, pitch-angle scattering | covered; a device case profile against NEO-2 lag 10 with both, and lag 14 as basis check |
-| misaligned-potential drive with local current (NEO-2 pull request 240, draft) | open: waits for the NEO-2 implementation to pass its own acceptance; then one more right-hand side and the local current of the non-axisymmetric solve |
+| misaligned-potential drive with local current (NEO-2 pull request 240, draft) | covered on general 3D surfaces for any (m, n) of a prescribed Phi_1: `surface_transport` with `phi1`, local flow checked by surface continuity to 1e-14 ([spec](drift-kinetics.md#prescribed-in-surface-potential-and-local-parallel-flow-220-221)); SFINCS response comparison open |
 | quasineutral Phi_1 on the surface | open: a bordered unknown per angle in the multispecies solve, after 240 |
 
 NEO-2-PAR (stellarator transport, relativistic operator):

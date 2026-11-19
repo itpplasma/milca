@@ -238,8 +238,22 @@ contains
     !> electric drift. full_local_electric includes electric speed and pitch
     !> advection with the same per-speed distribution constraint. d_drate
     !> holds field, species and collision inputs fixed.
+    !>
+    !> phi1(n_theta, n_zeta) is a prescribed in-surface potential in volts on
+    !> the grid of b. Its radial E x B drift acts on the Maxwellian gradient:
+    !>   v_E.grad psi / v_d.grad psi = Z e B d_perp Phi_1 / (T x^2 (1 + xi^2) d_perp B),
+    !> d_perp = d_theta - (I/G) d_zeta, so its source is the radial-drive row
+    !> with (1 + xi^2) x^2 tz b_drift/b replaced by d_perp Phi_1 (P_0 only).
+    !> d_phi(a, sb, i, jf) holds the moments of d for the response of species
+    !> a to this drive with force jf = 1, 2 of species sb (per unit force).
+    !> flow_local(i, a, sb, jf) is the local parallel flow U at point i of the
+    !> response to drive jf = 1..3, normalised so that <b U> = d(a, sb, 3, jf)
+    !> with <.> of weight 1/b^2; flow_local_phi(i, a, sb, jf) the same for the
+    !> phi1 drive, <b U> = d_phi(a, sb, 3, jf). Point i = i_theta +
+    !> n_theta (i_zeta - 1).
     subroutine surface_transport(b, nper, q, i_over_g, kappa, species, lnlambda, grid, &
-            model, n_leg, d, iterations, status, electric_rate, d_drate, full_local_electric)
+            model, n_leg, d, iterations, status, electric_rate, d_drate, full_local_electric, &
+            phi1, d_phi, flow_local, flow_local_phi)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa
         integer, intent(in) :: nper, n_leg
         type(collop_species_t), intent(in) :: species(:)
@@ -251,13 +265,17 @@ contains
         real(dp), intent(in), optional :: electric_rate
         real(dp), intent(out), optional :: d_drate(:, :, :, :)
         logical, intent(in), optional :: full_local_electric
+        real(dp), intent(in), optional :: phi1(:, :)
+        real(dp), intent(out), optional :: d_phi(:, :, :, :), flow_local(:, :, :, :), &
+            flow_local_phi(:, :, :, :)
         type(mono_factor_t) :: geo
         type(mono_factor_t), allocatable :: modes(:)
         type(surface_full_exb_t) :: full_exb
         real(dp), allocatable :: rows(:, :, :, :, :), ratio(:, :), d3(:), d4(:), d6(:), &
             vt(:), tz(:), coll(:, :, :), lo(:, :, :), up(:, :, :), v(:, :), vu(:, :), &
             rinv(:), rhs(:, :, :), x(:, :, :), radial(:), measure(:), bv(:), &
-            electric_unit(:), electric_rows(:), dx(:, :, :)
+            electric_unit(:), electric_rows(:), dx(:, :, :), d_par(:, :), b_par(:), &
+            b_drift(:), d_perp(:, :), dphi(:)
         real(dp) :: j0, rate
         integer :: n, lmax, ns, nx, nm, a, sb, jf, k, l, st, its
         logical :: full
@@ -266,6 +284,25 @@ contains
         iterations = 0
         ns = size(species)
         if (any(shape(d) /= [ns, ns, 3, 3]) .or. mod(n_leg, 2) /= 0) return
+        if (present(d_phi) .or. present(flow_local_phi)) then
+            if (.not. present(phi1)) return
+        end if
+        if (present(phi1)) then
+            if (any(shape(phi1) /= shape(b))) return
+            if (.not. all(ieee_is_finite(phi1))) return
+        end if
+        if (present(d_phi)) then
+            if (any(shape(d_phi) /= [ns, ns, 3, 2])) return
+            d_phi = 0
+        end if
+        if (present(flow_local)) then
+            if (any(shape(flow_local) /= [size(b), ns, ns, 3])) return
+            flow_local = 0
+        end if
+        if (present(flow_local_phi)) then
+            if (any(shape(flow_local_phi) /= [size(b), ns, ns, 2])) return
+            flow_local_phi = 0
+        end if
         rate = 0
         full = .false.
         if (present(full_local_electric)) full = full_local_electric
@@ -344,6 +381,7 @@ contains
                 end if
                 do a = 1, ns
                     d(a, sb, :, jf) = moments(x, a)
+                    if (present(flow_local)) flow_local(:, a, sb, jf) = local_flow(x, a)
                 end do
                 if (.not. present(d_drate)) cycle
                 if (full) then
@@ -365,8 +403,52 @@ contains
                 end do
             end do
         end do
+        if (present(phi1) .and. (present(d_phi) .or. present(flow_local_phi))) then
+            call mono_surface_operators(b, nper, q, i_over_g, d_par, b_par, b_drift, st, d_perp)
+            if (st /= MONO_OK) then
+                status = SURFACE_BAD_INPUT
+                return
+            end if
+            dphi = matmul(d_perp, reshape(phi1, [n]))
+            do sb = 1, ns
+                do jf = 1, 2
+                    rhs = 0
+                    do k = 1, nx
+                        associate (m => (sb - 1)*nx + k, row => ratio(k, sb)/(vt(sb)*d3(k)))
+                            rhs(:, 0, m) = row*merge(d4(k), d6(k), jf == 1) &
+                                /grid%x(k + 1)**2*dphi/q
+                        end associate
+                    end do
+                    call solve(rhs, x, its, st)
+                    iterations = iterations + its
+                    if (st /= SURFACE_OK) then
+                        status = st
+                        return
+                    end if
+                    do a = 1, ns
+                        if (present(d_phi)) d_phi(a, sb, :, jf) = moments(x, a)
+                        if (present(flow_local_phi)) flow_local_phi(:, a, sb, jf) = &
+                            local_flow(x, a)
+                    end do
+                end do
+            end do
+        end if
         status = SURFACE_OK
     contains
+        !> U(i) with <b U> = moments(h, a)(3).
+        function local_flow(h, species_index) result(value)
+            real(dp), intent(in) :: h(:, 0:, :)
+            integer, intent(in) :: species_index
+            real(dp) :: value(n)
+            integer :: k, m
+            value = 0
+            do k = 1, nx
+                m = (species_index - 1)*nx + k
+                value = value + d3(k)*h(:, 1, m)
+            end do
+            value = vt(species_index)/sqrt(pi)*2/3.0_dp*value
+        end function local_flow
+
         function moments(h, species_index) result(value)
             real(dp), intent(in) :: h(:, 0:, :)
             integer, intent(in) :: species_index

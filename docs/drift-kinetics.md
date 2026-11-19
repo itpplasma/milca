@@ -413,6 +413,63 @@ radial fluxes of a nearly symmetric 3D surface. It costs 1.6 s against 624 s
 for model 3 with the l <= 1 preconditioner on the helical surface (same
 speed grid and Legendre resolution, loaded 28-core node).
 
+### Prescribed in-surface potential and local parallel flow (#220, #221)
+
+`surface_transport` accepts a prescribed potential \(\Phi_1(\theta,\zeta)\) in
+volts on the grid of \(b\) and returns the response of every species to it
+(`d_phi`), together with the local parallel flow \(U(\theta,\zeta)\) of each
+standard drive (`flow_local`) and of the potential drive (`flow_local_phi`).
+With \(g = f_1 + Ze\Phi_1 f_M/T\) the parallel electric field of \(\Phi_1\) is
+absorbed, and the linearised equation keeps one new source, the radial
+\(E\times B\) drift acting on the Maxwellian gradient:
+
+\[
+v_\parallel \nabla_\parallel g + (\mathbf v_d + \mathbf v_E)\cdot\nabla\psi\,
+\partial_\psi f_M = C(g), \qquad
+\frac{\mathbf v_E\cdot\nabla\psi}{\mathbf v_d\cdot\nabla\psi}
+= \frac{ZeB\,d_\perp\Phi_1}{T x^2 (1+\xi^2)\, d_\perp B},
+\]
+
+with \(d_\perp = \partial_\theta - (I/G)\partial_\zeta\), the same operator as
+the magnetic drift. The source is therefore the radial-drive row with
+\((1+\xi^2)x^2 (T/Ze)\, d_\perp b/b\) replaced by \(d_\perp\Phi_1\): pure
+\(P_0\), speed weight \(x^0\), and the same forces \(f_1, f_2\). For an
+\(n=0\) harmonic in an axisymmetric field it equals
+\((G/\iota B^2)\,\mathbf B\cdot\nabla\Phi_1\) and gives local parallel flow
+without a surface-averaged radial flux. The flow is normalised so that
+\(\langle bU\rangle\) (weight \(1/b^2\)) equals the parallel-flow entry of the
+same drive, and \(u_\parallel = 2 s U f\) in SI with \(s = q/(1+(I/G)/q)\), as
+in `surface_fluxes`. The same source form is used by SFINCS with
+`readExternalPhi1` (`evaluateResidual.F90` at the commit below).
+
+Verification (`test_surface_phi1`):
+
+- `continuity`: particle conservation fixes the local flow of every drive up
+  to a constant,
+  \(B^2(\iota\partial_\theta+\partial_\zeta)(u_\parallel/B) + G S =
+  \mathrm{const}\), with \(S = (T/ZeB)\,d_\perp B\,(2f_1+5f_2)\) for the
+  magnetic drift and \(S = d_\perp\Phi_1 (f_1+\tfrac32 f_2)\) for the
+  \(E\times B\) drift (Maxwellian moments of \(x^2(1+\xi^2)(f_1+x^2f_2)\) and of
+  \(f_1+x^2f_2\)). It holds to \(10^{-14}\) with pitch-angle scattering for
+  both drives, which fixes the sign, density and energy weights of the new
+  source against the SFINCS-checked magnetic drive. With the full operator the
+  residual is the operator's density-conservation defect, first order in the
+  speed-element width (phi1 drive, force 1: \(2.1\times10^{-3}\) at 12
+  elements, \(1.0\times10^{-3}\) at 24; magnetic drive \(4\times10^{-4}\)).
+- `closure`: \(\langle bU\rangle\) reproduces the flow moments to
+  \(10^{-15}\), and a constant \(\Phi_1\) drives nothing.
+
+Open: the SFINCS `readExternalPhi1` run of the same case is not linear in
+\(\Phi_1\) and already differs from `includePhi1 = .false.` at \(\Phi_1 = 0\)
+([lessons](lessons/drift-kinetic-transport.md#7-implementation-and-toolchain-defects)),
+so a direct SFINCS comparison of the response is pending. Quasineutral
+\(\Phi_1\) (#224) and helical-core geometry (#222) build on this.
+
+Sources: [SFINCS](https://github.com/landreman/sfincs/tree/8df5453472e982df0f6ae005243ce38d57a83711)
+(BSD 2-Clause), `evaluateResidual.F90`;
+[NEO-2 pull request 240](https://github.com/itpplasma/NEO-2/pull/240)
+(misaligned-potential drive in NEO-2-QL, our code).
+
 ### K1 at low collisionality: pitch fitted to every local maximum
 
 Status: design, two variants to be built and compared (2026-11-09).
