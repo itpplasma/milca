@@ -2022,6 +2022,20 @@ milca_test_labels(ntv_boozer_line fast CLASSES apps TARGETS test_ntv_boozer_line
 target_include_directories(milca_io PRIVATE ${CMAKE_BINARY_DIR}/result_include)
 target_link_libraries(milca_io PUBLIC milca fortio::fortio)
 target_compile_options(milca_io PRIVATE -Wall -Wextra)
+# Foreign equilibrium inputs (GVEC, DESC, SPECTRE, VMEC) to nested_equilibrium's
+# namelist (docs/equilibrium-import.md).
+add_library(milca_importers src/import/import_text.f90 src/import/equilibrium_import.f90
+    src/import/import_vmec.f90 src/import/import_gvec.f90 src/import/import_desc_spectre.f90
+    src/import/import_any.f90)
+target_link_libraries(milca_importers PUBLIC fortnum fortio::fortio)
+target_compile_options(milca_importers PRIVATE -Wall -Wextra)
+add_executable(milca_import app/milca_import.f90)
+target_link_libraries(milca_import PRIVATE milca_importers)
+add_executable(test_equilibrium_import test/test_equilibrium_import.f90)
+target_link_libraries(test_equilibrium_import PRIVATE milca_importers)
+add_test(NAME equilibrium_import COMMAND test_equilibrium_import
+    ${CMAKE_BINARY_DIR}/equilibrium-import-test)
+milca_test_labels(equilibrium_import fast CLASSES apps TARGETS test_equilibrium_import)
 # Every application reads --config FILE and writes output/<name>.nc.
 foreach(application milca_demo steady_laboratory_demo transport_demo
         streaming_comparison_demo streaming_moments_demo debye_sphere_demo

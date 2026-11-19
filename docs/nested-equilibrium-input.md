@@ -4,8 +4,9 @@
 equilibrium (the D8 boundary/profile lane, [ideal-seed-3d](ideal-seed-3d.md))
 for a boundary, a toroidal flux and prescribed profiles, and writes the solved
 state's global quantities to `output/nested_equilibrium.nc`. It is the native
-entry for cross-code comparison with VMEC-class codes; converting a VMEC
-`&INDATA` deck into this namelist is the adapter's job, not MILCA's.
+entry for cross-code comparison with VMEC-class codes. `milca_import` writes
+this namelist from GVEC, DESC, SPECTRE and VMEC inputs
+([equilibrium-import](equilibrium-import.md)).
 
 ## Input: namelist `nested_input`
 
