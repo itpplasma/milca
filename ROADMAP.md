@@ -57,8 +57,8 @@ MILCA cannot take is classified as unsupported input, conversion failure,
 solver failure or timeout. G-gates are those of
 [islands](docs/island-equilibrium.md#verification-ladder-before-machines).
 
-E1 to E5 (nested) and E6 to E10 (islands) are two chains, each in order; E4
-needs only E2. A failed gate is recorded with its cause, not relaxed, and the
+E1 to E5 and E11 (nested) and E6 to E10 and E12 (islands) are two chains,
+each in order. E4 needs only E2, E11 needs E1, and E12 needs E7 and E11. A failed gate is recorded with its cause, not relaxed, and the
 existing convergence gates of the non-nested (NN1, NN2), island and Beltrami
 lanes stay.
 
@@ -74,6 +74,8 @@ lanes stay.
 | E8 | islands, free boundary: W7-X vacuum, classical stellarator at finite beta | SPECTRE | G8 and G7 |
 | E9 | island divertor and stochastic edge: W7-X 5/5, 5/4, 5/6 at finite beta with open field lines and sheath boundary data; LHD n = 1 resonant perturbation; the stochastic edge of the CFQS stellarator | SPECTRE on closed field lines; HINT and PIES published results | G10 for W7-X and LHD; CFQS against published HINT field-line plots; open-field-line cases by internal convergence only |
 | E10 | machine resolution: matrix-free actions, mode-block preconditioning, hp refinement at islands | SPECTRE, SIESTA | time and memory at matched island observables at most those of the fastest comparator |
+| E11 | profiles as the frozen flux form (0, chi'(s), Phi'(s)) with chi'^2 + Phi'^2 > 0 instead of iota and Phi: axisymmetric reversed-field pinch through its reversal surface Phi' = 0, then a single-helical-axis pinch state | VMEC2000 with LRFP (poloidal-flux label); SPEC for the helical state | as E1; reversal surface and helical axis within the estimated error |
+| E12 | n = 0 resonance: tokamak with iota through zero, where every n = 0 displacement is resonant; inertia of the constrained Hessian at the iota = 0 surface under refinement, then the state with n = 0 islands (ideal current sheet and relaxed) | PARVMEC (nested state); SPEC | inertia reported under refinement; island observables as E6 |
 
 ### P1e procedure
 
