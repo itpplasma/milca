@@ -136,7 +136,7 @@ contains
         allocate (surface%edge(2, 0:fb%order, fb%nedge), &
                   surface%parameters(2, 3, nf), surface%panel_edge(nf), faces(3, nf))
         do e = 1, fb%nedge
-            surface%edge(:, :, e) = fb%position(:, fb%edge(:, e))
+            surface%edge(:, :, e) = fb%reference(:, fb%edge(:, e))
         end do
         p = 0
         do j = 1, nphi

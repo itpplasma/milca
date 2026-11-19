@@ -190,7 +190,8 @@ module milca_ideal_free_boundary
         real(dp), allocatable :: reference(:, :)
         ! Physical rest position of the shell nodes (Gamma_c: the fixed
         ! coupling surface; elsewhere any point with the constraint rows
-        ! satisfied). Equal to reference unless ideal_fb_init got positions.
+        ! satisfied). Allocated only when ideal_fb_init got positions;
+        ! otherwise the reference is the rest position (rest, rest_node).
         real(dp), allocatable :: position(:, :)
         ! Master derivatives of theta/(2 pi) and the reference det per point.
         real(dp), allocatable :: theta_s(:, :, :), det(:, :)
@@ -506,15 +507,16 @@ contains
             ! Shell numbering.
             fb%ns = count(in_shell); fb%ncell = cells - count(inside)
             allocate (fb%shell_global(fb%ns), fb%reference(2, fb%ns), &
-                fb%position(2, fb%ns), &
                 fb%role(fb%ns), fb%plasma_node(fb%ns), fb%conn(fb%nloc, fb%ncell))
             k = 0
             do a = 1, nodes
                 if (.not. in_shell(a)) cycle
                 k = k + 1; fb%shell_global(k) = a
                 fb%reference(:, k) = mesh%points(:, a)
-                fb%position(:, k) = mesh%points(:, a)
-                if (present(positions)) fb%position(:, k) = positions(:, a)
+                if (present(positions)) then
+                    if (.not. allocated(fb%position)) allocate (fb%position(2, fb%ns))
+                    fb%position(:, k) = positions(:, a)
+                end if
                 fb%role(k) = 2
                 fb%plasma_node(k) = number(a)
                 if (in_plasma(a)) fb%role(k) = 1
@@ -569,12 +571,34 @@ contains
             fb%lam(3, fb%nmode, fb%ns), fb%drive(fb%nt, fb%nmode), &
             fb%load(fb%nt, fb%nmode))
         fb%xs = 0; fb%phi = 0; fb%lam = 0; fb%drive = 0; fb%load = 0
-        fb%xs(1:2, 1, :) = fb%position
+        fb%xs(1:2, 1, :) = rest(fb)
         do k = 1, fb%ns
             if (fb%role(k) == 1) fb%xs(:, :, k) = fb%plasma%x(:, :, fb%plasma_node(k))
         end do
         status = IDEAL_FB_OK
     end subroutine
+
+    pure function rest(fb) result(y)
+        ! Physical rest positions of the shell nodes.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp) :: y(2, fb%ns)
+        if (allocated(fb%position)) then
+            y = fb%position
+        else
+            y = fb%reference
+        end if
+    end function
+
+    pure function rest_node(fb, k) result(y)
+        type(ideal_fb_t), intent(in) :: fb
+        integer, intent(in) :: k
+        real(dp) :: y(2)
+        if (allocated(fb%position)) then
+            y = fb%position(:, k)
+        else
+            y = fb%reference(:, k)
+        end if
+    end function
 
     pure logical function point_in_polygon(poly, p) result(inside)
         real(dp), intent(in) :: poly(:, :), p(2)
@@ -684,8 +708,8 @@ contains
                 x = x + w(j)*fb%reference(:, fb%edge(j, i))
                 tangent = tangent + dw(j)*fb%reference(:, fb%edge(j, i))
             else
-                x = x + w(j)*fb%position(:, fb%edge(j, i))
-                tangent = tangent + dw(j)*fb%position(:, fb%edge(j, i))
+                x = x + w(j)*rest_node(fb, fb%edge(j, i))
+                tangent = tangent + dw(j)*rest_node(fb, fb%edge(j, i))
             end if
         end do
     end subroutine
@@ -1099,7 +1123,7 @@ contains
             call edge_point(fb, i, 0.5_dp, q2(:, p), tq(:, p), w(0:fb%order))
         end do
         do col = 1, fb%nt
-            q2(:, nl + nd + col) = fb%position(:, fb%trace(col))
+            q2(:, nl + nd + col) = rest_node(fb, fb%trace(col))
             tq(:, nl + nd + col) = 0
         end do
         ! Trapezoid weights of the mean and the real harmonics (the DFT of
@@ -1295,7 +1319,7 @@ contains
             call edge_point(fb, i, 0.5_dp, pm(:, i), tm(:, i), w(0:fb%order))
         end do
         do col = 1, fb%nt
-            pt(:, col) = fb%position(:, fb%trace(col))
+            pt(:, col) = rest_node(fb, fb%trace(col))
         end do
         allocate (cl(3, 0:fb%ntor, nf, nl), sl(3, 0:fb%ntor, nf, nl), &
             cd(3, 0:0, nf, nd), sd(3, 0:0, nf, nd), &
@@ -1819,7 +1843,7 @@ contains
         real(dp), allocatable :: u(:, :, :)
         integer :: s, p
         u = fb%xs
-        u(1:2, 1, :) = u(1:2, 1, :) - fb%position
+        u(1:2, 1, :) = u(1:2, 1, :) - rest(fb)
         do s = 1, fb%ns
             select case (fb%role(s))
             case (1)
@@ -2982,7 +3006,7 @@ contains
         mean = 0; nb = 0; rms = 0
         do s = 1, fb%ns
             if (fb%role(s) /= 1) cycle
-            mean = mean + fb%xs(1:2, 1, s) - fb%position(:, s); nb = nb + 1
+            mean = mean + fb%xs(1:2, 1, s) - rest_node(fb, s); nb = nb + 1
             if (fb%nmode > 1) rms = rms + sum(fb%xs(1:2, 2:fb%nmode, s)**2)
         end do
         print '(a,2es12.4)', '   Gamma_p mean shift', mean/nb
