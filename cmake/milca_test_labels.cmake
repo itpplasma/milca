@@ -485,6 +485,8 @@ milca_test_labels(gs_response_3d_ampere_indicator_contract fast CLASSES mhd
     TARGETS gs_response_3d)
 milca_test_labels(gs_response_3d_kinetic_closure fast CLASSES mhd
     TARGETS gs_response_3d)
+milca_test_labels(gs_response_3d_reconnected_closure fast CLASSES mhd
+    TARGETS gs_response_3d)
 milca_test_labels(equilibrium_core_d7_readback_p3 fast CLASSES equilibrium
     TARGETS test_equilibrium_core)
 milca_test_labels(equilibrium_core_d3_solovev_p3 fast CLASSES equilibrium

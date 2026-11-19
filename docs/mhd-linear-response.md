@@ -298,7 +298,8 @@ and finite-pressure layers go to resolved strips
 (one table per phasing), `n`, `rat_num`/`rat_den`, `nrad`, `nth_max`,
 `order`, `model` (`'shield'` or `'ideal'`), `np_sample`, `qlow`,
 `boundary_sheet`, `rat_pad`/`rat_grade` (rings graded geometrically toward
-each rational), `edge_moved_current`, `closure` (`'sheet'` or `'frobenius'`),
+each rational), `edge_moved_current`, `closure` (`'sheet'`, `'frobenius'`,
+`'resistive'`, `'kinetic'` or `'reconnected'`),
 `layer_delta`, `layer_ratio`, `layer_nfit`, `spot`, `error_estimate`
 (default true: equilibrated coupled bound of every unit-sheet solve in
 `prefix_sheet_error.dat`, plus the final-state ideal algebraic diagnostic in
@@ -315,6 +316,30 @@ alone per area (GPEC's `singflx`); `m = n q` with the signed `q` of
 `# ampere_discrete_energy_error_max` comment: the worst discrete residual-energy
 indicator of the app's unit-sheet Ampère solves (claim `indicator`; the
 continuous claim stays `unavailable-exterior-remainder`).
+
+`closure = 'reconnected'` is the resistive matching with `Δ_layer = 0`:
+zero net layer current and continuous reconnected flux `A`. This is the ideal
+outer solution without shielding current, the zero-sheet-current matching
+`[f']_s = Δ' f_s + D f_b = 0` of
+[island-driven-cylinder.md](island-driven-cylinder.md), so `f_s/f_b = −D/Δ'`
+in the cylinder. `prefix_resist.dat` gives `A/area` with `L = Q = 0`.
+Test `gs_response_3d_reconnected_closure`: zero net layer current, unshielded
+`A`, and the total-field harmonic on the rational ring equal to `A/area`.
+
+At finite pressure `A` depends on the layer half-width `δ` like a layer term
+`∝ 1/δ`. On a circular CHEASE equilibrium (R0 = 5 m, a = 0.5 m, β0 = 1e-5,
+q = 2 at psin 0.447, `D_I = −0.250105`) the ratio `A/Φ_vac` is −0.122,
+−0.087, −0.058, −0.035 and −0.020 for `δ` = 4, 2, 1, 0.5 and 0.25e-3 (psin),
+so `A → 0` as `δ → 0`; with `zero_pressure` it is −0.191, −0.175, −0.168,
+−0.164 and −0.162 and extrapolates linearly in `δ` to −0.1596. The
+shielded closures (`'frobenius'`, `'sheet'`) change by less than 1 % between
+the two cases. The origin of the `1/δ` term is open.
+
+`prefix_helicity.dat` gives, for every model and closure, per phasing and
+rational the PEST flux harmonics (`ring_flux_*`, peak amplitudes per area, T)
+on the rational ring of the coil field and of the total field (coil and all
+plasma currents) for `m = n q` and the opposite helicity `−m`. The resonant
+harmonic does not depend on the straight-field-line angle; `−m` does.
 
 ## Perturbation export (L7 core)
 

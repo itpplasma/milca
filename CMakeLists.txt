@@ -2671,6 +2671,12 @@ add_test(NAME gs_response_3d_kinetic_closure COMMAND ${CMAKE_COMMAND}
     -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_kinetic.cmake)
 set_tests_properties(gs_response_3d_kinetic_closure PROPERTIES TIMEOUT 240
     ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+add_test(NAME gs_response_3d_reconnected_closure COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_reconnected
+    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
+    -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_reconnected.cmake)
+set_tests_properties(gs_response_3d_reconnected_closure PROPERTIES TIMEOUT 240
+    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
 add_executable(test_mhd_ideal_n test/test_mhd_ideal_n.f90)
 target_link_libraries(test_mhd_ideal_n PRIVATE milca)
 add_test(NAME mhd_ideal_n_mde_force_free_identity COMMAND test_mhd_ideal_n)
