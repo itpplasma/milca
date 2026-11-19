@@ -325,6 +325,7 @@ contains
             plasma_points(:, a) = centre + y/(section_radius(alpha)*norm2([cos(alpha), &
                 sin(alpha)]/axes))
         end do
+        call straighten(mesh, chain, plasma_points)
     contains
         function point(a) result(p)
             real(dp), intent(in) :: a
@@ -349,6 +350,76 @@ contains
             end do
         end function
     end subroutine
+
+    subroutine straighten(mesh, chain, points)
+        ! Plasma cells in their own reference: every edge but a Gamma_p
+        ! segment is straight between its mapped vertices, and a cubic
+        ! cell's bubble node carries the edge curvature as in initialize_gs.
+        ! The current loops of the frozen field (milca_map_3d_loop) cross only
+        ! straight interior edges.
+        type(gs_state_t), intent(in) :: mesh
+        real(dp), intent(in) :: chain(:, :)
+        real(dp), intent(inout) :: points(:, :)
+        integer, allocatable :: on_chain(:)
+        real(dp) :: centre(2), t
+        integer :: e, k, j, order, first, second, node, nc, c1, c2
+        logical :: segment
+        order = merge(2, 3, size(mesh%triangles, 1) == 6)
+        nc = size(chain, 2)
+        allocate (on_chain(size(mesh%points, 2)))
+        on_chain = 0
+        do j = 1, nc
+            do k = 1, size(mesh%points, 2)
+                if (maxval(abs(mesh%points(:, k) - chain(:, j))) <= tiny(1.0_dp)) &
+                    on_chain(k) = j
+            end do
+        end do
+        do e = 1, size(mesh%triangles, 2)
+            centre = sum(mesh%points(:, mesh%triangles(1:3, e)), dim=2)/3
+            if (.not. inside_polygon(chain, centre)) cycle
+            do k = 1, 3
+                first = mesh%triangles(k, e)
+                second = mesh%triangles(mod(k, 3) + 1, e)
+                c1 = on_chain(first); c2 = on_chain(second)
+                segment = .false.
+                if (c1 > 0 .and. c2 > 0) segment = mod(c1, nc) + 1 == c2 &
+                    .or. mod(c2, nc) + 1 == c1
+                if (segment) cycle
+                do j = 1, order - 1
+                    t = real(j, dp)/order
+                    node = mesh%triangles(3 + (k - 1)*(order - 1) + j, e)
+                    points(:, node) = (1 - t)*points(:, first) + t*points(:, second)
+                end do
+            end do
+            if (order /= 3) cycle
+            centre = sum(points(:, mesh%triangles(1:3, e)), dim=2)/3
+            do k = 1, 3
+                first = mesh%triangles(k, e)
+                second = mesh%triangles(mod(k, 3) + 1, e)
+                do j = 1, 2
+                    t = real(j, dp)/3
+                    node = mesh%triangles(3 + 2*(k - 1) + j, e)
+                    centre = centre + (points(:, node) - (1 - t)*points(:, first) &
+                        - t*points(:, second))/4
+                end do
+            end do
+            points(:, mesh%triangles(10, e)) = centre
+        end do
+    end subroutine
+
+    pure logical function inside_polygon(poly, p) result(inside)
+        real(dp), intent(in) :: poly(:, :), p(2)
+        integer :: i, j
+        inside = .false.
+        j = size(poly, 2)
+        do i = 1, size(poly, 2)
+            if ((poly(2, i) > p(2)) .neqv. (poly(2, j) > p(2))) then
+                if (p(1) < (poly(1, j) - poly(1, i))*(p(2) - poly(2, i)) &
+                    /(poly(2, j) - poly(2, i)) + poly(1, i)) inside = .not. inside
+            end if
+            j = i
+        end do
+    end function
 
     pure real(dp) function dirichlet(x, n) result(w)
         ! cardinal function of trigonometric interpolation on n (even)
