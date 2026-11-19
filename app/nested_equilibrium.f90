@@ -8,13 +8,15 @@ program nested_equilibrium
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
         ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate
     use milca_ideal_map, only: ideal_map_t, ideal_map_solve, ideal_map_solve_report_t, &
-        ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction, ideal_map_freeze
+        ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction, ideal_map_freeze, &
+        ideal_map_sensitivity
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
     use milca_equilibrium_state, only: EQ_VALUES, EQ_BR, EQ_BZ, EQ_BPHI, EQ_P
     use milca_grad_shafranov, only: gs_state_t
     use milca_curved_triangle, only: triangle_locate
     use milca_result_io, only: run_t, result_file_t
     use fortnum_quadrature, only: gauss_legendre
+    use milca_map_3d_loop, only: map_3d_loop_t, map_3d_loop_setup, map_3d_loop_integral
     use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
     implicit none
     integer, parameter :: mmax = 64, nmax = 32, kmax = 32, knot_max = 1024
@@ -22,9 +24,18 @@ program nested_equilibrium
     integer :: nfp, mpol, ntor, boundary_nodes, degree, max_iterations, angle_mpol
     integer :: unit, ios, status, solve_status, step, steps, nodes, order, n
     integer :: ladder_nodes(8), ladder_degree(8)
-    integer :: map_ntor, ntor_level, level, current_nodes
-    logical :: automatic_ntor, iota_crosses_zero = .false.
-    real(dp) :: fourier_tolerance, fourier_error, observed(4), previous_observed(4)
+    integer :: map_ntor, ntor_level
+    ! iota of the current matching: polynomial through iota_nodes
+    ! Chebyshev-Gauss surfaces, stored as a Hermite profile on store_knots
+    integer :: iota_nodes, iota_level
+    integer, parameter :: store_knots = 129, iota_nodes_max = 32
+    integer, parameter :: mesh_nodes(7) = [16, 24, 32, 48, 64, 96, 128]
+    logical :: automatic_ntor, automatic_mesh, automatic_iota
+    logical :: mesh_confirmed, modes_confirmed, iota_confirmed
+    logical :: iota_crosses_zero = .false.
+    real(dp) :: fourier_tolerance, fourier_error, mesh_tolerance, mesh_error
+    real(dp) :: iota_tolerance, iota_error
+    real(dp) :: observed(4), previous_observed(4)
     real(dp), allocatable :: boundary_input(:, :, :)
     type(ideal_map_t) :: previous_map
     real(dp), allocatable :: previous_seed(:, :, :)
@@ -57,15 +68,18 @@ program nested_equilibrium
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
         current_tolerance, iota_type, pressure_type, &
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
-        pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, current_nodes
+        pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
+        iota_nodes, iota_tolerance
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
-    boundary_nodes = 16; degree = 3; tolerance = 1e-8_dp; max_iterations = 200
+    boundary_nodes = -1; degree = 3; tolerance = 1e-8_dp; max_iterations = 200
     angle_mpol = -1; ladder_nodes = 0; ladder_degree = 0
     prescribe_current = .false.; current = 0; max_current_iterations = 30
     current_tolerance = 1e-5_dp
-    map_ntor = -1; fourier_tolerance = 1e-4_dp; current_nodes = 16
+    map_ntor = -1; fourier_tolerance = 1e-4_dp
+    mesh_tolerance = 1e-4_dp
+    iota_nodes = -1; iota_tolerance = 1e-4_dp
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -87,8 +101,10 @@ program nested_equilibrium
     if (map_ntor > nmax .or. (map_ntor >= 0 .and. map_ntor < ntor)) &
         error stop 'nested_equilibrium: map_ntor below the boundary ntor or above 32'
     if (.not. fourier_tolerance > 0) error stop 'nested_equilibrium: fourier_tolerance'
-    if (current_nodes < 2 .or. current_nodes > 64) &
-        error stop 'nested_equilibrium: current_nodes from 2 to 64'
+    if (.not. mesh_tolerance > 0) error stop 'nested_equilibrium: mesh_tolerance'
+    if (.not. iota_tolerance > 0) error stop 'nested_equilibrium: iota_tolerance'
+    if (iota_nodes > iota_nodes_max .or. (iota_nodes >= 0 .and. iota_nodes < 2)) &
+        error stop 'nested_equilibrium: iota_nodes from 2 to 32, or -1'
     call run%open_resolved(unit)
     write (unit, nml=nested_input)
     call run%close_resolved(unit)
@@ -109,46 +125,38 @@ program nested_equilibrium
     call profile%evaluate(0.0_dp, iota_axis, p_axis, unused)
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
 
-    ! Interior toroidal modes: the solution of a 3D boundary needs more
-    ! toroidal harmonics than the boundary has. With map_ntor < 0 they are
-    ! chosen by the change of the observables between levels ntor_level - 2
-    ! and ntor_level (fourier_error); axisymmetric data keep ntor = 0.
+    ! Resolution under error control: the mesh (boundary_nodes < 0), the
+    ! interior toroidal modes (map_ntor < 0; a 3D boundary's interior needs more
+    ! harmonics than the boundary) and the nodes of the matched iota
+    ! (iota_nodes < 0) are raised until the observables change by at most
+    ! their tolerance between successive levels. The active ladders alternate
+    ! until each is confirmed by one refinement or is at its finest level;
+    ! axisymmetric data keep ntor = 0.
+    automatic_mesh = boundary_nodes < 0
     automatic_ntor = map_ntor < 0 .and. ntor > 0
-    ! the change between levels estimates the truncation error only when each
+    ! a change between levels estimates the truncation error only when each
     ! level's current is matched well below it
     if (automatic_ntor) current_tolerance = min(current_tolerance, fourier_tolerance/10)
+    if (automatic_mesh) current_tolerance = min(current_tolerance, mesh_tolerance/10)
+    automatic_iota = prescribe_current .and. iota_nodes < 0
+    if (automatic_iota) current_tolerance = min(current_tolerance, iota_tolerance/10)
+    iota_level = merge(6, iota_nodes, automatic_iota)
+    if (automatic_mesh) boundary_nodes = mesh_nodes(1)
     ntor_level = merge(ntor, map_ntor, map_ntor < 0)
-    fourier_error = 0
-    level = 0
+    mesh_error = 0; fourier_error = 0; iota_error = 0
+    call set_toroidal_level(ntor_level)
+    call mesh_ladder()
+    call finish_level()
     do
-        call set_toroidal_level(ntor_level)
-        if (level == 0) then
-            call mesh_ladder()
-        else
-            ! seed with the new modes plus the correction of the solved level
-            call ideal_seed_disk_mesh(mesh, boundary_nodes, degree, status)
-            if (status /= 0) error stop 'nested_equilibrium: disk mesh'
-            call init_seed(status)
-            if (status /= 0) call fail('the seed of a toroidal level is not admitted')
-            reference = free_gradient()
-            seed_x = map%x
-            call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
-            if (status /= 0) call fail('the toroidal level correction failed')
-            call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-                reference_gradient=reference)
-        end if
-        current_error = 0; current_iterations = 0; solve_tolerance = tolerance
-        if (prescribe_current) call match_current(current_error)
-        call observe(observed)
-        if (level > 0) fourier_error = max(abs(observed(1)/previous_observed(1) - 1), &
-            maxval(abs(observed(2:) - previous_observed(2:))))
-        print '(a,i3,a,es10.3)', 'toroidal modes ', ntor_level, ': fourier error ', &
-            fourier_error
-        if (iota_crosses_zero .or. .not. automatic_ntor) exit
-        if (level > 0 .and. fourier_error <= fourier_tolerance) exit
-        if (ntor_level + 2 > nmax) exit
-        previous_map = map; previous_seed = seed_x; previous_observed = observed
-        ntor_level = ntor_level + 2; level = level + 1
+        mesh_confirmed = .true.; modes_confirmed = .true.; iota_confirmed = .true.
+        if (automatic_mesh) call raise_mesh(mesh_confirmed)
+        if (iota_crosses_zero) exit
+        if (automatic_ntor) call raise_modes(modes_confirmed)
+        if (iota_crosses_zero) exit
+        if (automatic_iota) call raise_iota(iota_confirmed)
+        if (iota_crosses_zero) exit
+        if (count([automatic_mesh, automatic_ntor, automatic_iota]) < 2) exit
+        if (mesh_confirmed .and. modes_confirmed .and. iota_confirmed) exit
     end do
     call profile%evaluate(0.0_dp, iota_axis, unused, unused)
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
@@ -157,7 +165,7 @@ program nested_equilibrium
     if (status /= 0) call fail('a volume integral met a folded map')
     call axis_radius(raxis, status)
     if (status /= 0) call fail('the magnetic axis was not found')
-    ctor = enclosed_current(1.0_dp, status)
+    ctor = edge_current(status)
     if (status /= 0) call fail('the edge current readback met a folded map')
 
     call result%create(run)
@@ -165,7 +173,9 @@ program nested_equilibrium
     call result%attribute('converged', merge('true ', 'false', &
         solve_status == 0 .and. residual <= tolerance .and. current_error <= current_tolerance &
         .and. .not. iota_crosses_zero &
-        .and. (.not. automatic_ntor .or. fourier_error <= fourier_tolerance)))
+        .and. (.not. automatic_ntor .or. fourier_error <= fourier_tolerance) &
+        .and. (.not. automatic_mesh .or. mesh_error <= mesh_tolerance) &
+        .and. (.not. automatic_iota .or. iota_error <= iota_tolerance)))
     call result%write('volume_p', volume, 'm^3', 'plasma volume')
     call result%write('aminor_p', sqrt(area/pi), 'm', 'sqrt of mean cross-section area / pi')
     call result%write('rmajor_p', volume/(2*pi*area), 'm', 'volume / (2 pi mean area)')
@@ -182,11 +192,21 @@ program nested_equilibrium
         call result%attribute('current_status', merge('iota crosses zero', 'matched          ', &
             iota_crosses_zero))
         call result%write('current_error', current_error, '1', &
-            'largest enclosed-current error relative to the largest prescribed current')
+            'largest iota change of the last Newton step on the prescribed current')
         call result%write('current_iterations', real(current_iterations, dp), '1', &
             'iota updates to match the prescribed current')
     end if
     call result%write('map_ntor', real(ntor_level, dp), '1', 'interior toroidal modes')
+    call result%write('boundary_nodes', real(boundary_nodes, dp), '1', &
+        'boundary nodes of the reference disk mesh')
+    if (automatic_mesh) call result%write('mesh_error', mesh_error, '1', &
+        'largest change of wb (relative), raxis/aminor_p and iota on axis and edge' &
+        //' from the previous mesh')
+    if (prescribe_current) call result%write('iota_nodes', real(iota_level, dp), '1', &
+        'Chebyshev-Gauss surfaces of the polynomial iota matched to the current')
+    if (automatic_iota) call result%write('iota_error', iota_error, '1', &
+        'largest change of wb (relative), raxis/aminor_p and iota on axis and edge' &
+        //' from iota_nodes - 2')
     if (automatic_ntor) call result%write('fourier_error', fourier_error, '1', &
         'largest change of wb (relative), raxis/aminor_p and iota on axis and edge' &
         //' from map_ntor - 2')
@@ -256,6 +276,109 @@ contains
         end do
     end function
 
+    subroutine raise_mesh(confirmed)
+        ! mesh levels at the current toroidal modes until mesh_error is below
+        ! mesh_tolerance; confirmed when the first refinement already is
+        logical, intent(out) :: confirmed
+        integer :: k, steps
+        real(dp) :: last
+        confirmed = .false.
+        steps = 0; last = huge(1.0_dp)
+        do k = 1, size(mesh_nodes)
+            if (mesh_nodes(k) <= boundary_nodes) cycle
+            call next_level(mesh_nodes(k), ntor_level)
+            mesh_error = change()
+            steps = steps + 1
+            print '(a,i4,a,es10.3)', 'boundary nodes ', boundary_nodes, ': mesh error ', &
+                mesh_error
+            if (iota_crosses_zero .or. mesh_error <= mesh_tolerance) exit
+            ! a change that does not shrink is limited by another resolution
+            if (mesh_error >= last) exit
+            last = mesh_error
+        end do
+        ! a ladder at its finest level has nothing left to confirm
+        confirmed = steps == 0 .or. (steps == 1 .and. mesh_error <= mesh_tolerance)
+    end subroutine
+
+    subroutine raise_modes(confirmed)
+        ! toroidal levels + 2 at the current mesh until fourier_error is below
+        ! fourier_tolerance; confirmed when the first one already is
+        logical, intent(out) :: confirmed
+        integer :: steps
+        real(dp) :: last
+        confirmed = .false.
+        steps = 0; last = huge(1.0_dp)
+        do while (ntor_level + 2 <= nmax)
+            call next_level(boundary_nodes, ntor_level + 2)
+            fourier_error = change()
+            steps = steps + 1
+            print '(a,i3,a,es10.3)', 'toroidal modes ', ntor_level, ': fourier error ', &
+                fourier_error
+            if (iota_crosses_zero .or. fourier_error <= fourier_tolerance) exit
+            ! a change that does not shrink is limited by another resolution
+            if (fourier_error >= last) exit
+            last = fourier_error
+        end do
+        ! a ladder at its finest level has nothing left to confirm
+        confirmed = steps == 0 .or. (steps == 1 .and. fourier_error <= fourier_tolerance)
+    end subroutine
+
+    subroutine raise_iota(confirmed)
+        ! iota polynomials of 2 more nodes on the solved map until iota_error is
+        ! below iota_tolerance; confirmed when the first one already is
+        logical, intent(out) :: confirmed
+        integer :: steps
+        real(dp) :: last
+        confirmed = .false.
+        steps = 0; last = huge(1.0_dp)
+        do while (iota_level + 2 <= iota_nodes_max)
+            previous_observed = observed
+            iota_level = iota_level + 2
+            call finish_level()
+            iota_error = change()
+            steps = steps + 1
+            print '(a,i3,a,es10.3)', 'iota nodes ', iota_level, ': iota error ', iota_error
+            if (iota_crosses_zero .or. iota_error <= iota_tolerance) exit
+            ! a change that does not shrink is limited by another resolution
+            if (iota_error >= last) exit
+            last = iota_error
+        end do
+        ! a ladder at its finest level has nothing left to confirm
+        confirmed = steps == 0 .or. (steps == 1 .and. iota_error <= iota_tolerance)
+    end subroutine
+
+    subroutine next_level(nodes_next, modes_next)
+        ! seed at the new resolution plus the correction of the solved level
+        integer, intent(in) :: nodes_next, modes_next
+        previous_map = map; previous_seed = seed_x; previous_observed = observed
+        boundary_nodes = nodes_next; ntor_level = modes_next
+        call set_toroidal_level(ntor_level)
+        call ideal_seed_disk_mesh(mesh, boundary_nodes, degree, status)
+        if (status /= 0) error stop 'nested_equilibrium: disk mesh'
+        call init_seed(status)
+        if (status /= 0) call fail('the seed of a resolution level is not admitted')
+        reference = free_gradient()
+        seed_x = map%x
+        call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
+        if (status /= 0) call fail('the resolution level correction failed')
+        call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
+            reference_gradient=reference)
+        call finish_level()
+    end subroutine
+
+    subroutine finish_level()
+        ! the prescribed current and the observables of the solved level
+        current_error = 0; current_iterations = 0; solve_tolerance = tolerance
+        if (prescribe_current) call match_current(current_error)
+        call observe(observed)
+    end subroutine
+
+    real(dp) function change()
+        ! wb relative, raxis/aminor_p and iota on axis and edge
+        change = max(abs(observed(1)/previous_observed(1) - 1), &
+            maxval(abs(observed(2:) - previous_observed(2:))))
+    end function
+
     subroutine set_toroidal_level(modes)
         ! boundary padded with zero coefficients up to the map's modes
         integer, intent(in) :: modes
@@ -279,68 +402,60 @@ contains
     end subroutine
 
     subroutine match_current(error)
-        ! Prescribed enclosed toroidal current I(s). For a fixed map I on each
-        ! surface is affine in iota there; its slope is read on the solved map
-        ! with the frozen form's iota shifted by delta, so every update is the
-        ! exact Newton step for that map at the current_nodes Chebyshev-Gauss
-        ! surfaces, interpolated (refit) and re-solved.
+        ! Prescribed enclosed toroidal current I(s), matched pointwise at the
+        ! iota_level Chebyshev-Gauss surfaces s_j, which exclude the axis.
+        ! Iota is the polynomial through its values c_j there, each level
+        ! starting from the previous iota at the s_j. On a fixed map B on the
+        ! surface s depends on iota(s) only, so I(s_j) = A_j c_j + C_j; with
+        ! the map in equilibrium Newton solves F(c) = I(s; x(c), c) - I_target
+        ! = 0 with dF/dc = diag(A) + (dI/dx) dx/dc, dx/dc = -H^-1 dg/dc
+        ! (current_jacobian). error: the iota increment of the last step.
         real(dp), intent(out) :: error
-        real(dp), parameter :: delta = 1e-3_dp
-        real(dp) :: s(current_nodes), target(current_nodes), measured(current_nodes)
-        real(dp) :: shifted(current_nodes), slope(current_nodes), iota_s(current_nodes)
-        real(dp) :: scale, unused1, unused2
+        type(map_3d_loop_t), allocatable :: loops(:)
+        real(dp), allocatable :: s(:), c(:), target(:), measured(:), step(:, :)
+        real(dp), allocatable :: jacobian(:, :)
+        real(dp) :: unused1, unused2
         type(toroidal_profile_t) :: previous
-        integer :: j, k, local, ns
-        ns = current_nodes
-        do j = 1, ns
-            s(j) = (1 - cos((2*j - 1)*pi/(2*ns)))/2
-            if (current_type == 'hermite') then
-                call hermite_profile_evaluate(profile_knots(:n_knots), &
-                    current_values(:n_knots), current_slopes(:n_knots), s(j), target(j), &
-                    unused1)
-            else
-                target(j) = sum(current*s(j)**[(k, k=0, kmax)])
-            end if
+        integer :: j, k, local, n, info
+        integer, allocatable :: pivot(:)
+        n = iota_level
+        s = iota_surfaces(n)
+        allocate (loops(n), c(n), target(n), measured(n), step(n, 1), jacobian(n, n), &
+            pivot(n))
+        do j = 1, n
+            call map_3d_loop_setup(map, s(j), loops(j), local)
+            if (local /= 0) call fail('a current loop met a curved cell edge')
+            target(j) = current_target(s(j))
+            call profile%evaluate(s(j), c(j), unused1, unused2)
         end do
-        scale = maxval(abs(target))
-        do k = 0, max_current_iterations
-            call measure(s, measured)
-            if (k == 0) then
-                ! the current per unit iota of the starting map scales a
-                ! current-free target, so that the error is an iota error there
-                call seed%profile%shift_iota(delta)
-                call measure(s, shifted)
-                call seed%profile%shift_iota(-delta)
-                scale = max(scale, maxval(abs(shifted - measured))/delta, tiny(1.0_dp))
-            end if
-            error = maxval(abs(measured - target))/scale
-            print '(a,i3,a,es10.3)', 'current iteration ', k, ': relative error ', error
+        ! the map in equilibrium with the represented iota
+        call set_iota(c)
+        call resolve(local)
+        if (local /= 0) call fail('the map folded when frozen with the represented iota')
+        k = 0
+        do
+            call measure(loops, measured)
+            call current_jacobian(c, loops, measured, jacobian)
+            step(:, 1) = target - measured
+            call dgesv(n, 1, jacobian, n, pivot, step, n, info)
+            if (info /= 0) call fail('the current Jacobian is singular')
+            error = maxval(abs(step(:, 1)))
+            print '(a,i3,a,es10.3)', 'current iteration ', k, ': iota increment ', error
             if (error <= current_tolerance .or. k == max_current_iterations) then
-                ! the current of a loosely solved map is measured again on the
-                ! fully solved one
+                ! a loosely solved map is solved fully and the step taken again
                 if (solve_tolerance <= tolerance .or. k == max_current_iterations) exit
                 solve_tolerance = tolerance
                 call ideal_map_solve(map, solve_tolerance, max_iterations, report, &
                     solve_status, reference_gradient=reference)
-                call measure(s, measured)
-                error = maxval(abs(measured - target))/scale
-                print '(a,i3,a,es10.3)', 'current iteration ', k, ': relative error ', error
-                if (error <= current_tolerance) exit
+                cycle
             end if
-            current_iterations = k + 1
-            call seed%profile%shift_iota(delta)
-            call measure(s, shifted)
-            call seed%profile%shift_iota(-delta)
-            slope = (shifted - measured)/delta
-            do j = 1, ns
-                call profile%evaluate(s(j), iota_s(j), unused1, unused2)
-            end do
-            ! Newton step on the solved map, where the current is affine in iota
-            ! on each surface. The frozen map admits iota of one sign only
-            ! (docs/ideal-seed-3d.md); the step may reverse that sign.
-            iota_s = iota_s + (target - measured)/slope
+            k = k + 1
+            current_iterations = k
+            c = c + step(:, 1)
+            ! The frozen map admits iota of one sign only (docs/ideal-seed-3d.md);
+            ! the step may reverse that sign on every surface.
             previous = profile
-            call refit(s, iota_s)
+            call set_iota(c)
             if (.not. single_signed()) then
                 profile = previous
                 iota_crosses_zero = .true.
@@ -348,12 +463,134 @@ contains
                     //' frozen map does not admit'
                 exit
             end if
-            ! intermediate maps need only the accuracy of the current mismatch
+            ! intermediate maps need only the accuracy of the iota increment
             solve_tolerance = max(tolerance, min(1e-4_dp, 1e-3_dp*error))
             call resolve(local)
             if (local /= 0) call fail('the map folded when frozen with the updated iota')
         end do
     end subroutine
+
+    subroutine current_jacobian(c, loops, measured, jacobian)
+        ! dI(s_j)/dc_k of the map in equilibrium. Fixed map: I(s_j) is affine in
+        ! c_j alone, so one shift of every c by 1 gives the exact diagonal A.
+        ! The energy gradient is quadratic in c, so dg/dc_k from the unit steps
+        ! +-e_k is exact; the map's response dx_k = -H^-1 dg/dc_k
+        ! (ideal_map_sensitivity) enters through a central difference of the
+        ! loop integrals along dx_k, whose O(h^2) error changes only the rate of
+        ! convergence, not the matched current.
+        real(dp), intent(in) :: c(:), measured(:)
+        type(map_3d_loop_t), intent(in) :: loops(:)
+        real(dp), intent(out) :: jacobian(:, :)
+        real(dp), allocatable :: dg(:, :), dx(:, :), plus(:), minus(:), x0(:, :, :)
+        real(dp), allocatable :: angle0(:)
+        real(dp) :: ip(size(c)), im(size(c)), e(size(c)), h, length
+        integer :: k, local, n, ncoef
+        n = size(c)
+        ncoef = size(map%x)
+        allocate (dg(map%ndof, n), dx(map%ndof, n), plus(map%ndof), minus(map%ndof))
+        call set_iota(c + 1)
+        seed%profile = profile
+        call measure(loops, ip)
+        jacobian = 0
+        do k = 1, n
+            jacobian(k, k) = ip(k) - measured(k)
+        end do
+        do k = 1, n
+            e = 0; e(k) = 1
+            call frozen_gradient(c + e, plus)
+            call frozen_gradient(c - e, minus)
+            dg(:, k) = (plus - minus)/2
+        end do
+        ! the map frozen with c again for its Hessian and the loop integrals
+        call frozen_gradient(c, plus)
+        call ideal_map_sensitivity(map, dg, dx, local)
+        if (local /= 0) call fail('the map sensitivity solve failed')
+        x0 = map%x
+        if (map%nangle > 0) angle0 = map%angle
+        length = maxval(maxval(map%reference, dim=2) - minval(map%reference, dim=2))
+        do k = 1, n
+            h = 1e-6_dp*length/max(maxval(abs(dx(:ncoef, k))), tiny(1.0_dp))
+            call displace(x0, angle0, h, dx(:, k))
+            call measure(loops, ip)
+            call displace(x0, angle0, -h, dx(:, k))
+            call measure(loops, im)
+            jacobian(:, k) = jacobian(:, k) + (ip - im)/(2*h)
+        end do
+        map%x = x0
+        if (map%nangle > 0) map%angle = angle0
+    end subroutine
+
+    subroutine frozen_gradient(c, gradient)
+        ! energy gradient of the fixed map frozen with the iota values c
+        real(dp), intent(in) :: c(:)
+        real(dp), intent(out) :: gradient(:)
+        real(dp) :: energy
+        integer :: local
+        call set_iota(c)
+        seed%profile = profile
+        call ideal_map_freeze(map, seed, local)
+        if (local /= 0) call fail('the map folded when frozen in the current Jacobian')
+        call ideal_map_energy(map, map%x, energy, local, gradient)
+        if (local /= 0) call fail('the energy met a folded map in the current Jacobian')
+    end subroutine
+
+    subroutine displace(x0, angle0, t, direction)
+        ! map coefficients and field-line angle moved by t along direction
+        real(dp), intent(in) :: x0(:, :, :), t, direction(:)
+        real(dp), allocatable, intent(in) :: angle0(:)
+        integer :: ncoef
+        ncoef = size(x0)
+        map%x = x0 + t*reshape(direction(:ncoef), shape(x0))
+        if (map%nangle > 0) map%angle = angle0 + t*direction(ncoef + 1:)
+    end subroutine
+
+    subroutine measure(loops, values)
+        ! enclosed toroidal current (A) through the loops
+        type(map_3d_loop_t), intent(in) :: loops(:)
+        real(dp), intent(out) :: values(:)
+        integer :: j, local
+        do j = 1, size(loops)
+            values(j) = map_3d_loop_integral(map, seed, loops(j), local)/mu0
+            if (local /= 0) call fail('the current readback met a folded map')
+        end do
+    end subroutine
+
+    subroutine set_iota(c)
+        ! the polynomial through the values c at the Chebyshev-Gauss surfaces,
+        ! stored by its values and slopes on store_knots uniform knots
+        real(dp), intent(in) :: c(:)
+        real(dp) :: t(store_knots), value(store_knots), slope(store_knots)
+        real(dp) :: w(size(c)), dw(size(c))
+        integer :: k
+        do k = 1, store_knots
+            t(k) = real(k - 1, dp)/(store_knots - 1)
+            call lagrange_weights(size(c), t(k), iota_surfaces(size(c)), w)
+            call lagrange_deriv_weights(size(c), t(k), iota_surfaces(size(c)), dw)
+            value(k) = dot_product(w, c); slope(k) = dot_product(dw, c)
+        end do
+        call profile%set_hermite_iota(t, value, slope)
+    end subroutine
+
+    pure function iota_surfaces(n) result(x)
+        ! Chebyshev-Gauss surfaces, which exclude the axis
+        integer, intent(in) :: n
+        real(dp) :: x(n)
+        integer :: k
+        x = [((1 - cos((2*k - 1)*pi/(2*n)))/2, k=1, n)]
+    end function
+
+    real(dp) function current_target(t)
+        ! prescribed enclosed toroidal current (A) at normalised toroidal flux t
+        real(dp), intent(in) :: t
+        real(dp) :: unused
+        integer :: k
+        if (current_type == 'hermite') then
+            call hermite_profile_evaluate(profile_knots(:n_knots), current_values(:n_knots), &
+                current_slopes(:n_knots), t, current_target, unused)
+        else
+            current_target = sum(current*t**[(k, k=0, kmax)])
+        end if
+    end function
 
     subroutine init_seed(status)
         integer, intent(out) :: status
@@ -365,34 +602,6 @@ contains
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
                 status, winslow=.true.)
         end if
-    end subroutine
-
-    subroutine measure(s, values)
-        ! enclosed toroidal current on the surfaces s
-        real(dp), intent(in) :: s(:)
-        real(dp), intent(out) :: values(:)
-        integer :: i, local
-        do i = 1, size(s)
-            values(i) = enclosed_current(s(i), local)
-            if (local /= 0) call fail('the current readback met a folded map')
-        end do
-    end subroutine
-
-    subroutine refit(s, values)
-        ! iota as the polynomial interpolant of the matched values at the
-        ! Chebyshev-Gauss surfaces s, which exclude the axis where the matched
-        ! iota is only a limit; stored as values and slopes on 65 Hermite knots
-        real(dp), intent(in) :: s(:), values(:)
-        integer, parameter :: knots = 65
-        real(dp) :: t(knots), value(knots), slope(knots), w(size(s)), dw(size(s))
-        integer :: k
-        do k = 1, knots
-            t(k) = real(k - 1, dp)/(knots - 1)
-            call lagrange_weights(size(s), t(k), s, w)
-            call lagrange_deriv_weights(size(s), t(k), s, dw)
-            value(k) = dot_product(w, values); slope(k) = dot_product(dw, values)
-        end do
-        call profile%set_hermite_iota(t, value, slope)
     end subroutine
 
     subroutine resolve(local)
@@ -476,68 +685,43 @@ contains
         magnetic = 2*pi*sums(3)/nphi; kinetic = 2*pi*sums(4)/nphi
     end subroutine
 
-    real(dp) function enclosed_current(s, status)
-        ! (1/mu0) oint B.dl around a poloidal loop on the flux surface s at phi = 0;
-        ! every such loop encloses the same current. Inside, the loop is the image
-        ! of the reference circle; at s = 1 it runs along the discrete wall.
-        real(dp), intent(in) :: s
+    real(dp) function edge_current(status)
+        ! (1/mu0) oint B.dl along the discrete wall at phi = 0, the enclosed
+        ! toroidal current; Gauss-Legendre on every wall edge
         integer, intent(out) :: status
-        integer, parameter :: nt = 512, ng = 8
-        real(dp) :: centre(2), radius, y(2), xi(2), trial(2), point(3, 0:nt), b(3, 0:nt)
-        real(dp) :: values(EQ_VALUES), dl(3), corner(2, 3), x(ng), w(ng), q(3), d(3, 3)
-        real(dp) :: ref(2), g(2, 2), tangent(2), along(3), sense
-        integer :: k, e, local, owner, i, a
+        integer, parameter :: ng = 8
+        real(dp) :: centre(2), radius, xi(2), point(3), values(EQ_VALUES), corner(2, 3)
+        real(dp) :: x(ng), w(ng), q(3), d(3, 3), ref(2), g(2, 2), tangent(2), along(3)
+        real(dp) :: sense
+        integer :: k, e, local, i, a
         centre = (maxval(map%reference, dim=2) + minval(map%reference, dim=2))/2
-        radius = sqrt(s)*(maxval(map%reference(1, :)) - minval(map%reference(1, :)))/2
-        enclosed_current = 0; status = 1
-        if (s >= 1) then
-            corner = reshape([0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 1.0_dp], [2, 3])
-            call gauss_legendre(ng, x, w)
-            x = (x + 1)/2; w = w/2
-            do e = 1, map%cells
-                do i = 1, 3
-                    a = mod(i, 3) + 1
-                    if (.not. (map%boundary(map%conn(i, e)) .and. map%boundary(map%conn(a, e)))) cycle
-                    ! a wall edge, not a chord between two wall nodes
-                    call map_3d_coordinates(map, e, (corner(:, i) + corner(:, a))/2, 0.0_dp, q, d, ref, g)
-                    if (abs(norm2(ref - centre)/radius - 1) > 1e-3_dp) cycle
-                    tangent = corner(:, a) - corner(:, i)
-                    sense = sign(1.0_dp, (ref(1) - centre(1))*dot_product(g(2, :), tangent) &
-                        - (ref(2) - centre(2))*dot_product(g(1, :), tangent))
-                    do k = 1, ng
-                        xi = corner(:, i) + x(k)*tangent
-                        call map_3d_coordinates(map, e, xi, 0.0_dp, q, d, ref, g)
-                        call map_3d_sample(map, seed, e, xi, 0.0_dp, point(:, 0), values, local)
-                        if (local /= 0) return
-                        along = matmul(d(:, 1:2), tangent); along(3) = along(3)*q(1)
-                        enclosed_current = enclosed_current + sense*w(k)* &
-                            dot_product(values([EQ_BR, EQ_BZ, EQ_BPHI]), along)
-                    end do
+        radius = (maxval(map%reference(1, :)) - minval(map%reference(1, :)))/2
+        edge_current = 0; status = 1
+        corner = reshape([0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 1.0_dp], [2, 3])
+        call gauss_legendre(ng, x, w)
+        x = (x + 1)/2; w = w/2
+        do e = 1, map%cells
+            do i = 1, 3
+                a = mod(i, 3) + 1
+                if (.not. (map%boundary(map%conn(i, e)) .and. map%boundary(map%conn(a, e)))) cycle
+                ! a wall edge, not a chord between two wall nodes
+                call map_3d_coordinates(map, e, (corner(:, i) + corner(:, a))/2, 0.0_dp, q, d, ref, g)
+                if (abs(norm2(ref - centre)/radius - 1) > 1e-3_dp) cycle
+                tangent = corner(:, a) - corner(:, i)
+                sense = sign(1.0_dp, (ref(1) - centre(1))*dot_product(g(2, :), tangent) &
+                    - (ref(2) - centre(2))*dot_product(g(1, :), tangent))
+                do k = 1, ng
+                    xi = corner(:, i) + x(k)*tangent
+                    call map_3d_coordinates(map, e, xi, 0.0_dp, q, d, ref, g)
+                    call map_3d_sample(map, seed, e, xi, 0.0_dp, point, values, local)
+                    if (local /= 0) return
+                    along = matmul(d(:, 1:2), tangent); along(3) = along(3)*q(1)
+                    edge_current = edge_current + sense*w(k)* &
+                        dot_product(values([EQ_BR, EQ_BZ, EQ_BPHI]), along)
                 end do
             end do
-        else
-            do k = 0, nt
-                y = centre + radius*[cos(2*pi*k/nt), sin(2*pi*k/nt)]
-                owner = 0
-                do e = 1, map%cells
-                    call triangle_locate(map%reference(:, map%conn(:, e)), y, trial, local)
-                    if (local /= 0) cycle
-                    if (minval([trial, 1 - sum(trial)]) < -1e-10_dp) cycle
-                    owner = e; xi = trial; exit
-                end do
-                if (owner == 0) return
-                call map_3d_sample(map, seed, owner, xi, 0.0_dp, point(:, k), values, local)
-                if (local /= 0) return
-                b(:, k) = values([EQ_BR, EQ_BZ, EQ_BPHI])
-            end do
-            do k = 0, nt - 1
-                ! (R, Z, phi) increments; the toroidal length is R dphi
-                dl = point(:, k + 1) - point(:, k)
-                dl(3) = dl(3)*(point(1, k + 1) + point(1, k))/2
-                enclosed_current = enclosed_current + dot_product((b(:, k + 1) + b(:, k))/2, dl)
-            end do
-        end if
-        enclosed_current = enclosed_current/mu0
+        end do
+        edge_current = edge_current/mu0
         status = 0
     end function
 

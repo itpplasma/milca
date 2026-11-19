@@ -70,7 +70,7 @@ module milca_ideal_map
     public :: ideal_map_solve, ideal_map_point, ideal_map_dof, ideal_map_mode_norms
     public :: ideal_map_reduce, ideal_map_expand, ideal_map_rdof, ideal_map_axis_dof
     public :: ideal_map_prolong, ideal_map_residual, ideal_map_position_gauge
-    public :: ideal_map_prolong_correction
+    public :: ideal_map_prolong_correction, ideal_map_sensitivity
     public :: ideal_map_solve_report_t, ideal_map_eliminate_omega
     public :: ideal_map_gauge_project, ideal_map_angle_enable, ideal_map_angle_rdof
     public :: ideal_map_angle_value, ideal_map_parallel_mass
@@ -1032,6 +1032,54 @@ contains
                 end do
             end do
         end if
+        status = IDEAL_MAP_OK
+    end subroutine
+
+    subroutine ideal_map_sensitivity(map, rhs, response, status)
+        ! First-order response of the solved map to changes of its data:
+        ! H d_k = -rhs_k on the free reduced dofs for every column k, with rhs_k
+        ! the derivative of the energy gradient (layout of ideal_map_energy) with
+        ! respect to datum k and d_k in the same layout; one factorisation. The relabelling near-nulls of H carry no
+        ! data derivative; the diagonal shift 1e-12 max|diag| of the solver's
+        ! damping floor keeps the factor regular on them.
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: rhs(:, :)
+        real(dp), intent(out) :: response(:, :)
+        integer, intent(out) :: status
+        type(csr_matrix_t) :: matrix
+        type(sparse_solver_t) :: solver
+        type(ideal_map_solve_report_t) :: report
+        type(fortsparse_status_t) :: sstatus
+        real(dp), allocatable :: reduced(:), step(:), shift(:), diag(:)
+        logical :: done
+        integer :: info, i, k, column
+        status = IDEAL_MAP_BAD_INPUT
+        if (map%omega_elimination .and. .not. map%position_gauge) return
+        if (size(rhs, 2) /= size(response, 2)) return
+        status = IDEAL_MAP_SOLVE_FAILED
+        call ideal_map_hessian(map, map%x, matrix)
+        allocate (diag(map%nred), shift(map%nred), reduced(map%nred), step(map%nred))
+        diag = 0
+        do i = 1, map%nred
+            do k = matrix%rowptr(i), matrix%rowptr(i + 1) - 1
+                if (matrix%colidx(k) == i) diag(i) = matrix%val(k)
+            end do
+        end do
+        shift = merge(1.0e-12_dp*maxval(abs(diag), mask=.not. map%fixed), 0.0_dp, &
+            .not. map%fixed)
+        done = .false.
+        call factor_masked(map, matrix, .not. map%fixed, shift, solver, done, info, report)
+        if (info /= 0) return
+        do column = 1, size(rhs, 2)
+            call ideal_map_reduce(map, rhs(:, column), reduced)
+            where (map%fixed) reduced = 0
+            call sparse_solve(solver, -reduced, step, sstatus)
+            if (.not. status_ok(sstatus)) exit
+            where (map%fixed) step = 0
+            call ideal_map_expand(map, step, response(:, column))
+        end do
+        call sparse_destroy(solver)
+        if (.not. status_ok(sstatus)) return
         status = IDEAL_MAP_OK
     end subroutine
 
