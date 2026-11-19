@@ -26,7 +26,8 @@ program nested_equilibrium
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
-        ideal_fb_boundary_polygon, last_jacobian, ideal_fb_worst_shell_cell
+        ideal_fb_boundary_polygon, last_jacobian, ideal_fb_worst_shell_cell, &
+        ideal_fb_fix_vertical
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
     use milca_ideal_fb_nested, only: fb_nested_offset_distance, fb_nested_layer_mesh, &
@@ -429,6 +430,9 @@ contains
                 0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1))
         end if
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
+        ! An up-down symmetric boundary (no rbs, zbc) is solved in that
+        ! symmetry like VMEC with lasym = F: the vertical position is held.
+        if (.not. any(abs(boundary(2:3, :, :)) > 0)) call ideal_fb_fix_vertical(next)
         call ideal_fb_circuits_build(next, coil_basis, circuits, local)
         if (local /= IDEAL_FB_OK) &
             call fail('the coil field grid does not cover the coupling surface')
