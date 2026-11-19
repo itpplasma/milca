@@ -470,9 +470,6 @@ contains
                 call fail('the free-boundary seed is not admitted')
         end if
         fb = next
-        ! The layered shell is solved with the inertia-controlled Newton
-        ! (the stable state, k = 0) and its fold barrier.
-        fb%inertia_control = shell_layers > 0
         call fb_solve(tolerance)
         ! A solve that converges only with the fold barrier active (or folds)
         ! has Gamma_c too close: Gamma_c is re-placed around the solved
@@ -603,9 +600,15 @@ contains
         ! A solve that stalls has driven its Levenberg damping up; it is
         ! restarted from its last state with the damping reset while each
         ! restart lowers the residual by at least a quarter.
+        ! The layered shell falls back to the inertia-controlled Newton from
+        ! the same start when this fails; it converges where the residual
+        ! merit stalls (DIII-D), at more steps.
         real(dp), intent(in) :: target
+        type(ideal_fb_t) :: start
         real(dp) :: last
         integer :: restart
+        if (shell_layers > 0) start = fb
+        fb%inertia_control = .false.
         last = huge(1.0_dp)
         do restart = 0, 20
             call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
@@ -614,6 +617,13 @@ contains
             if (.not. fb_report%residual < 0.75_dp*last) exit
             last = fb_report%residual
         end do
+        if (solve_status /= IDEAL_FB_OK .and. shell_layers > 0) then
+            fb = start
+            fb%inertia_control = .true.
+            call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
+                solve_status, verbose=free_boundary_verbose, residual_tolerance=target)
+            fb%inertia_control = .false.
+        end if
         map = fb%plasma
         print '(a,i0,a,i0,a,es10.3)', 'free-boundary solve: status ', solve_status, &
             ', iterations ', fb_report%iterations, ', residual ', fb_report%residual
