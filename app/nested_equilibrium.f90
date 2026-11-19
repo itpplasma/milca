@@ -200,6 +200,8 @@ program nested_equilibrium
     call finish_level()
     call require_unfolded()
     do
+        ! an iota without a resolved sign ends the resolution ladders
+        if (iota_vanishes) exit
         mesh_confirmed = .true.; modes_confirmed = .true.; iota_confirmed = .true.
         if (automatic_mesh) call raise_mesh(mesh_confirmed)
         if (iota_vanishes) exit

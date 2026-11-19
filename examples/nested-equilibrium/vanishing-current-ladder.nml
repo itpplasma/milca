@@ -1,0 +1,9 @@
+! benchmark profile_1d: R0 = 3 m, a = 0.8 m by 0.9 m, I = 0.02 A (2 s - s^2):
+! iota ~ 1e-8 is zero within current_tolerance, here under the mesh ladder
+&nested_input
+  nfp = 1, mpol = 1, ntor = 0, phiedge = 1.0,
+  rbc(0,0) = 3.0, rbc(0,1) = 0.8, zbs(0,1) = 0.9,
+  iota(0) = 0.3, pressure(0) = 0.2, pressure(1) = -0.2,
+  prescribe_current = .true., current(1) = 0.04, current(2) = -0.02,
+  angle_mpol = 4, tolerance = 1e-8, max_iterations = 400
+/

@@ -850,7 +850,8 @@ foreach(family 1 2)
 endforeach()
 foreach(name circular-tokamak circular-tokamak-current circular-tokamak-hermite
         circular-tokamak-current-hermite doubled-boundary axis-current-free
-        wrong-sign-start vanishing-current bean-continuation-fold)
+        wrong-sign-start vanishing-current bean-continuation-fold
+        vanishing-current-ladder)
     milca_test_labels(equilibrium_nested_${name} fast CLASSES apps
         TARGETS nested_equilibrium test_nested_equilibrium_app)
 endforeach()
