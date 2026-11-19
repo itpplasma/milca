@@ -6074,7 +6074,6 @@ contains
             x0 = fb%plasma%x; xs0 = fb%xs; phi0 = fb%phi; lam0 = fb%lam
             accepted = .false.; dmin = 0
             do tries = 1, 30
-                if (factored) call sparse_destroy(solver)
                 ! Near the solution (stationarity below 1e-3 of the start
                 ! and the last step's actual/predicted ratio above 0.5) the
                 ! plain Newton step is taken whatever the inertia and judged
