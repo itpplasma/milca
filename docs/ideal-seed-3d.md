@@ -112,6 +112,38 @@ the saddle, and Newton leaves for a lower-energy helical state, as the
 sliding-node variant did. CTest `ideal_map_field_angle` checks the leaves, the
 map gradient and Hessian, and the chart-angle regression.
 
+With `winslow = .true.` the interior of every toroidal plane is replaced by
+the Winslow map of the plane's cross-section (`milca_winslow_seed`): the plane
+coordinates X of the interior nodes minimise
+
+    E = int |A|_F^2 / det A dy,    A = dX/dy,
+
+the Dirichlet energy of the inverse map y(X) per reference area. E is finite
+only for maps with det A > 0. The minimiser exists and is injective exactly
+when the section is bounded by a Jordan curve, so boundaries whose harmonic
+extension folds are seeded without an axis guess. A plane is admitted only if
+the polygon through its boundary nodes is simple, a sampled test of the curve;
+otherwise the seed returns `WINSLOW_NOT_SIMPLE` and the initializer
+`IDEAL_MAP_BAD_INPUT`, while a failed solve on an admitted plane gives
+`IDEAL_MAP_FOLDED`. A folded start is untangled with the determinant
+
+    h = (det + sqrt(det^2 + eps^2))/2 = eps^2 / (2 (sqrt(det^2 + eps^2) - det)),
+
+the second form, used where det < 0, being free of cancellation. FortSym
+proves the two equal. eps starts at the section area per reference area and
+is reduced to 0 (Escobar et al., Comput. Methods Appl. Mech. Engrg. 192, 2775
+(2003)). A non-finite energy or gradient fails the plane. Newton with exact
+FortSym-generated Hessians (`gen/gen_winslow_seed.f90`) and
+Levenberg-Marquardt damping stops at a gradient of 1e-10 times the energy per
+length of the section, judging steps below the roundoff of the energy by the
+gradient norm. A clockwise section is solved reflected. The plane solutions
+are projected onto the map's toroidal modes by least squares. CTest
+`ideal_seed_3d_winslow` checks that a perturbed circular section returns to
+the conformal map to 1e-8, that a bean section with the boundary
+z + 0.4 z^2 + 0.15 conj(z)^2, whose harmonic extension folds, is admitted with
+positive determinants in every plane, and that a doubled boundary is rejected
+as not simple.
+
 `ideal_seed_disk_mesh` builds the common P2/P3 reference mesh. Generated
 leaves include primal/JVP/VJP; the initializer parallelizes independent nodal
 coefficient assembly. FP64 is the current reference path. The seed is a

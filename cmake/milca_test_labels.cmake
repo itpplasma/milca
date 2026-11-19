@@ -872,6 +872,8 @@ milca_test_labels(ideal_seed_3d_boundary_profiles fast CLASSES mhd
     TARGETS test_ideal_seed_3d)
 milca_test_labels(ideal_map_field_angle fast CLASSES mhd
     TARGETS test_ideal_map_field_angle)
+milca_test_labels(ideal_seed_3d_winslow fast CLASSES mhd
+    TARGETS test_winslow_seed)
 milca_test_labels(ideal_seed_3d_hermite_profile fast CLASSES mhd
     TARGETS test_toroidal_profile_hermite)
 milca_test_labels(ideal_seed_3d_nested_input fast CLASSES mhd
@@ -889,6 +891,10 @@ if(TARGET gen_ideal_field_angle)
         TARGETS gen_ideal_field_angle)
     milca_test_labels(ideal_map_leaves_regeneration fast CLASSES mhd
         TARGETS gen_ideal_map)
+endif()
+if(TARGET gen_winslow_seed)
+    milca_test_labels(winslow_seed_regeneration fast CLASSES mhd
+        TARGETS gen_winslow_seed)
 endif()
 if(TARGET gen_ideal_seed_3d)
     milca_test_labels(ideal_seed_3d_regeneration fast CLASSES mhd

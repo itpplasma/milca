@@ -659,6 +659,8 @@ contains
         real(dp), allocatable :: labels(:, :), slope(:)
         integer :: e, g, a, k
         status = IDEAL_MAP_OK
+        ! a solved map may be frozen again with a new field
+        if (allocated(map%axis_t)) deallocate (map%axis_t)
         allocate (labels(map%nodes, 1), map%axis_t(map%nodes), slope(map%nodes))
         do a = 1, map%nodes
             call field%evaluate(map%reference(:, a), chi, grad, b3, pressure)
@@ -735,6 +737,7 @@ contains
         ! The moments exclude the constant (sum phi_l = 1): the omega pin, a
         ! point condition that would force layer-scale f, is released.
         map%fixed(ideal_map_rdof(map, 2, 1, map%gauge)) = .false.
+        if (allocated(map%omega_c)) deallocate (map%omega_c)
         allocate (map%omega_c(nc, map%nodes))
         map%omega_c = 0
         do e = 1, map%cells
@@ -835,6 +838,7 @@ contains
         y = matmul(transpose(h), h)
         call symmetric_eigen(y, lam, status)
         if (status /= IDEAL_MAP_OK) return
+        if (allocated(map%axis_removed)) deallocate (map%axis_removed)
         allocate (map%axis_removed(2, ng))
         map%axis_removed(1, :) = lam(1:ng)
         ! Orthonormal contents of the kept near-tangential directions.
@@ -856,6 +860,7 @@ contains
             map%axis_removed(2, :) = mu(nk + 1:)
             c = matmul(c, mm(:, :nk))
         end if
+        if (allocated(map%axis_vec)) deallocate (map%axis_vec)
         allocate (map%axis_vec(2, np2, n))
         map%axis_vec = 0
         do p = 1, nk
@@ -1099,6 +1104,7 @@ contains
         real(dp) :: pos(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3)
         integer :: e, g, n, j
         n = map%nloc
+        if (allocated(map%omega_gauge)) deallocate (map%omega_gauge)
         allocate (map%omega_gauge(n, n, map%cells))
         map%omega_gauge = 0
         ! The phi-fixed increment space has no omega unknown. Its gauge
@@ -2192,107 +2198,107 @@ contains
             quasi = .false.
             if (qn_slot > 0) call quasi_newton_step(quasi)
             if (.not. quasi) then
-            t0 = wall_seconds()
-            call ideal_map_hessian(map, map%x, matrix)
-            report%hessian_s = report%hessian_s + wall_seconds() - t0
-            report%hessians = report%hessians + 1
-            !$omp parallel do default(shared) private(i, k) schedule(static)
-            do i = 1, map%nred
-                do k = matrix%rowptr(i), matrix%rowptr(i + 1) - 1
-                    if (matrix%colidx(k) == i) diag(i) = matrix%val(k)
+                t0 = wall_seconds()
+                call ideal_map_hessian(map, map%x, matrix)
+                report%hessian_s = report%hessian_s + wall_seconds() - t0
+                report%hessians = report%hessians + 1
+                !$omp parallel do default(shared) private(i, k) schedule(static)
+                do i = 1, map%nred
+                    do k = matrix%rowptr(i), matrix%rowptr(i + 1) - 1
+                        if (matrix%colidx(k) == i) diag(i) = matrix%val(k)
+                    end do
                 end do
-            end do
-            !$omp end parallel do
-            scale = maxval(abs(diag), mask=.not. map%fixed)
-            if (map%parallel_damping > 0) call add_parallel()
-            accepted = .false.
-            if (nested) then
-                call nested_line_search()
-                if (status == IDEAL_MAP_SOLVE_FAILED) then
-                    call cleanup(); return
-                end if
-            end if
-            if (.not. nested) then
-                eta = min(0.5_dp, sqrt(gnorm/max(ginit, tiny(1.0_dp))))
-            do tries = 1, 30
-                t0 = wall_seconds()
-                shift = merge(mu*(abs(diag) + 1.0e-12_dp*scale), 0.0_dp, damped)
-                report%trials = report%trials + 1
-                rhs = -gred
-                direct = .true.
-                if (map%krylov_step .and. retained) call krylov_solve(direct)
-                if (direct) then
-                    use_lu = .false.
-                    spd = .false.
-                    if (map%krylov_step) then
-                        ! The preconditioner must be SPD (map%factor_policy);
-                        ! an indefinite factor is used for this trial only.
-                        call factor_masked(map, matrix, .not. map%fixed, shift, &
-                            solver, factored, estatus, report, lu=lsolver, &
-                            lu_done=lfactored, use_lu=use_lu, spd=spd)
-                    else
-                        call factor_masked(map, matrix, .not. map%fixed, shift, &
-                            solver, factored, estatus, report)
-                    end if
-                    retained = estatus == 0 .and. spd
-                    if (estatus /= 0) then
-                        mu = mu*10; cycle
-                    end if
-                    if (use_lu) then
-                        call sparse_solve(lsolver, rhs, step, sstatus)
-                    else
-                        call sparse_solve(solver, rhs, step, sstatus)
-                    end if
-                    if (.not. status_ok(sstatus)) then
-                        status = IDEAL_MAP_SOLVE_FAILED; call cleanup(); return
-                    end if
-                    ! A fresh factor restarts the secant memory.
-                    if (allocated(qs)) then
-                        qn_slot = merge(2, 1, use_lu); qcount = 0
-                        if (mu > map%lagged_damping) qn_slot = 0
-                    end if
-                else if (allocated(qs)) then
-                    ! Krylov step: the retained factor stays the initial
-                    ! inverse of the quasi-Newton steps.
-                    qn_slot = 1
-                    if (mu > map%lagged_damping) qn_slot = 0
-                end if
-                report%factor_s = report%factor_s + wall_seconds() - t0
-                where (map%fixed) step = 0
-                call ideal_map_expand(map, step, full)
-                ! Trust region: near-null (relabelling) directions can carry
-                ! large Newton components; cap the displacement and rotation.
-                call trust_region()
-                full = alpha*full; step = alpha*step
-                trial = map%x + reshape(full, shape(map%x))
-                if (map%nangle > 0) trial_angle = map%angle &
-                    + full(3*map%nmode*map%nodes + 1:)
-                t0 = wall_seconds()
-                call ideal_map_energy(map, trial, trial_energy, estatus, &
-                    angle=trial_angle)
-                report%energy_s = report%energy_s + wall_seconds() - t0
-                if (estatus == IDEAL_MAP_OK .and. trial_energy < energy &
-                    - 64*epsilon(1.0_dp)*abs(energy)) then
-                    accepted = .true.; exit
-                end if
-                ! Within the roundoff band of W the energy cannot rank steps.
-                ! Rank them by the trapezoidal energy change
-                ! (g(x) + g(x + s)) . s / 2 (error O(|s|^3), no cancellation
-                ! against W); near-null directions need full Newton steps that
-                ! do not decrease |g| monotonically.
-                if (estatus == IDEAL_MAP_OK .and. trial_energy <= energy &
-                    + 1024*epsilon(1.0_dp)*abs(energy)) then
-                    call ideal_map_energy(map, trial, trial_energy, estatus, grad, &
-                        angle=trial_angle)
-                    call ideal_map_reduce(map, grad, rhs)
-                    where (map%fixed) rhs = 0
-                    if (dot_product(gred + rhs, step) <= 0) then
-                        accepted = .true.; exit
+                !$omp end parallel do
+                scale = maxval(abs(diag), mask=.not. map%fixed)
+                if (map%parallel_damping > 0) call add_parallel()
+                accepted = .false.
+                if (nested) then
+                    call nested_line_search()
+                    if (status == IDEAL_MAP_SOLVE_FAILED) then
+                        call cleanup(); return
                     end if
                 end if
-                mu = mu*10
-            end do
-            end if
+                if (.not. nested) then
+                    eta = min(0.5_dp, sqrt(gnorm/max(ginit, tiny(1.0_dp))))
+                    do tries = 1, 30
+                        t0 = wall_seconds()
+                        shift = merge(mu*(abs(diag) + 1.0e-12_dp*scale), 0.0_dp, damped)
+                        report%trials = report%trials + 1
+                        rhs = -gred
+                        direct = .true.
+                        if (map%krylov_step .and. retained) call krylov_solve(direct)
+                        if (direct) then
+                            use_lu = .false.
+                            spd = .false.
+                            if (map%krylov_step) then
+                                ! The preconditioner must be SPD (map%factor_policy);
+                                ! an indefinite factor is used for this trial only.
+                                call factor_masked(map, matrix, .not. map%fixed, shift, &
+                                    solver, factored, estatus, report, lu=lsolver, &
+                                    lu_done=lfactored, use_lu=use_lu, spd=spd)
+                            else
+                                call factor_masked(map, matrix, .not. map%fixed, shift, &
+                                    solver, factored, estatus, report)
+                            end if
+                            retained = estatus == 0 .and. spd
+                            if (estatus /= 0) then
+                                mu = mu*10; cycle
+                            end if
+                            if (use_lu) then
+                                call sparse_solve(lsolver, rhs, step, sstatus)
+                            else
+                                call sparse_solve(solver, rhs, step, sstatus)
+                            end if
+                            if (.not. status_ok(sstatus)) then
+                                status = IDEAL_MAP_SOLVE_FAILED; call cleanup(); return
+                            end if
+                            ! A fresh factor restarts the secant memory.
+                            if (allocated(qs)) then
+                                qn_slot = merge(2, 1, use_lu); qcount = 0
+                                if (mu > map%lagged_damping) qn_slot = 0
+                            end if
+                        else if (allocated(qs)) then
+                            ! Krylov step: the retained factor stays the initial
+                            ! inverse of the quasi-Newton steps.
+                            qn_slot = 1
+                            if (mu > map%lagged_damping) qn_slot = 0
+                        end if
+                        report%factor_s = report%factor_s + wall_seconds() - t0
+                        where (map%fixed) step = 0
+                        call ideal_map_expand(map, step, full)
+                        ! Trust region: near-null (relabelling) directions can carry
+                        ! large Newton components; cap the displacement and rotation.
+                        call trust_region()
+                        full = alpha*full; step = alpha*step
+                        trial = map%x + reshape(full, shape(map%x))
+                        if (map%nangle > 0) trial_angle = map%angle &
+                            + full(3*map%nmode*map%nodes + 1:)
+                        t0 = wall_seconds()
+                        call ideal_map_energy(map, trial, trial_energy, estatus, &
+                            angle=trial_angle)
+                        report%energy_s = report%energy_s + wall_seconds() - t0
+                        if (estatus == IDEAL_MAP_OK .and. trial_energy < energy &
+                            - 64*epsilon(1.0_dp)*abs(energy)) then
+                            accepted = .true.; exit
+                        end if
+                        ! Within the roundoff band of W the energy cannot rank steps.
+                        ! Rank them by the trapezoidal energy change
+                        ! (g(x) + g(x + s)) . s / 2 (error O(|s|^3), no cancellation
+                        ! against W); near-null directions need full Newton steps that
+                        ! do not decrease |g| monotonically.
+                        if (estatus == IDEAL_MAP_OK .and. trial_energy <= energy &
+                            + 1024*epsilon(1.0_dp)*abs(energy)) then
+                            call ideal_map_energy(map, trial, trial_energy, estatus, grad, &
+                                angle=trial_angle)
+                            call ideal_map_reduce(map, grad, rhs)
+                            where (map%fixed) rhs = 0
+                            if (dot_product(gred + rhs, step) <= 0) then
+                                accepted = .true.; exit
+                            end if
+                        end if
+                        mu = mu*10
+                    end do
+                end if
             end if
             if (.not. accepted) exit
             if (allocated(qs)) gprev = gred
