@@ -18,7 +18,8 @@ module milca_ideal_seed_3d
     use milca_winslow_seed, only: winslow_seed, WINSLOW_OK, WINSLOW_NOT_SIMPLE
     use milca_ideal_seed_3d_leaves, only: seed_complex_product, seed_boundary_mode, &
         seed_horner, seed_toroidal_form, seed_disk_coordinates, seed_disk_boundary, &
-        seed_primitive_coefficient, seed_primitive_finish, seed_hermite_profile
+        seed_primitive_coefficient, seed_primitive_finish, seed_hermite_profile, &
+        seed_disc_coordinates, seed_disc_pullback
     implicit none
     private
     public :: toroidal_profile_t, toroidal_seed_t, ideal_seed_3d_init
@@ -42,6 +43,10 @@ module milca_ideal_seed_3d
     type, extends(ideal_frozen_t) :: toroidal_seed_t
         type(toroidal_profile_t) :: profile
         real(dp) :: flux = 0
+        ! Reference disc: centre and half-widths in q1 and q2 (an ellipse).
+        ! The free boundary fits it to the plasma so that its shell map stays
+        ! close to the physical one.
+        real(dp) :: centre(2) = [2, 0], axes(2) = [1, 1]
     contains
         procedure :: evaluate => frozen_evaluate
     end type
@@ -194,12 +199,15 @@ contains
         class(toroidal_seed_t), intent(in) :: field
         real(dp), intent(in) :: point(2)
         real(dp), intent(out) :: chi, chi_gradient(2), b3, pressure
-        real(dp) :: u, v, s, iota, p, integral, edge, qi, pi_unused
-        call seed_disk_coordinates(point(1), point(2), u, v, s)
+        real(dp) :: u, v, s, iota, p, integral, edge, qi, pi_unused, gu, gv, bu
+        call seed_disc_coordinates(point(1), point(2), field%centre(1), field%centre(2), &
+            field%axes(1), field%axes(2), u, v, s)
         call field%profile%evaluate(s, iota, p, integral)
         call field%profile%evaluate(1.0_dp, qi, pi_unused, edge)
         call seed_toroidal_form(u, v, field%flux, pi, integral, edge, iota, p, &
-            chi, chi_gradient(1), chi_gradient(2), b3, pressure)
+            chi, gu, gv, bu, pressure)
+        call seed_disc_pullback(gu, gv, bu, field%axes(1), field%axes(2), &
+            chi_gradient(1), chi_gradient(2), b3)
     end subroutine
 
     subroutine ideal_seed_disk_mesh(mesh, boundary_nodes, degree, status)
@@ -227,7 +235,8 @@ contains
         call seed_disk_boundary(t, pi, point(1), point(2))
     end subroutine
 
-    subroutine ideal_seed_boundary_coefficients(point, coefficients, values, axis)
+    subroutine ideal_seed_boundary_coefficients(point, coefficients, values, axis, &
+            centre, axes)
         ! Harmonic extension: rho^m exp(i m theta)=(u+i v)^m is regular
         ! at the axis. Mode sums and their storage are orchestration; the
         ! complex recurrence and real Fourier conversion are generated.
@@ -236,11 +245,18 @@ contains
         real(dp), intent(in) :: point(2), coefficients(:, :, 0:)
         real(dp), intent(out) :: values(:, :)
         real(dp), intent(in), optional :: axis(:, :)
+        ! reference disc (default: centre (2, 0), half-widths 1)
+        real(dp), intent(in), optional :: centre(2), axes(2)
         real(dp) :: u, v, s, re, im, nr, ni, term(4), c(4)
         integer :: m, n, ntor, mode
         ntor = (size(coefficients, 2) - 1)/2
         values = 0; re = 1; im = 0
-        call seed_disk_coordinates(point(1), point(2), u, v, s)
+        if (present(centre) .and. present(axes)) then
+            call seed_disc_coordinates(point(1), point(2), centre(1), centre(2), axes(1), &
+                axes(2), u, v, s)
+        else
+            call seed_disk_coordinates(point(1), point(2), u, v, s)
+        end if
         do m = 0, ubound(coefficients, 3)
             do n = -ntor, ntor
                 c = coefficients(:, n + ntor + 1, m)

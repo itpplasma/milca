@@ -1,0 +1,9 @@
+&nested_input
+  nfp = 1, mpol = 1, ntor = 0, phiedge = 0.19788,
+  rbc(0,0) = 0.945, rbc(0,1) = 0.238, zbs(0,1) = 0.238,
+  iota(0) = 0.3, prescribe_current = .true., current(1) = 50000.0,
+  pressure(0) = 600.0, pressure(1) = -600.0,
+  boundary_nodes = 24, degree = 3, tolerance = 1e-8, iota_nodes = 6,
+  free_boundary = .true., mgrid_file = 'mgrid_tokamak.nc',
+  extcur(1) = 1.0, extcur(2) = 0.0138, extcur(3) = -0.00414,
+/

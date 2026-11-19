@@ -433,3 +433,76 @@ hypothesis that has not been traced.
 6. Inverse API. This needs observable operators O(x) with ∂O/∂x and an
    adjoint solve through the existing KKT factor, followed by the
    Gauss–Newton or GSVD loop in fortnum on dO/dp.
+
+## 10. Free-boundary decks of the nested equilibrium app
+
+`nested_equilibrium` with `free_boundary`
+([input](nested-equilibrium-input.md#free-boundary)) solves VMEC free-boundary
+decks (LFREEB, MGRID_FILE, EXTCUR) with this residual on the cylindrical chart
+and the per-n exterior, which holds for every toroidal mode on an
+axisymmetric Γ_c.
+
+- Field basis. `mgrid_basis_t` (`src/mhd/ideal_fb_mgrid.f90`) implements the
+  basis contract for MAKEGRID's grid (reader `milca_mgrid_file`): field k is
+  group k per unit EXTCUR, interpolated in (R, Z) by the tensor Lagrange
+  polynomial of degree 5 (error O(h^6), degree 1 and 3 selectable) and
+  across the kp planes by their exact discrete Fourier series, so that the
+  harmonics n = k nfp of `sample` are the trigonometric interpolant's. Against
+  analytic harmonic fields written to synthetic grids (`ideal_fb_mgrid_field`)
+  the error falls by 15.7 and 66.9 per halving of h for degree 3 and 5.
+- Γ_c. An axisymmetric curve r(α) about the centre that keeps the clearance
+  `coupling_margin` × a from every section of the guess, stays in the grid and
+  avoids the coils inside it. Coils are the grid nodes where curl B exceeds
+  5 % of |B|/h (`mgrid_current_nodes`), widened by the stencil half-width.
+  Without this, the DIII-D grid (`mgrid_d3d_ef`) put its F-coil groups 1 to 4
+  inside Γ_c, with an n = 0 closure of 0.1 T m each; with it all 21 groups
+  close to 1e-8 T m. A clearance squeezed between plasma and coils leaves a
+  thin shell, and the mesh then takes cells of at most twice the narrowest gap.
+- Plasma current. The multivalued part c θ/2π continues outside Γ_c as an
+  axisymmetric filament of unit circulation at the reference centre
+  (`filament_basis_t`), so that the traces are those of c times its field plus
+  sum_k EXTCUR_k times the group traces. c = μ0 I(1) for a prescribed current.
+- Start. The guess's interior is solved in fixed-boundary equilibrium with
+  the current matched there, so that Newton starts with the plasma's edge
+  current equal to c. A Winslow interior with an unmatched iota put a current
+  sheet of 10 % of I on Γ_p of the DIII-D guess and drove the boundary into
+  Γ_c.
+
+Evidence on the synthetic tokamak (`equilibrium_nested_free-boundary-tokamak`:
+TF 1/R, uniform B_Z = 0.0138 T and grad(Z log R) with decay index 0.3, I = 50
+kA, p = 600(1 − s) Pa, phiedge 0.19788 Wb, no Γ_c dependence at 24 boundary
+nodes):
+
+| | raxis (m) | volume (m^3) | wb (T^2 m^3) | iota edge |
+|---|---|---|---|---|
+| MILCA free, 24 nodes | 0.936758 | 1.027415 | 0.0157639 | 0.136212 |
+| MILCA free, 48 nodes | 0.936773 | 1.027433 | 0.0157641 | 0.136183 |
+| VMEC++ free (ns 128, mpol 8, ntheta default) | 0.933069 | 1.020111 | 0.0157640 | 0.135676 |
+| VMEC++ free (ns 128, mpol 12, ntheta 64) | 0.934277 | 1.022835 | 0.0157640 | 0.135864 |
+| VMEC++ free (ns 128, mpol 24, ntheta 192) | 0.934417 | 1.023148 | 0.0157640 | 0.135886 |
+| MILCA fixed at the mpol 8 VMEC++ boundary, 32 nodes | 0.933487 | 1.020112 | 0.0157640 | 0.135674 |
+
+MILCA's fixed boundary on VMEC++'s converged boundary reproduces VMEC++ to
+4e-4 m and 1e-6 in volume, so the interior models agree. VMEC++'s free
+boundary moves by 1.3 mm and 0.3 % in volume from mpol 8 to its converged
+value at mpol 24. The remaining difference to MILCA, 2.3 mm in the axis and
+0.42 % in the volume, does not change with MILCA's mesh, Γ_c or mgrid degree;
+which side carries it is open. MILCA takes 10 s at 16 and 35 s at 24 boundary
+nodes on 4 threads, VMEC++ 116 s at mpol 8 and 65 s at mpol 24 with 4
+threads (sCluster).
+
+Open, from the benchmark decks on sCluster:
+
+- DIII-D (`mgrid_d3d_ef`, F-coil column 0.1 m inboard of the plasma): the
+  room left between plasma and coils is 4 to 8 cm. Started from the guess or
+  from VMEC++'s boundary, Newton moves the inboard edge against Γ_c and
+  stalls at a residual of 1e-4 next to a shell fold, where the shell Hessian
+  no longer matches the gradient. At the stall the volume is 19.36 m^3, wb
+  0.9003 T^2 m^3 and raxis 1.708 m against VMEC++'s 19.57, 0.9015 and 1.722.
+  Restarting a stalled solve with its Levenberg damping reset recovers the
+  synthetic case but not this one.
+- CTH-like (nfp 5): the grid leaves a clearance of 0.11 a, and the harmonic
+  extension of the shell map from the reference ellipse to the rotating
+  sections folds before the first step. NCSX (`mgrid_ncsx_c09r00_small`): the
+  grid edge or a coil touches the guess. Both need a Γ_c that follows the
+  sections, that is the 3D chart with the R2 exterior of section 9.

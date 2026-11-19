@@ -29,21 +29,27 @@ module milca_map_3d_loop
     end type
 contains
 
-    subroutine map_3d_loop_setup(map, s, loop, status)
+    subroutine map_3d_loop_setup(map, s, loop, status, elliptic)
         ! the circle of radius sqrt(s) times the reference radius about the
-        ! reference centre, 0 < s < 1; status 1 when it crosses a curved
-        ! interior edge or a point is found in no cell
+        ! reference centre, 0 < s < 1; with elliptic, the ellipse of sqrt(s)
+        ! times the reference half-widths (an elliptic reference disc); status 1
+        ! when it crosses a curved interior edge or a point is found in no cell
         type(ideal_map_t), intent(in) :: map
         real(dp), intent(in) :: s
         type(map_3d_loop_t), intent(out) :: loop
         integer, intent(out) :: status
+        logical, intent(in), optional :: elliptic
         real(dp), allocatable :: angles(:), sorted(:)
-        real(dp) :: centre(2), radius, x(arc_points), w(arc_points), t, h
+        real(dp) :: centre(2), radius(2), x(arc_points), w(arc_points), t, h
         real(dp) :: y(2), xi(2)
         integer :: e, i, k, n, owner, previous
         status = 1
         centre = (maxval(map%reference, dim=2) + minval(map%reference, dim=2))/2
         radius = sqrt(s)*(maxval(map%reference(1, :)) - minval(map%reference(1, :)))/2
+        if (present(elliptic)) then
+            if (elliptic) radius(2) = sqrt(s)*(maxval(map%reference(2, :)) &
+                - minval(map%reference(2, :)))/2
+        end if
         allocate (angles(0))
         do e = 1, map%cells
             do i = 1, 3
@@ -81,11 +87,12 @@ contains
     end subroutine
 
     subroutine edge_crossings(map, cell, edge, centre, radius, list, status)
-        ! angles at which the circle crosses the edge from vertex edge to the
-        ! next vertex of the cell; status 1 when that edge is curved
+        ! angles at which the ellipse of half-widths radius crosses the edge
+        ! from vertex edge to the next vertex of the cell, found on the unit
+        ! circle of the scaled coordinates; status 1 when that edge is curved
         type(ideal_map_t), intent(in) :: map
         integer, intent(in) :: cell, edge
-        real(dp), intent(in) :: centre(2), radius
+        real(dp), intent(in) :: centre(2), radius(2)
         real(dp), allocatable, intent(inout) :: list(:)
         integer, intent(out) :: status
         real(dp) :: a(2), b(2), d(2), f(2), qa, qb, qc, disc, root(2), p(2), node(2)
@@ -93,9 +100,9 @@ contains
         status = 0
         a = map%reference(:, map%conn(edge, cell))
         b = map%reference(:, map%conn(mod(edge, 3) + 1, cell))
-        d = b - a; f = a - centre
+        d = (b - a)/radius; f = (a - centre)/radius
         qa = dot_product(d, d); qb = 2*dot_product(f, d)
-        qc = dot_product(f, f) - radius**2
+        qc = dot_product(f, f) - 1
         disc = qb**2 - 4*qa*qc
         if (disc < 0) return
         root = [(-qb - sqrt(disc))/(2*qa), (-qb + sqrt(disc))/(2*qa)]
@@ -109,7 +116,7 @@ contains
         ! interior nodes lie on the chord.
         degree = nint((sqrt(8.0_dp*map%nloc + 1) - 3)/2)
         do m = 4 + (edge - 1)*(degree - 1), 3 + edge*(degree - 1)
-            node = map%reference(:, map%conn(m, cell)) - a
+            node = (map%reference(:, map%conn(m, cell)) - a)/radius
             if (abs(d(1)*node(2) - d(2)*node(1)) > 1e-12_dp*qa) then
                 status = 1
                 return
@@ -117,7 +124,7 @@ contains
         end do
         do j = 1, 2
             if (root(j) < 0 .or. root(j) > 1) cycle
-            p = a + root(j)*d - centre
+            p = f + root(j)*d
             list = [list, modulo(atan2(p(2), p(1)), 2*pi)]
         end do
     end subroutine

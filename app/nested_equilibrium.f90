@@ -1,8 +1,11 @@
 program nested_equilibrium
-    ! Fixed-boundary nested 3D equilibrium from a boundary, the toroidal flux and
-    ! the profiles iota(s), p(s) in the normalized toroidal flux s, solved by the
-    ! native map Newton (docs/nested-equilibrium-input.md). Writes the solved
-    ! state's global quantities for cross-code comparison.
+    ! Nested 3D equilibrium from a boundary, the toroidal flux and the
+    ! profiles iota(s), p(s) in the normalized toroidal flux s, solved by the
+    ! native map Newton (docs/nested-equilibrium-input.md). With free_boundary
+    ! the boundary is the initial guess and the plasma sits in the vacuum field
+    ! of coil groups tabulated in an mgrid file, scaled by extcur
+    ! (milca_ideal_free_boundary). Writes the solved state's global quantities
+    ! for cross-code comparison.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
@@ -19,6 +22,15 @@ program nested_equilibrium
     use milca_map_3d_loop, only: map_3d_loop_t, map_3d_loop_setup, map_3d_loop_integral
     use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
     use milca_ideal_seed_3d_leaves, only: seed_hermite_profile_jvp
+    use milca_equilibrium_chart, only: cylindrical_chart_t
+    use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
+        ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
+        ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED
+    use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
+    use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
+    use milca_ideal_fb_nested, only: fb_nested_geometry, fb_nested_mesh, &
+        fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t
+    use milca_mgrid_file, only: mgrid_t, mgrid_read
     implicit none
     integer, parameter :: mmax = 64, nmax = 32, kmax = 32, knot_max = 1024
     real(dp), parameter :: pi = acos(-1.0_dp), mu0 = 4e-7_dp*pi
@@ -66,13 +78,34 @@ program nested_equilibrium
     type(toroidal_profile_t) :: profile
     type(ideal_map_solve_report_t) :: report
     character(256) :: message
+    ! Free boundary: coil groups of mgrid_file scaled by extcur, mgrid
+    ! interpolation degree in (R, Z), and the clearance of the coupling
+    ! surface Gamma_c around the guess in units of the minor radius.
+    integer, parameter :: extcur_max = 512
+    logical :: free_boundary
+    ! the free-boundary solver is active (off for the fixed-boundary interior
+    ! of the seed, which matches the current on the guess)
+    logical :: fb_solving = .false.
+    character(512) :: mgrid_file
+    real(dp) :: extcur(extcur_max), coupling_margin, margin_used
+    integer :: mgrid_degree
+    type(ideal_fb_t) :: fb
+    type(ideal_fb_report_t) :: fb_report
+    type(mgrid_basis_t) :: coil_basis
+    type(filament_basis_t) :: filament
+    type(ideal_fb_circuits_t) :: circuits
+    type(cylindrical_chart_t) :: chart
+    real(dp), allocatable :: filament_drive(:, :), filament_load(:, :)
+    real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
+    real(dp), allocatable :: fb_curve(:)
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
         current_tolerance, iota_type, pressure_type, &
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
-        iota_nodes, iota_tolerance
+        iota_nodes, iota_tolerance, free_boundary, mgrid_file, extcur, mgrid_degree, &
+        coupling_margin
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -83,6 +116,8 @@ program nested_equilibrium
     map_ntor = -1; fourier_tolerance = 1e-4_dp
     mesh_tolerance = 1e-4_dp
     iota_nodes = -1; iota_tolerance = 1e-4_dp
+    free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
+    coupling_margin = 0.5_dp
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -108,6 +143,10 @@ program nested_equilibrium
     if (.not. iota_tolerance > 0) error stop 'nested_equilibrium: iota_tolerance'
     if (iota_nodes > iota_nodes_max .or. (iota_nodes >= 0 .and. iota_nodes < 2)) &
         error stop 'nested_equilibrium: iota_nodes from 2 to 32, or -1'
+    if (free_boundary .and. len_trim(mgrid_file) == 0) &
+        error stop 'nested_equilibrium: free_boundary needs mgrid_file'
+    if (free_boundary .and. .not. coupling_margin > 0) &
+        error stop 'nested_equilibrium: coupling_margin must be positive'
     call run%open_resolved(unit)
     write (unit, nml=nested_input)
     call run%close_resolved(unit)
@@ -150,7 +189,12 @@ program nested_equilibrium
     ntor_level = merge(ntor, map_ntor, map_ntor < 0)
     mesh_error = 0; fourier_error = 0; iota_error = 0
     call set_toroidal_level(ntor_level)
-    call mesh_ladder()
+    if (free_boundary) then
+        call free_boundary_setup()
+        call fb_level(boundary_nodes, .true.)
+    else
+        call mesh_ladder()
+    end if
     call finish_level()
     call require_unfolded()
     do
@@ -166,7 +210,11 @@ program nested_equilibrium
     end do
     call profile%evaluate(0.0_dp, iota_axis, unused, unused)
     call profile%evaluate(1.0_dp, iota_edge, unused, unused)
-    residual = free_gradient()/max(tiny(1.0_dp), reference)
+    if (free_boundary) then
+        residual = fb_report%residual
+    else
+        residual = free_gradient()/max(tiny(1.0_dp), reference)
+    end if
     call integrals(volume, area, magnetic, kinetic, status)
     if (status /= 0) call fail('a volume integral met a folded map')
     call axis_radius(raxis, status)
@@ -175,7 +223,8 @@ program nested_equilibrium
     if (status /= 0) call fail('the edge current readback met a folded map')
 
     call result%create(run)
-    call result%attribute('physical_model', 'fixed-boundary nested ideal MHD, prescribed iota')
+    call result%attribute('physical_model', merge('free-boundary ', 'fixed-boundary', &
+        free_boundary)//' nested ideal MHD, prescribed iota')
     call result%attribute('converged', merge('true ', 'false', &
         solve_status == 0 .and. residual <= tolerance .and. current_error <= current_tolerance &
         .and. .not. iota_vanishes &
@@ -194,6 +243,15 @@ program nested_equilibrium
         'VMEC normalisation int B^2/2 dV / (2 pi)^2 (mu0 = 1)')
     call result%write('betatotal', kinetic/magnetic, '1', 'int p dV / int B^2/2 dV')
     call result%write('ctor', ctor, 'A', 'enclosed toroidal current at the edge')
+    if (free_boundary) then
+        call result%write('coupling_margin', margin_used, '1', &
+            'clearance of the coupling surface around the guess / minor radius')
+        call result%write('coil_closure', coil_closure, 'T m', &
+            'largest curl-free mismatch of the coil traces on the coupling surface')
+        call result%write('circulation', circulation, 'T m', &
+            'poloidal circulation of the vacuum field around the plasma')
+        call result%write('vacuum_f', fb%f_vac, 'T m', 'R B_phi of the coil field')
+    end if
     if (prescribe_current) then
         call result%attribute('current_status', merge('iota vanishes', 'matched      ', &
             iota_vanishes))
@@ -221,6 +279,7 @@ program nested_equilibrium
         //' from map_ntor - 2')
     call result%write('force_residual', residual, '1', 'relative free reduced-gradient l2')
     call result%write('tolerance', tolerance, '1', 'requested force_residual')
+    if (free_boundary) report%iterations = fb_report%iterations
     call result%write('iterations', real(report%iterations, dp), '1', 'Newton iterations')
     call result%write('energy_seconds', report%energy_s, 's', 'final solve: energy and gradient')
     call result%write('hessian_seconds', report%hessian_s, 's', 'final solve: Hessian assembly')
@@ -272,6 +331,292 @@ contains
             coarse = map; coarse_seed = seed_x
         end do
     end subroutine
+
+    subroutine free_boundary_setup()
+        ! coil groups of the mgrid file and the coupling surface around the guess
+        type(mgrid_t) :: grid
+        real(dp), allocatable :: coils_inside(:, :)
+        integer :: local
+        if (degree < 2 .or. degree > 3) &
+            call fail('the free boundary takes degree 2 or 3')
+        call mgrid_read(trim(mgrid_file), grid, local, message)
+        if (local /= 0) call fail('mgrid: '//trim(message))
+        if (grid%nextcur > extcur_max) &
+            call fail('mgrid: more coil groups than extcur holds')
+        if (grid%kp > 1 .and. mod(nfp, grid%nfp) /= 0) &
+            call fail('mgrid: the field periods of the grid do not divide nfp')
+        call mgrid_basis_init(coil_basis, grid%b, grid%nfp, grid%rmin, grid%rmax, &
+            grid%zmin, grid%zmax, grid%unit_scale(), mgrid_degree, local)
+        if (local /= 0) call fail('mgrid: invalid grid or mgrid_degree (1, 3 or 5)')
+        print '(a,3i5,a,i0,a,i0)', 'mgrid ir jz kp', grid%ir, grid%jz, grid%kp, &
+            ', nfp ', grid%nfp, ', coil groups ', grid%nextcur
+        call mgrid_current_nodes(coil_basis, extcur(:grid%nextcur), coils_inside)
+        call fb_nested_geometry(boundary_input, nfp, coupling_margin, [grid%rmin, &
+            grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
+            fb_curve, margin_used, local, message)
+        if (local /= 0) call fail(trim(message))
+        print '(a,2f9.4,a,2f8.4,a,f6.3)', 'reference disc centre', fb_centre, &
+            ' half-widths', fb_axes, ', coupling margin', margin_used
+        filament%source = fb_centre
+        seed%profile = profile; seed%flux = phiedge
+        seed%centre = fb_centre; seed%axes = fb_axes
+        if (.not. profile%valid() .or. .not. single_signed()) &
+            call fail('the frozen field needs an iota profile without zeros')
+        circulation = 0
+        if (prescribe_current) circulation = mu0*current_target(1.0_dp)
+    end subroutine
+
+    subroutine fb_level(nodes, first)
+        ! Free boundary at the mesh of nodes boundary nodes and the current
+        ! toroidal modes: coupling-surface operators and traces, the start
+        ! from the guess (first) or from the solved level, and the solve.
+        integer, intent(in) :: nodes
+        logical, intent(in) :: first
+        type(ideal_fb_t) :: next
+        real(dp), allocatable :: chain(:, :), d(:, :, :), l(:, :, :)
+        real(dp) :: closure(1), f(1), spread(1)
+        integer :: local
+        call fb_nested_mesh(mesh, chain, fb_centre, fb_axes, fb_curve, nodes, degree, &
+            local)
+        if (local /= 0) call fail('the free-boundary mesh failed')
+        seed%profile = profile
+        call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, 0.0_dp, &
+            circulation, local, nphi=max(1, 4*ntor_level + 1))
+        if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
+        call ideal_fb_circuits_build(next, coil_basis, circuits, local)
+        if (local /= IDEAL_FB_OK) &
+            call fail('the coil field grid does not cover the coupling surface')
+        allocate (d(next%nt, next%nmode, 1), l(next%nt, next%nmode, 1))
+        call ideal_fb_drive_traces(next, filament, [1.0_dp], d, l, closure, f, spread, &
+            local)
+        if (local /= IDEAL_FB_OK) call fail('the plasma-current traces failed')
+        filament_drive = d(:, :, 1); filament_load = l(:, :, 1)
+        ! bound of the closure of the summed coil field: a coil inside Gamma_c
+        ! (a toroidal current it encloses) shows as an n = 0 closure
+        coil_closure = sum(abs(extcur(:circuits%ncircuit))*circuits%closure)
+        call install_traces(next)
+        print '(a,es12.4,a,es10.2,a,i0,a,i0)', 'F_vac (T m)', next%f_vac, &
+            ', coil closure', coil_closure, ', unknowns ', next%n, ', modes ', &
+            ntor_level
+        if (.not. next%f_vac > 0) call fail('the coil toroidal field is not positive;' &
+            //' reverse extcur and the current for a negative toroidal flux')
+        if (first) then
+            call fb_nested_seed(next, boundary, fb_centre, fb_axes, local)
+            if (local /= IDEAL_FB_OK) &
+                call fail('the free-boundary seed is not admitted')
+        else
+            call fb_nested_transfer(next, fb, local)
+            if (local /= IDEAL_FB_OK) call fail('the resolution level transfer failed')
+        end if
+        if (first) then
+            if (prescribe_current) call seed_current(next)
+            call interior_equilibrium(next)
+            if (.not. prescribe_current) then
+                ! prescribed iota: start from the circulation of the seeded plasma
+                map = next%plasma
+                circulation = mu0*edge_current(local)
+                if (local /= 0) call fail('the edge current readback met a folded map')
+                call install_traces(next)
+            end if
+            call fb_nested_settle(next, local)
+            if (local /= IDEAL_FB_OK) &
+                call fail('the free-boundary seed is not admitted')
+        end if
+        fb = next
+        call fb_solve(tolerance)
+    end subroutine
+
+    subroutine interior_equilibrium(target)
+        ! The seed's interior in fixed-boundary equilibrium (position gauge,
+        ! Gamma_p held), with a prescribed current matched there by the
+        ! fixed-boundary Newton on iota: the free-boundary Newton then starts
+        ! with the force imbalance on Gamma_p only and with the plasma's edge
+        ! current equal to the vacuum circulation, instead of moving the whole
+        ! plasma to relax the Winslow interior and a current sheet.
+        type(ideal_fb_t), intent(inout) :: target
+        integer :: local
+        map = target%plasma
+        map%position_gauge = .true.
+        seed%profile = profile
+        call ideal_map_freeze(map, seed, local)
+        if (local /= 0) call fail('the seed folded when frozen for its interior')
+        reference = free_gradient()
+        call ideal_map_solve(map, tolerance, max_iterations, report, local, &
+            reference_gradient=reference)
+        print '(a,i0,a,i0)', 'fixed-boundary interior of the seed: status ', local, &
+            ', iterations ', report%iterations
+        fb_solving = .false.
+        if (prescribe_current) then
+            solve_tolerance = tolerance
+            call match_current(current_error)
+        end if
+        fb_solving = .true.
+        target%plasma%x = map%x
+        seed%profile = profile
+        call ideal_map_freeze(target%plasma, seed, local)
+        if (local /= 0) call fail('the seed folded when frozen with the matched iota')
+    end subroutine
+
+    subroutine seed_current(target)
+        ! Iota of the seed matched to the prescribed current on the seed's
+        ! geometry, where I(s_j) = A_j c_j + C_j is exact: the first solve then
+        ! starts with the plasma current equal to the vacuum circulation.
+        type(ideal_fb_t), intent(inout) :: target
+        type(map_3d_loop_t), allocatable :: loops(:)
+        real(dp), allocatable :: s(:), c(:), now(:), shifted(:)
+        real(dp) :: unused1, unused2
+        integer :: j, local, n
+        n = iota_level
+        s = iota_surfaces(n)
+        allocate (loops(n), c(n), now(n), shifted(n))
+        map = target%plasma
+        do j = 1, n
+            call map_3d_loop_setup(map, s(j), loops(j), local, elliptic=free_boundary)
+            if (local /= 0) call fail('a current loop met a curved cell edge')
+            call profile%evaluate(s(j), c(j), unused1, unused2)
+        end do
+        call set_iota(c); seed%profile = profile
+        call measure(loops, now)
+        call set_iota(c + 1); seed%profile = profile
+        call measure(loops, shifted)
+        do j = 1, n
+            shifted(j) = c(j) + (current_target(s(j)) - now(j))/(shifted(j) - now(j))
+        end do
+        call set_iota(shifted)
+        ! a seed whose current needs iota of both signs keeps its iota
+        if (.not. single_signed()) call set_iota(c)
+        seed%profile = profile
+        call ideal_map_freeze(target%plasma, seed, local)
+        if (local /= 0) call fail('the seed folded when frozen with the matched iota')
+    end subroutine
+
+    subroutine install_traces(target)
+        ! vacuum traces: the coil groups at extcur plus the plasma current
+        type(ideal_fb_t), intent(inout) :: target
+        real(dp), allocatable :: d(:, :), l(:, :)
+        real(dp) :: f
+        integer :: k, local
+        d = circulation*filament_drive; l = circulation*filament_load; f = 0
+        do k = 1, circuits%ncircuit
+            d = d + extcur(k)*circuits%drive(:, :, k)
+            l = l + extcur(k)*circuits%load(:, :, k)
+            f = f + extcur(k)*circuits%f_vac(k)
+        end do
+        target%circulation = circulation
+        call ideal_fb_set_traces(target, d, l, f, local)
+        if (local /= IDEAL_FB_OK) call fail('the vacuum traces are not finite')
+    end subroutine
+
+    subroutine fb_solve(target)
+        ! Newton on the free-boundary residual to the relative residual target.
+        ! A solve that stalls has driven its Levenberg damping up; it is
+        ! restarted from its last state with the damping reset while each
+        ! restart lowers the residual by at least a quarter.
+        real(dp), intent(in) :: target
+        real(dp) :: last
+        integer :: restart
+        last = huge(1.0_dp)
+        do restart = 0, 20
+            call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
+                solve_status, verbose=.false., residual_tolerance=target)
+            if (solve_status == IDEAL_FB_OK .or. solve_status == IDEAL_FB_FOLDED) exit
+            if (.not. fb_report%residual < 0.75_dp*last) exit
+            last = fb_report%residual
+        end do
+        map = fb%plasma
+        print '(a,i0,a,i0,a,es10.3)', 'free-boundary solve: status ', solve_status, &
+            ', iterations ', fb_report%iterations, ', residual ', fb_report%residual
+    end subroutine
+
+    subroutine match_circulation(error)
+        ! Prescribed iota: the vacuum circulation c equals mu0 times the edge
+        ! current of the solved plasma, so that no current sheet remains on
+        ! Gamma_p. error: the relative change of c in the last update.
+        ! The edge current responds to c through the plasma position with a
+        ! gain near -1, so the fixed point c = mu0 I(c) is found by secants.
+        real(dp), intent(out) :: error
+        real(dp) :: defect, previous_c, previous_defect, next_c
+        integer :: k, local
+        error = 0
+        previous_c = 0; previous_defect = 0
+        do k = 1, max_current_iterations
+            defect = mu0*edge_current(local) - circulation
+            if (local /= 0) call fail('the edge current readback met a folded map')
+            error = abs(defect)/max(abs(circulation + defect), tiny(1.0_dp))
+            print '(a,i3,a,es12.4,a,es10.3)', 'circulation iteration ', k, ': ', &
+                circulation, ' T m, relative defect ', error
+            current_iterations = k
+            if (error <= current_tolerance) exit
+            next_c = circulation + defect
+            if (k > 1 .and. abs(defect - previous_defect) > 0) next_c = circulation &
+                - defect*(circulation - previous_c)/(defect - previous_defect)
+            previous_c = circulation; previous_defect = defect
+            circulation = next_c
+            call install_traces(fb)
+            call fb_solve(tolerance)
+        end do
+    end subroutine
+
+    subroutine fb_current_jacobian(c, loops, measured, jacobian)
+        ! current_jacobian with the free-boundary response: dg/dc_k on all
+        ! unknowns (plasma rows only) and dx_k = -K^-1 dg/dc_k from the
+        ! slide-gauged KKT matrix K of the solved state (ideal_fb_sensitivity).
+        real(dp), intent(in) :: c(:), measured(:)
+        type(map_3d_loop_t), intent(in) :: loops(:)
+        real(dp), intent(out) :: jacobian(:, :)
+        real(dp), allocatable :: rhs(:, :), dx(:, :), plus(:), minus(:), x0(:, :, :)
+        real(dp), allocatable :: step(:, :, :)
+        real(dp) :: ip(size(c)), im(size(c)), e(size(c)), h, length
+        integer :: k, local, n
+        n = size(c)
+        allocate (rhs(fb%n, n), dx(fb%n, n), plus(fb%n), minus(fb%n))
+        call set_iota(c + 1)
+        seed%profile = profile
+        call measure(loops, ip)
+        jacobian = 0
+        do k = 1, n
+            jacobian(k, k) = ip(k) - measured(k)
+        end do
+        do k = 1, n
+            e = 0; e(k) = 1
+            call fb_frozen_gradient(c + e, plus)
+            call fb_frozen_gradient(c - e, minus)
+            rhs(:, k) = -(plus - minus)/2
+        end do
+        call fb_frozen_gradient(c, plus)
+        call ideal_fb_sensitivity(fb, rhs, dx, local)
+        if (local /= IDEAL_FB_OK) &
+            call fail('the free-boundary sensitivity solve failed')
+        map = fb%plasma
+        x0 = map%x
+        length = maxval(maxval(map%reference, dim=2) - minval(map%reference, dim=2))
+        allocate (step(2, fb%nmode, fb%plasma%nodes))
+        do k = 1, n
+            step = reshape(dx(:fb%np, k), shape(step))
+            h = 1e-6_dp*length/max(maxval(abs(step)), tiny(1.0_dp))
+            map%x(1:2, :, :) = x0(1:2, :, :) + h*step
+            call measure(loops, ip)
+            map%x(1:2, :, :) = x0(1:2, :, :) - h*step
+            call measure(loops, im)
+            jacobian(:, k) = jacobian(:, k) + (ip - im)/(2*h)
+        end do
+        map%x = x0
+    end subroutine
+
+    subroutine fb_frozen_gradient(c, gradient)
+        ! free-boundary residual with the plasma frozen at the iota values c
+        real(dp), intent(in) :: c(:)
+        real(dp), intent(out) :: gradient(:)
+        integer :: local
+        call set_iota(c)
+        seed%profile = profile
+        call ideal_map_freeze(fb%plasma, seed, local)
+        if (local /= 0) call fail('the map folded when frozen in the current Jacobian')
+        call ideal_fb_gradient(fb, gradient, local)
+        if (local /= IDEAL_FB_OK) &
+            call fail('the free-boundary residual met a folded map')
+    end subroutine
+
 
     logical function single_signed()
         ! the seed's admission rule: iota without zeros on [0, 1]
@@ -371,9 +716,15 @@ contains
     subroutine next_level(nodes_next, modes_next)
         ! seed at the new resolution plus the correction of the solved level
         integer, intent(in) :: nodes_next, modes_next
-        previous_map = map; previous_seed = seed_x; previous_observed = observed
+        previous_map = map; previous_observed = observed
+        if (allocated(seed_x)) previous_seed = seed_x
         boundary_nodes = nodes_next; ntor_level = modes_next
         call set_toroidal_level(ntor_level)
+        if (free_boundary) then
+            call fb_level(boundary_nodes, .false.)
+            call finish_level()
+            return
+        end if
         call ideal_seed_disk_mesh(mesh, boundary_nodes, degree, status)
         if (status /= 0) error stop 'nested_equilibrium: disk mesh'
         call init_seed(status)
@@ -410,7 +761,11 @@ contains
     subroutine finish_level()
         ! the prescribed current and the observables of the solved level
         current_error = 0; current_iterations = 0; solve_tolerance = tolerance
-        if (prescribe_current) call match_current(current_error)
+        if (prescribe_current) then
+            call match_current(current_error)
+        else if (free_boundary) then
+            call match_circulation(current_error)
+        end if
         call observe(observed)
     end subroutine
 
@@ -461,6 +816,7 @@ contains
         real(dp) :: unused1, unused2, tau
         type(toroidal_profile_t) :: previous
         type(ideal_map_t) :: map0
+        type(ideal_fb_t) :: fb0
         integer :: j, k, local, n, info, sign_attempt
         integer, allocatable :: pivot(:)
         n = iota_level
@@ -468,7 +824,7 @@ contains
         allocate (loops(n), c(n), target(n), measured(n), step(n, 1), jacobian(n, n), &
             pivot(n))
         do j = 1, n
-            call map_3d_loop_setup(map, s(j), loops(j), local)
+            call map_3d_loop_setup(map, s(j), loops(j), local, elliptic=free_boundary)
             if (local /= 0) call fail('a current loop met a curved cell edge')
             target(j) = current_target(s(j))
             call profile%evaluate(s(j), c(j), unused1, unused2)
@@ -478,11 +834,16 @@ contains
         call resolve(local)
         if (local /= 0) call fail('the map folded when frozen with the represented iota')
         c0 = c; map0 = map
+        if (fb_solving) fb0 = fb
         k = 0
         sign_attempt = 1
         do
             call measure(loops, measured)
-            call current_jacobian(c, loops, measured, jacobian)
+            if (fb_solving) then
+                call fb_current_jacobian(c, loops, measured, jacobian)
+            else
+                call current_jacobian(c, loops, measured, jacobian)
+            end if
             step(:, 1) = target - measured
             call dgesv(n, 1, jacobian, n, pivot, step, n, info)
             if (info /= 0) call fail('the current Jacobian is singular')
@@ -492,8 +853,12 @@ contains
                 ! a loosely solved map is solved fully and the step taken again
                 if (solve_tolerance <= tolerance .or. k == max_current_iterations) exit
                 solve_tolerance = tolerance
-                call ideal_map_solve(map, solve_tolerance, max_iterations, report, &
-                    solve_status, reference_gradient=reference)
+                if (fb_solving) then
+                    call fb_solve(solve_tolerance)
+                else
+                    call ideal_map_solve(map, solve_tolerance, max_iterations, report, &
+                        solve_status, reference_gradient=reference)
+                end if
                 cycle
             end if
             k = k + 1
@@ -528,6 +893,7 @@ contains
                 sign_attempt = 2
                 print '(a)', 'current iteration: starting from the iota of the other sign'
                 c = -c0; map = map0
+                if (fb_solving) fb = fb0
                 call set_iota(c)
                 solve_tolerance = tolerance
                 call resolve(local)
@@ -716,6 +1082,12 @@ contains
         ! freeze the new iota on the solved map and solve again
         integer, intent(out) :: local
         seed%profile = profile
+        if (fb_solving) then
+            call ideal_map_freeze(fb%plasma, seed, local)
+            if (local /= 0) return
+            call fb_solve(solve_tolerance)
+            return
+        end if
         call ideal_map_freeze(map, seed, local)
         if (local /= 0) return
         ! the same absolute target as the first solve, relative to its seed
@@ -798,12 +1170,16 @@ contains
         ! toroidal current; Gauss-Legendre on every wall edge
         integer, intent(out) :: status
         integer, parameter :: ng = 8
-        real(dp) :: centre(2), radius, xi(2), point(3), values(EQ_VALUES), corner(2, 3)
+        real(dp) :: centre(2), radius(2), xi(2), point(3), values(EQ_VALUES)
+        real(dp) :: corner(2, 3)
         real(dp) :: x(ng), w(ng), q(3), d(3, 3), ref(2), g(2, 2), tangent(2), along(3)
         real(dp) :: sense
         integer :: k, e, local, i, a
         centre = (maxval(map%reference, dim=2) + minval(map%reference, dim=2))/2
         radius = (maxval(map%reference(1, :)) - minval(map%reference(1, :)))/2
+        ! the free boundary's reference disc is an ellipse
+        if (free_boundary) radius = (maxval(map%reference, dim=2) &
+            - minval(map%reference, dim=2))/2
         edge_current = 0; status = 1
         corner = reshape([0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 1.0_dp], [2, 3])
         call gauss_legendre(ng, x, w)
@@ -814,7 +1190,7 @@ contains
                 if (.not. (map%boundary(map%conn(i, e)) .and. map%boundary(map%conn(a, e)))) cycle
                 ! a wall edge, not a chord between two wall nodes
                 call map_3d_coordinates(map, e, (corner(:, i) + corner(:, a))/2, 0.0_dp, q, d, ref, g)
-                if (abs(norm2(ref - centre)/radius - 1) > 1e-3_dp) cycle
+                if (abs(norm2((ref - centre)/radius) - 1) > 1e-3_dp) cycle
                 tangent = corner(:, a) - corner(:, i)
                 sense = sign(1.0_dp, (ref(1) - centre(1))*dot_product(g(2, :), tangent) &
                     - (ref(2) - centre(2))*dot_product(g(1, :), tangent))
