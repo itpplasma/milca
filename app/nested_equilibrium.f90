@@ -198,7 +198,7 @@ program nested_equilibrium
         call mesh_ladder()
     end if
     call finish_level()
-    call require_unfolded()
+    call refine_folded()
     do
         ! an iota without a resolved sign ends the resolution ladders
         if (iota_vanishes) exit
@@ -656,6 +656,7 @@ contains
         do k = 1, size(mesh_nodes)
             if (mesh_nodes(k) <= boundary_nodes) cycle
             call next_level(mesh_nodes(k), ntor_level)
+            call refine_folded()
             mesh_error = change()
             steps = steps + 1
             print '(a,i4,a,es10.3)', 'boundary nodes ', boundary_nodes, ': mesh error ', &
@@ -679,6 +680,7 @@ contains
         steps = 0; last = huge(1.0_dp)
         do while (ntor_level + 2 <= nmax)
             call next_level(boundary_nodes, ntor_level + 2)
+            call refine_folded()
             fourier_error = change()
             steps = steps + 1
             print '(a,i3,a,es10.3)', 'toroidal modes ', ntor_level, ': fourier error ', &
@@ -704,7 +706,7 @@ contains
             previous_observed = observed
             iota_level = iota_level + 2
             call finish_level()
-            call require_unfolded()
+            call refine_folded()
             iota_error = change()
             steps = steps + 1
             print '(a,i3,a,es10.3)', 'iota nodes ', iota_level, ': iota error ', iota_error
@@ -720,8 +722,13 @@ contains
     subroutine next_level(nodes_next, modes_next)
         ! seed at the new resolution plus the correction of the solved level
         integer, intent(in) :: nodes_next, modes_next
-        previous_map = map; previous_observed = observed
-        if (allocated(seed_x)) previous_seed = seed_x
+        logical :: continued
+        ! a folded level is neither a reference for the change nor a start
+        continued = .not. level_folded
+        if (continued) then
+            previous_map = map; previous_observed = observed
+            if (allocated(seed_x)) previous_seed = seed_x
+        end if
         boundary_nodes = nodes_next; ntor_level = modes_next
         call set_toroidal_level(ntor_level)
         if (free_boundary) then
@@ -735,8 +742,10 @@ contains
         if (status /= 0) call fail('the seed of a resolution level is not admitted')
         reference = free_gradient()
         seed_x = map%x
-        call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
-        if (status /= 0) call fail('the resolution level correction failed')
+        if (continued) then
+            call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
+            if (status /= 0) call fail('the resolution level correction failed')
+        end if
         call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
             reference_gradient=reference)
         call finish_level()
@@ -744,7 +753,7 @@ contains
         ! continued start can reach a stationary point that folds between
         ! them (ideal_map_prolong_correction); the level is solved again from
         ! its injective Winslow seed.
-        if (level_folded) then
+        if (continued .and. level_folded) then
             print '(a,i4,a,i3,a)', 'boundary nodes ', boundary_nodes, ', toroidal modes ', &
                 ntor_level, ': the continued map folds, solving from the seed'
             call init_seed(status)
@@ -755,12 +764,57 @@ contains
                 reference_gradient=reference)
             call finish_level()
         end if
-        call require_unfolded()
     end subroutine
 
-    subroutine require_unfolded()
-        if (level_folded) call fail('a volume integral met a folded map')
+    subroutine refine_folded()
+        ! A level whose map folds at the volume-integral points does not
+        ! resolve the map. A fold on a plane of the energy's toroidal
+        ! quadrature lies between in-plane points and asks for a finer mesh;
+        ! a fold only between those planes asks for more toroidal modes,
+        ! whose 4 ntor + 1 planes follow. Each such level starts from its seed.
+        logical :: in_plane
+        do while (level_folded)
+            in_plane = folds_on_energy_planes()
+            print '(a,i4,a,i3,a,a)', 'boundary nodes ', boundary_nodes, ', toroidal modes ', &
+                ntor_level, ': the solved map folds ', &
+                merge('on a plane of the energy quadrature        ', &
+                'between the planes of the energy quadrature', in_plane)
+            if (in_plane) then
+                if (.not. automatic_mesh .or. boundary_nodes >= mesh_nodes(size(mesh_nodes))) &
+                    call fail('the solved map folds between the in-plane quadrature points' &
+                    //' at the finest admitted mesh')
+                call next_level(minval(mesh_nodes, mask=mesh_nodes > boundary_nodes), ntor_level)
+            else
+                if (.not. automatic_ntor .or. ntor_level + 2 > nmax) &
+                    call fail('the solved map folds between the planes of the energy' &
+                    //' quadrature at the most admitted toroidal modes')
+                call next_level(boundary_nodes, ntor_level + 2)
+            end if
+        end do
     end subroutine
+
+    logical function folds_on_energy_planes()
+        ! a fold at the volume-integral points of a plane of the energy's
+        ! toroidal quadrature
+        integer, parameter :: nq = 8
+        real(dp) :: x(nq), w(nq), xi(2), point(3), values(EQ_VALUES)
+        integer :: e, i, j, k, local
+        call gauss_legendre(nq, x, w)
+        x = (x + 1)/2
+        folds_on_energy_planes = .true.
+        do e = 1, map%cells
+            do k = 1, map%nphi
+                do j = 1, nq
+                    do i = 1, nq
+                        xi = [x(i)*(1 - x(j)), x(j)]
+                        call map_3d_sample(map, seed, e, xi, map%phi(k), point, values, local)
+                        if (local /= 0) return
+                    end do
+                end do
+            end do
+        end do
+        folds_on_energy_planes = .false.
+    end function
 
     subroutine finish_level()
         ! the prescribed current and the observables of the solved level
