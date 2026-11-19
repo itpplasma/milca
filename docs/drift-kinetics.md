@@ -509,7 +509,14 @@ goes like \(\delta^2\). The ratio of the changes at \(\delta\) and \(\delta/2\)
 is 3.982 (matrix) and 3.960 (bootstrap current) at \(\delta=0.01\), and 3.999
 and 3.998 at \(\delta=0.0025\).
 
-Open from #222: comparison with SFINCS on the same file, a helical-core
+Against SFINCS (`geometryScheme=12`) on the same file at \(\delta=0.03\)
+(`dk_surface_device_sfincs`, [fixture](../test/data/dk_surface_helical_sfincs.md)):
+particle flux, kinetic-energy flux and \(\langle Bu_\parallel\rangle\) for a
+density gradient agree to \(1.2\times10^{-5}\) and \(5.6\times10^{-5}\) with
+pitch-angle scattering and \(6.1\times10^{-4}\) and \(2.4\times10^{-4}\) with
+the full operator, at `nu_n` = 0.005 and 0.05.
+
+Open from #222: a helical-core
 equilibrium from VMEC++ or MILCA's own solver, and refusal of surfaces whose
 orbit width exceeds the distance to the helical axis.
 

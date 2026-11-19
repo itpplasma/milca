@@ -8,25 +8,34 @@
 !!             the shift phi_B -> phi_B + pi, so the coefficients are even in
 !!             delta, and the differences at delta and delta/2 have ratio
 !!             4 (1 + O(delta^2)): 3.982 and 3.960 at delta = 0.01, 3.999 and
-!!             3.998 at 0.0025 (matrix and bootstrap current).
+!!             3.998 at 0.0025 (matrix and bootstrap current);
+!!   sfincs    particle flux, kinetic-energy flux and <B u_par> for a density
+!!             gradient on the delta = 0.03 file against SFINCS
+!!             (test/data/dk_surface_helical_sfincs.md).
 program test_dk_surface_device
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, boozer_surface_t, load_boozer_file, &
         boozer_surface, BOOZER_OK
     use milca_dk_surface_device, only: dk_surface_input_t, dk_surface_result_t, &
         dk_surface_harmonic_t, dk_surface_geometry, dk_surface_profile, DKS_OK
+    use milca_dk_surface, only: surface_transport, surface_fluxes, SURFACE_OK
+    use milca_dk_collop, only: collop_species_t, collop_grid_t, collop_make_grid, COLLOP_OK
     implicit none
     real(dp), parameter :: twopi = 8*atan(1.0_dp), mu0 = 2*twopi*1e-7_dp
     real(dp), parameter :: b0 = 2, r0 = 1.7_dp, a = 0.5_dp, eps = 0.15_dp, iota = 1.2_dp
     real(dp), parameter :: g_cov = 3.4_dp, s_eval = 0.5_dp
     real(dp), parameter :: elementary = 1.602176634e-19_dp
     character(64) :: check
+    character(1024) :: path
     logical :: ok
 
     call get_command_argument(1, check)
     select case (trim(check))
     case ('geometry'); ok = geometry()
     case ('helical'); ok = helical()
+    case ('sfincs')
+        call get_command_argument(2, path)
+        ok = sfincs(trim(path))
     case default
         print '(a)', 'unknown check '//trim(check)
         ok = .false.
@@ -111,6 +120,48 @@ contains
         print '(a,2es11.3,a,f8.4)', 'bootstrap change [T A/m^2] ', db(1:2), ', ratio ', ratio_b
         pass = abs(ratio_d/4 - 1) < 0.02_dp .and. abs(ratio_b/4 - 1) < 0.02_dp
     end function helical
+
+    !> SFINCS reads the file as its mirror image (psi, iota and n flipped); the
+    !> fluxes per psi and <B u_par> agree in sign with this reading.
+    logical function sfincs(path) result(pass)
+        character(*), intent(in) :: path
+        type(boozer_file_t) :: bf
+        type(boozer_surface_t) :: surf
+        type(collop_species_t) :: sp(1)
+        type(collop_grid_t) :: grid
+        real(dp), allocatable :: b(:, :)
+        real(dp) :: bb0, q, ig, kappa, d(1, 1, 3, 3), lnl(1, 1), particle(1), energy(1), &
+            flow(1), expected(3), computed(3), err, collisionality
+        integer :: st, its, unit, cases, c, model
+        call write_file('dk_surface_sfincs.bc', 0.03_dp)
+        call load_boozer_file('dk_surface_sfincs.bc', bf, st)
+        pass = st == BOOZER_OK
+        if (.not. pass) return
+        call boozer_surface(bf, s_eval, surf, st)
+        call dk_surface_geometry(surf, 11, 7, b, bb0, q, ig, kappa, st)
+        pass = st == DKS_OK
+        if (.not. pass) return
+        sp(1) = collop_species_t(3.3435837768e-27_dp, 1.0_dp, 3e19_dp, 2000*elementary)
+        call collop_make_grid(6.0_dp, 12, 6, grid, st)
+        open (newunit=unit, file=path, status='old')
+        read (unit, *) cases
+        do c = 1, cases
+            read (unit, *) model, collisionality, expected
+            lnl = collisionality
+            call surface_transport(b, surf%nper, q, ig, kappa, sp, lnl, grid, model, 24, d, &
+                its, st)
+            pass = pass .and. st == SURFACE_OK
+            call surface_fluxes(d, q, ig, sp, [-1/surf%psi_prime], [0.0_dp], 0.0_dp, 0.0_dp, &
+                particle, energy, flow, st)
+            computed = [particle(1), energy(1), bb0*flow(1)]
+            err = maxval(abs(computed/expected - 1))
+            print '(a,i0,a,f8.1,a,3es12.4,a,es10.2)', 'SFINCS collision ', model, &
+                ', lnlambda ', collisionality, ': Gamma, Q, <B u_par> ', computed, &
+                ', relative error ', err
+            pass = pass .and. st == SURFACE_OK .and. err < 0.01_dp
+        end do
+        close (unit)
+    end function sfincs
 
     subroutine solve(delta, r, pass)
         real(dp), intent(in) :: delta

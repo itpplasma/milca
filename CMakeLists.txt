@@ -1984,6 +1984,9 @@ add_executable(dk_surface_profile app/dk_surface_profile.f90)
 target_link_libraries(dk_surface_profile PRIVATE milca_ntv_geometry)
 add_executable(test_dk_surface_device test/test_dk_surface_device.f90)
 target_link_libraries(test_dk_surface_device PRIVATE milca_ntv_geometry)
+add_test(NAME dk_surface_device_sfincs COMMAND test_dk_surface_device sfincs
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_sfincs.txt)
+milca_test_labels(dk_surface_device_sfincs fast CLASSES apps TARGETS test_dk_surface_device)
 foreach(check geometry helical)
     add_test(NAME dk_surface_device_${check} COMMAND test_dk_surface_device ${check})
     milca_test_labels(dk_surface_device_${check} fast CLASSES apps
