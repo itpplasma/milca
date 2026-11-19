@@ -32,7 +32,9 @@ program nested_equilibrium
         fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t
     use milca_mgrid_file, only: mgrid_t, mgrid_read
     implicit none
-    integer, parameter :: mmax = 64, nmax = 32, kmax = 32, knot_max = 1024
+    ! namelist storage: the toroidal modes a boundary and map need follow
+    ! from the spectrum and fourier_tolerance, memory grows like map_ntor^2
+    integer, parameter :: mmax = 64, nmax = 256, kmax = 32, knot_max = 1024
     real(dp), parameter :: pi = acos(-1.0_dp), mu0 = 4e-7_dp*pi
     integer :: nfp, mpol, ntor, boundary_nodes, degree, max_iterations, angle_mpol
     integer :: unit, ios, status, solve_status, step, steps, nodes, order, n
@@ -137,7 +139,7 @@ program nested_equilibrium
         (n_knots < 2 .or. n_knots > knot_max)) &
         error stop 'nested_equilibrium: hermite profiles need 2 to 1024 knots'
     if (map_ntor > nmax .or. (map_ntor >= 0 .and. map_ntor < ntor)) &
-        error stop 'nested_equilibrium: map_ntor below the boundary ntor or above 32'
+        error stop 'nested_equilibrium: map_ntor below the boundary ntor or above 256'
     if (.not. fourier_tolerance > 0) error stop 'nested_equilibrium: fourier_tolerance'
     if (.not. mesh_tolerance > 0) error stop 'nested_equilibrium: mesh_tolerance'
     if (.not. iota_tolerance > 0) error stop 'nested_equilibrium: iota_tolerance'

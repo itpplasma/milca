@@ -10,7 +10,7 @@ module milca_import_gvec
     use milca_import_text, only: kv_store_t, read_gvec_ini, read_toml, read_yaml, lower, mode_key
     use milca_equilibrium_import, only: imported_equilibrium_t, import_profile_t, import_note, &
         import_refuse, import_fail, IMPORT_OK, boundary_fit, power_series_profile, &
-        spline_profile, hermite_profile, hermite_value, IN_MMAX, IN_NMAX
+        spline_profile, hermite_profile, hermite_value, IN_MMAX, IN_NMAX, boundary_reserve, MILCA_NMAX, MILCA_MMAX
     use milca_import_vmec, only: import_wout
     use fortio_hdf5_reader, only: hdf5_file_t
     use fortio_status, only: fortio_status_t
@@ -308,6 +308,7 @@ contains
         type(gvec_surface_t), intent(in) :: surface
         type(imported_equilibrium_t), intent(inout) :: eq
         integer :: n
+        call boundary_reserve(eq, IN_MMAX, IN_NMAX)
         do n = -IN_NMAX, IN_NMAX
             eq%rbc(-n, :) = surface%c1(n, :); eq%rbs(-n, :) = surface%s1(n, :)
             eq%zbc(-n, :) = surface%c2(n, :); eq%zbs(-n, :) = surface%s2(n, :)
@@ -506,71 +507,94 @@ contains
 
     subroutine cartesian_refit(surface, eq, s_zeta)
         ! The surface x(theta, zeta) cut by the planes phi = const: on each
-        ! theta line zeta(phi) is found by bisection, then R(theta, phi),
-        ! Z(theta, phi) are fitted in VMEC's basis. Admitted only if phi
-        ! is monotone in zeta on every theta line. The fit error at the
-        ! midpoints of the fit grid is the stated geometry error.
+        ! theta line zeta(phi) is found by regula falsi, then R(theta, phi),
+        ! Z(theta, phi) are fitted in VMEC's basis. Admitted only if phi is
+        ! monotone in zeta on every theta line. The fitted modes double in m
+        ! and n until the upper half of each spectrum holds less than a
+        ! quarter of the geometry tolerance, so the measured decay sizes the
+        ! fit; truncate_boundary then keeps what the tolerance needs. The fit
+        ! error at the midpoints of the fit grid is noted.
         type(gvec_surface_t), intent(in) :: surface
         type(imported_equilibrium_t), intent(inout) :: eq
         real(dp), intent(out) :: s_zeta
         integer, parameter :: ntable = 512
-        integer :: mfit, nfit, nt, np, i, j, m
-        real(dp), allocatable :: r(:, :), z(:, :), table(:, :)
-        real(dp) :: theta, phi, rr, zz, rf, zf, error, radius
-        logical :: monotone
-        mfit = 0
+        integer :: mfit, nfit, nt, np, i, j, m, msurface
+        real(dp), allocatable :: r(:, :), z(:, :), table(:, :), check(:)
+        real(dp) :: theta, phi, rr, zz, rf, zf, error, radius, edge_n, edge_m
+        logical :: monotone, raise_n, raise_m
+        msurface = 0
         do m = 0, IN_MMAX
             if (any(surface%c1(:, m) /= 0) .or. any(surface%s1(:, m) /= 0) .or. &
-                any(surface%c2(:, m) /= 0) .or. any(surface%s2(:, m) /= 0)) mfit = m
+                any(surface%c2(:, m) /= 0) .or. any(surface%s2(:, m) /= 0)) msurface = m
         end do
-        ! the change of toroidal parameter couples poloidal modes; modes
-        ! beyond nested_equilibrium's limits are cut and counted later
-        mfit = min(IN_MMAX/2, 2*mfit + 8)
-        nfit = IN_NMAX/2
-        nt = 2*mfit + 2; np = 2*nfit + 2
         eq%nfp = surface%nfp
-        ! phi on a fine zeta table over one full turn, per theta line
-        allocate (table(0:ntable, nt))
-        monotone = .true.
-        do i = 1, nt
-            call phi_line(2*pi*(i - 1)/nt, table(:, i))
-        end do
-        s_zeta = sign(1.0_dp, table(ntable, 1) - table(0, 1))
-        do i = 1, nt
-            if (any(s_zeta*(table(1:, i) - table(:ntable - 1, i)) <= 0)) monotone = .false.
-            if (abs(abs(table(ntable, i) - table(0, i)) - 2*pi) > 1e-6_dp) monotone = .false.
-        end do
-        if (.not. monotone) then
-            call import_refuse(eq, 'the boundary is not single-valued over the cylindrical angle '// &
-                '(phi is not monotone along zeta)')
-            return
-        end if
-        allocate (r(nt, np), z(nt, np))
-        do j = 1, np
-            phi = 2*pi*(j - 1)/(surface%nfp*np)
+        nfit = 16
+        ! the change of toroidal parameter couples poloidal modes
+        mfit = 2*msurface + 8
+        do
+            ! twice the sampling of the fitted modes keeps unresolved ones from
+            ! aliasing onto them
+            nt = 4*mfit + 2; np = 4*nfit + 2
+            if (allocated(table)) deallocate (table, r, z)
+            ! phi on a zeta table over one full turn, per theta line
+            allocate (table(0:ntable, nt), r(nt, np), z(nt, np))
+            monotone = .true.
             do i = 1, nt
-                call section(2*pi*(i - 1)/nt, phi, table(:, i), r(i, j), z(i, j))
+                call phi_line(2*pi*(i - 1)/nt, table(:, i))
             end do
+            s_zeta = sign(1.0_dp, table(ntable, 1) - table(0, 1))
+            do i = 1, nt
+                if (any(s_zeta*(table(1:, i) - table(:ntable - 1, i)) <= 0)) monotone = .false.
+                if (abs(abs(table(ntable, i) - table(0, i)) - 2*pi) > 1e-6_dp) monotone = .false.
+            end do
+            if (.not. monotone) then
+                call import_refuse(eq, 'the boundary is not single-valued over the cylindrical angle '// &
+                    '(phi is not monotone along zeta)')
+                return
+            end if
+            do j = 1, np
+                phi = 2*pi*(j - 1)/(surface%nfp*np)
+                do i = 1, nt
+                    call section(2*pi*(i - 1)/nt, phi, table(:, i), r(i, j), z(i, j))
+                end do
+            end do
+            call boundary_fit(eq, r, z, mfit, nfit)
+            radius = sqrt(sum(eq%rbc(:, 1:)**2 + eq%zbs(:, 1:)**2 + eq%rbs(:, 1:)**2 &
+                + eq%zbc(:, 1:)**2)/2)
+            ! the content of the upper half of each spectrum measures whether
+            ! its decay is resolved
+            edge_n = content(nfit/2 + 1, nfit, 0, mfit)
+            edge_m = content(0, nfit, mfit/2 + 1, mfit)
+            call import_note(eq, 'boundary refitted on cylindrical planes with m <= '// &
+                text(real(mfit, dp))//', |n| <= '//text(real(nfit, dp))//': upper-half content '// &
+                text(edge_m/radius)//' (m), '//text(edge_n/radius)//' (n) of the minor radius')
+            raise_n = edge_n > eq%geometry_tolerance*radius/4
+            raise_m = edge_m > eq%geometry_tolerance*radius/4
+            if (.not. (raise_n .or. raise_m)) exit
+            if ((raise_n .and. nfit >= 2*MILCA_NMAX) .or. (raise_m .and. mfit >= 2*MILCA_MMAX)) then
+                call import_refuse(eq, 'the boundary spectrum over the cylindrical angle is not '// &
+                    'resolved by m <= '//text(real(mfit, dp))//', |n| <= '//text(real(nfit, dp))// &
+                    ' (upper-half content '//text(max(edge_m, edge_n)/radius)//' of the minor radius)')
+                return
+            end if
+            if (raise_n) nfit = 2*nfit
+            if (raise_m) mfit = 2*mfit
         end do
-        call boundary_fit(eq, r, z, mfit, nfit)
         ! check off the fit grid
         error = 0
-        radius = sqrt(sum(eq%rbc(:, 1:)**2 + eq%zbs(:, 1:)**2 + eq%rbs(:, 1:)**2 + eq%zbc(:, 1:)**2)/2)
+        allocate (check(0:ntable))
         do i = 1, nt, max(1, nt/16)
             theta = 2*pi*(i - 0.5_dp)/nt
-            call phi_line(theta, table(:, 1))
+            call phi_line(theta, check)
             do j = 1, np
                 phi = 2*pi*(j - 0.5_dp)/(surface%nfp*np)
-                call section(theta, phi, table(:, 1), rr, zz)
+                call section(theta, phi, check, rr, zz)
                 call fitted(theta, phi, rf, zf)
                 error = max(error, hypot(rr - rf, zz - zf))
             end do
         end do
+        call import_note(eq, 'largest midpoint deviation of the refit '//text(error)//' m')
         eq%geometry_error = eq%geometry_error + error
-        call import_note(eq, 'boundary refitted on cylindrical planes; largest midpoint deviation '// &
-            text(error)//' m, relative to the minor radius '//text(error/radius))
-        if (error > 1e-3_dp*radius) call import_refuse(eq, 'the boundary is not resolved by '// &
-            text(real(nfit, dp))//' toroidal modes over the cylindrical angle')
     contains
         subroutine phi_line(theta, phis)
             real(dp), intent(in) :: theta
@@ -623,6 +647,19 @@ contains
             x = surface_xyz(surface, theta, mid)
             r = hypot(x(1), x(2)); z = x(3)
         end subroutine
+        real(dp) function content(n0, n1, m0, m1)
+            ! sum of |c| over m0 <= m <= m1, n0 <= |n| <= n1
+            integer, intent(in) :: n0, n1, m0, m1
+            integer :: m, n
+            content = 0
+            do m = m0, m1
+                do n = -n1, n1
+                    if (abs(n) < n0) cycle
+                    content = content + abs(eq%rbc(n, m)) + abs(eq%rbs(n, m)) + abs(eq%zbc(n, m)) &
+                        + abs(eq%zbs(n, m))
+                end do
+            end do
+        end function
         subroutine fitted(theta, phi, r, z)
             real(dp), intent(in) :: theta, phi
             real(dp), intent(out) :: r, z

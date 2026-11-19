@@ -16,14 +16,16 @@ module milca_equilibrium_import
     implicit none
     private
     public :: import_profile_t, imported_equilibrium_t, IMPORT_OK, IMPORT_UNSUPPORTED, &
-        IMPORT_ERROR, IN_MMAX, IN_NMAX, import_note, import_refuse, import_fail, &
+        IMPORT_ERROR, IN_MMAX, IN_NMAX, MILCA_NMAX, MILCA_MMAX, boundary_reserve, mode_bounds, import_note, import_refuse, import_fail, &
         boundary_fit, boundary_point, boundary_area, profile_value, power_series_profile, &
         spline_profile, hermite_profile, hermite_value, import_normalize, import_write, &
         orientation_flip
     integer, parameter :: IMPORT_OK = 0, IMPORT_UNSUPPORTED = 3, IMPORT_ERROR = 1
     ! working limits; nested_equilibrium accepts m <= 64, |n| <= 32
+    ! input-side limits of the readers that store foreign modes first
     integer, parameter :: IN_MMAX = 128, IN_NMAX = 128
-    integer, parameter :: MILCA_MMAX = 64, MILCA_NMAX = 32, MILCA_KMAX = 32, KNOT_MAX = 1024
+    ! nested_equilibrium's namelist storage
+    integer, parameter :: MILCA_MMAX = 64, MILCA_NMAX = 256, MILCA_KMAX = 32, KNOT_MAX = 1024
     real(dp), parameter :: pi = acos(-1.0_dp)
 
     type :: import_profile_t
@@ -41,12 +43,13 @@ module milca_equilibrium_import
         integer :: n_notes = 0
         integer :: nfp = 1
         real(dp) :: phiedge = 1
-        real(dp) :: rbc(-IN_NMAX:IN_NMAX, 0:IN_MMAX) = 0, rbs(-IN_NMAX:IN_NMAX, 0:IN_MMAX) = 0
-        real(dp) :: zbc(-IN_NMAX:IN_NMAX, 0:IN_MMAX) = 0, zbs(-IN_NMAX:IN_NMAX, 0:IN_MMAX) = 0
+        ! (-n_max:n_max, 0:m_max), sized by boundary_reserve to the modes held
+        real(dp), allocatable :: rbc(:, :), rbs(:, :), zbc(:, :), zbs(:, :)
         type(import_profile_t) :: iota, pressure, current
         logical :: prescribe_current = .false.
-        ! largest boundary displacement left out by the conversion (m)
-        real(dp) :: geometry_error = 0
+        ! largest boundary displacement left out by the conversion (m), and
+        ! its accepted bound relative to the minor radius
+        real(dp) :: geometry_error = 0, geometry_tolerance = 1e-6_dp
     end type
 
 contains
@@ -57,6 +60,36 @@ contains
         if (eq%n_notes == size(eq%notes)) return
         eq%n_notes = eq%n_notes + 1
         eq%notes(eq%n_notes) = text
+    end subroutine
+
+    subroutine boundary_reserve(eq, mmax, nmax)
+        ! boundary arrays covering m <= mmax, |n| <= nmax, keeping held modes
+        type(imported_equilibrium_t), intent(inout) :: eq
+        integer, intent(in) :: mmax, nmax
+        integer :: m0, n0
+        m0 = -1; n0 = -1
+        if (allocated(eq%rbc)) then
+            m0 = ubound(eq%rbc, 2); n0 = ubound(eq%rbc, 1)
+            if (m0 >= mmax .and. n0 >= nmax) return
+        end if
+        call grow(eq%rbc); call grow(eq%rbs); call grow(eq%zbc); call grow(eq%zbs)
+    contains
+        subroutine grow(c)
+            real(dp), allocatable, intent(inout) :: c(:, :)
+            real(dp), allocatable :: wider(:, :)
+            allocate (wider(-max(nmax, n0):max(nmax, n0), 0:max(mmax, m0)))
+            wider = 0
+            if (allocated(c)) wider(-n0:n0, 0:m0) = c
+            call move_alloc(wider, c)
+        end subroutine
+    end subroutine
+
+    pure subroutine mode_bounds(eq, mmax, nmax)
+        type(imported_equilibrium_t), intent(in) :: eq
+        integer, intent(out) :: mmax, nmax
+        mmax = -1; nmax = -1
+        if (.not. allocated(eq%rbc)) return
+        mmax = ubound(eq%rbc, 2); nmax = ubound(eq%rbc, 1)
     end subroutine
 
     subroutine import_refuse(eq, reason)
@@ -87,7 +120,7 @@ contains
         integer :: nt, np, i, j, m, n
         complex(dp) :: w
         nt = size(r, 1); np = size(r, 2)
-        if (2*mfit >= nt .or. 2*nfit >= np .or. mfit > IN_MMAX .or. nfit > IN_NMAX) &
+        if (2*mfit >= nt .or. 2*nfit >= np) &
             error stop 'boundary_fit: grid too coarse for the requested modes'
         ! F(m, n) = <f exp(-i (m theta - n psi))>, psi = nfp phi
         allocate (er(nt, -nfit:nfit), ez(nt, -nfit:nfit))
@@ -109,7 +142,8 @@ contains
             end do
         end do
         fr = fr/(nt*np); fz = fz/(nt*np)
-        eq%rbc = 0; eq%rbs = 0; eq%zbc = 0; eq%zbs = 0
+        if (allocated(eq%rbc)) deallocate (eq%rbc, eq%rbs, eq%zbc, eq%zbs)
+        call boundary_reserve(eq, mfit, nfit)
         ! f = c cos(a) + s sin(a) gives F = (c - i s)/2 on each pair, F = c on (0, 0)
         eq%rbc(0, 0) = real(fr(0, 0)); eq%zbc(0, 0) = real(fz(0, 0))
         do m = 0, mfit
@@ -128,8 +162,9 @@ contains
         integer :: m, n
         real(dp) :: a, c, s
         r = 0; z = 0
-        do m = 0, IN_MMAX
-            do n = -IN_NMAX, IN_NMAX
+        if (.not. allocated(eq%rbc)) return
+        do m = 0, ubound(eq%rbc, 2)
+            do n = lbound(eq%rbc, 1), ubound(eq%rbc, 1)
                 if (eq%rbc(n, m) == 0 .and. eq%rbs(n, m) == 0 .and. eq%zbc(n, m) == 0 &
                     .and. eq%zbs(n, m) == 0) cycle
                 a = m*theta - n*eq%nfp*phi
@@ -156,10 +191,11 @@ contains
         ! theta -> -theta: (n, m) -> (-n, m) for m > 0, sine terms change
         ! sign; iota changes sign, the current is physical and keeps it
         type(imported_equilibrium_t), intent(inout) :: eq
-        real(dp), dimension(-IN_NMAX:IN_NMAX, 0:IN_MMAX) :: rbc, rbs, zbc, zbs
-        integer :: n
+        real(dp), allocatable, dimension(:, :) :: rbc, rbs, zbc, zbs
+        integer :: n, nmax
+        nmax = ubound(eq%rbc, 1)
         rbc = eq%rbc; rbs = eq%rbs; zbc = eq%zbc; zbs = eq%zbs
-        do n = -IN_NMAX, IN_NMAX
+        do n = -nmax, nmax
             eq%rbc(n, 1:) = rbc(-n, 1:); eq%rbs(n, 1:) = -rbs(-n, 1:)
             eq%zbc(n, 1:) = zbc(-n, 1:); eq%zbs(n, 1:) = -zbs(-n, 1:)
         end do
@@ -246,6 +282,10 @@ contains
             call import_fail(eq, 'the toroidal flux is zero or not finite')
             return
         end if
+        if (.not. allocated(eq%rbc)) then
+            call import_fail(eq, 'the input holds no boundary')
+            return
+        end if
         if (boundary_area(eq) < 0) then
             call orientation_flip(eq)
             call import_note(eq, 'theta reversed to run counterclockwise in (R, Z); iota changes sign')
@@ -253,7 +293,7 @@ contains
         call scale_profile(eq%current, -sign(1.0_dp, eq%phiedge))
         eq%phiedge = abs(eq%phiedge)
         ! m = 0 terms on n >= 0 only
-        do n = 1, IN_NMAX
+        do n = 1, ubound(eq%rbc, 1)
             eq%rbc(n, 0) = eq%rbc(n, 0) + eq%rbc(-n, 0); eq%rbs(n, 0) = eq%rbs(n, 0) - eq%rbs(-n, 0)
             eq%zbc(n, 0) = eq%zbc(n, 0) + eq%zbc(-n, 0); eq%zbs(n, 0) = eq%zbs(n, 0) - eq%zbs(-n, 0)
             eq%rbc(-n, 0) = 0; eq%rbs(-n, 0) = 0; eq%zbc(-n, 0) = 0; eq%zbs(-n, 0) = 0
@@ -266,19 +306,44 @@ contains
     end subroutine
 
     subroutine truncate_boundary(eq)
-        ! Drop modes below 1e-12 of the minor radius, then any beyond
-        ! nested_equilibrium's limits; the sum of the dropped |c| bounds the
-        ! displacement of the boundary.
+        ! The smallest ntor and mpol whose dropped modes sum to at most half the
+        ! geometry tolerance each: the sum of the dropped |c| bounds the
+        ! displacement of the boundary, so the spectrum's own decay sets the
+        ! resolution. Single modes below 1e-12 of the minor radius go too.
         type(imported_equilibrium_t), intent(inout) :: eq
-        real(dp) :: radius, dropped, tiny
-        integer :: m, n
+        real(dp), allocatable :: by_n(:), by_m(:)
+        real(dp) :: radius, dropped, tiny, budget
+        integer :: m, n, mmax, nmax, ntor, mpol
+        call mode_bounds(eq, mmax, nmax)
         radius = sqrt(sum(eq%rbc(:, 1:)**2 + eq%rbs(:, 1:)**2 + eq%zbc(:, 1:)**2 &
             + eq%zbs(:, 1:)**2)/2)
         tiny = 1e-12_dp*radius
+        budget = eq%geometry_tolerance*radius/2
+        allocate (by_n(0:nmax), by_m(0:mmax))
+        by_n = 0; by_m = 0
+        do m = 0, mmax
+            do n = -nmax, nmax
+                associate (c => abs(eq%rbc(n, m)) + abs(eq%rbs(n, m)) + abs(eq%zbc(n, m)) &
+                        + abs(eq%zbs(n, m)))
+                    by_n(abs(n)) = by_n(abs(n)) + c
+                    by_m(m) = by_m(m) + c
+                end associate
+            end do
+        end do
+        ntor = nmax
+        do while (ntor > 0)
+            if (sum(by_n(ntor:)) > budget) exit
+            ntor = ntor - 1
+        end do
+        mpol = mmax
+        do while (mpol > 1)
+            if (sum(by_m(mpol:)) > budget) exit
+            mpol = mpol - 1
+        end do
         dropped = 0
-        do m = 0, IN_MMAX
-            do n = -IN_NMAX, IN_NMAX
-                if (m <= MILCA_MMAX .and. abs(n) <= MILCA_NMAX) then
+        do m = 0, mmax
+            do n = -nmax, nmax
+                if (m <= mpol .and. abs(n) <= ntor) then
                     call drop(eq%rbc(n, m), tiny); call drop(eq%rbs(n, m), tiny)
                     call drop(eq%zbc(n, m), tiny); call drop(eq%zbs(n, m), tiny)
                 else
@@ -288,10 +353,11 @@ contains
             end do
         end do
         eq%geometry_error = eq%geometry_error + dropped
-        if (dropped > 1e-12_dp*radius) call import_note(eq, 'modes beyond m <= 64, |n| <= 32 or below '// &
-            '1e-12 of the minor radius dropped, sum of |c| '//real_text(dropped)//' m')
-        if (dropped > 1e-3_dp*radius) call import_refuse(eq, 'the boundary needs modes beyond '// &
-            'nested_equilibrium''s m <= 64, |n| <= 32 (dropped |c| sum '//real_text(dropped)//' m)')
+        call import_note(eq, 'boundary held by m <= '//int_text(mpol)//', |n| <= '//int_text(ntor)// &
+            ', dropped |c| sum '//real_text(dropped)//' m')
+        if (ntor > MILCA_NMAX .or. mpol > MILCA_MMAX) call import_refuse(eq, 'the boundary needs '// &
+            int_text(mpol)//' poloidal and '//int_text(ntor)//' toroidal modes, beyond '// &
+            'nested_equilibrium''s namelist storage')
     contains
         subroutine drop(c, limit)
             real(dp), intent(inout) :: c
@@ -302,6 +368,14 @@ contains
             end if
         end subroutine
     end subroutine
+
+    function int_text(k) result(text)
+        integer, intent(in) :: k
+        character(len=:), allocatable :: text
+        character(16) :: buffer
+        write (buffer, '(i0)') k
+        text = trim(buffer)
+    end function
 
     subroutine fit_profile(eq, p, name)
         ! power series beyond s^32 become Hermite profiles; the error of that
@@ -372,8 +446,8 @@ contains
         ok = .false.
         if (eq%status /= IMPORT_OK) return
         mpol = 1; ntor = 0
-        do m = 0, MILCA_MMAX
-            do n = -MILCA_NMAX, MILCA_NMAX
+        do m = 0, min(MILCA_MMAX, ubound(eq%rbc, 2))
+            do n = -min(MILCA_NMAX, ubound(eq%rbc, 1)), min(MILCA_NMAX, ubound(eq%rbc, 1))
                 if (any([eq%rbc(n, m), eq%rbs(n, m), eq%zbc(n, m), eq%zbs(n, m)] /= 0)) then
                     mpol = max(mpol, m); ntor = max(ntor, abs(n))
                 end if

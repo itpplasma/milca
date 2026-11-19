@@ -8,7 +8,7 @@ module milca_import_vmec
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_import_text, only: kv_store_t, read_namelist_group, namelist_groups, lower
     use milca_equilibrium_import, only: imported_equilibrium_t, import_note, import_refuse, &
-        import_fail, IMPORT_OK, power_series_profile, spline_profile, IN_MMAX, IN_NMAX
+        import_fail, IMPORT_OK, power_series_profile, spline_profile, boundary_reserve
     use netcdf, only: nf90_open, nf90_close, nf90_inq_varid, nf90_get_var, nf90_inquire_variable, &
         nf90_inquire_dimension, NF90_NOWRITE, NF90_NOERR
     implicit none
@@ -121,7 +121,8 @@ contains
         do f = 1, 4
             call p%modes(trim(fields(f)), n, m, v)
             do k = 1, size(v)
-                if (m(k) < 0 .or. m(k) > IN_MMAX .or. abs(n(k)) > IN_NMAX) cycle
+                if (m(k) < 0) cycle
+                call boundary_reserve(eq, m(k), abs(n(k)))
                 select case (f)
                 case (1)
                     eq%rbc(n(k), m(k)) = v(k)
@@ -134,6 +135,7 @@ contains
                 end select
             end do
         end do
+        call boundary_reserve(eq, 1, 0)
         if (.not. p%logical('lasym', .false.)) then
             eq%rbs = 0; eq%zbc = 0
         end if
@@ -192,7 +194,7 @@ contains
         eq%phiedge = phi(ns)
         do k = 1, mnmax
             m = nint(xm(k)); n = nint(xn(k))/nfp
-            if (m > IN_MMAX .or. abs(n) > IN_NMAX) cycle
+            call boundary_reserve(eq, m, abs(n))
             eq%rbc(n, m) = rmnc(k, ns); eq%zbs(n, m) = zmns(k, ns)
             if (lasym /= 0) then
                 eq%rbs(n, m) = rmns(k, ns); eq%zbc(n, m) = zmnc(k, ns)

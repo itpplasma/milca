@@ -27,10 +27,12 @@ its own current I, so the last step is
 
 The current keeps its sign under (3) because it is physical. (4) matches the
 benchmark converter and the PARVMEC comparison of the
-[input page](nested-equilibrium-input.md). Modes beyond m <= 64, |n| <= 32 or
-below 1e-12 of the minor radius are dropped, and the sum of their |c| bounds
-the displacement of the boundary. Above 1e-3 of the minor radius the input is
-refused.
+[input page](nested-equilibrium-input.md). The kept modes are the smallest
+mpol and ntor whose dropped modes sum to at most half the geometry tolerance
+each, 1e-6 of the minor radius, and modes below 1e-12 of it go too. The sum
+of the dropped |c| bounds the displacement of the boundary, so the decay of
+the spectrum sets the resolution. A boundary needing m > 64 or |n| > 256, the
+storage of `nested_input`, is refused.
 
 A profile is a power series in s, the normalised toroidal flux, or a
 piecewise cubic Hermite profile. Several Hermite profiles share the union of
@@ -63,19 +65,21 @@ table of phi(zeta), and
 
     R(t_i, phi_j), Z(t_i, phi_j)  ->  (1) by a discrete Fourier fit,               (6)
 
-with m up to 2 m_max + 8 and |n| up to 64. iota, Phi and I take the factor
+starting from m <= 2 m_max + 8 and |n| <= 16 on a grid of twice that
+resolution. m and n double while the upper half of their spectrum holds more
+than a quarter of the geometry tolerance. iota, Phi and I take the factor
 s_zeta = sign(dphi/dzeta). The surface is admitted only if phi is monotone in
 zeta on every line t = t_i and turns once, which excludes knots. The largest
-distance between the fit and the cut at the midpoints of the fit grid is the
-stated geometry error. DESC's product basis is evaluated on a grid and fitted
+distance between the fit and the cut at the midpoints of the fit grid is
+noted. DESC's product basis is evaluated on a grid and fitted
 by (6) without a cut. Its current is c = signgs I_V with signgs = -1 for a
 counterclockwise boundary (DESC's VMEC reader).
 
 ## Refused inputs
 
 GVEC hmap 3 (a straight periodic cylinder) and hmap 10 (a knot), G-frame axes
-winding more than once, boundaries not resolved by 64 toroidal modes over phi
-(fit error above 1e-3 of the minor radius), SPECTRE slab or cylinder geometry,
+winding more than once, boundaries whose spectrum over phi is not resolved
+within m <= 128, |n| <= 512 or needs more than the storage, SPECTRE slab or cylinder geometry,
 free boundary, a stepped pressure (not C1) or lconstraint other than 1 and 3,
 VMEC free-boundary decks (LFREEB true with an MGRID_FILE), VMEC profile types
 other than power_series, and VMEX &MIRROR (an open mirror).
@@ -110,10 +114,23 @@ converter on the VMEC twin of each case:
 | DESC DSHAPE, QSC_r2_5.5 | 1.8e-15, 5.5e-9 | equal, current sign included |
 
 The GVEC G-frame N2-63 boundary lies within 3.2e-7 m of the imported surface
-at every point of the file grid. The QH nfp 7 G-frame and Frenet boundaries
-are refused: an independent cut shows their R(t, phi) spectrum decaying only
-like n^-2 (3.6e-5 m at n = 32) because the strongly helical axis makes the
-surface nearly tangent to the phi planes.
+at every point of the file grid. Over phi it needs m <= 27 and |n| <= 142 for
+the default tolerance. The sum of |c| over the upper half of the toroidal
+spectrum, relative to the minor radius, against the fitted |n|:
+
+| Boundary | 32 | 64 | 128 | 256 |
+|---|---|---|---|---|
+| G-frame N2-63 | 1.3e-4 | 2.1e-5 | 3.5e-5 | 3.0e-6 |
+| G-frame N2-12 | 4.9e-2 | 4.7e-3 | 5.8e-4 | |
+| G-frame QH nfp 7 | 2.2e-1 | 5.9e-2 | 5.1e-3 | |
+| Frenet QH nfp 7 | 2.2e-1 | 5.8e-2 | 5.2e-3 | 8.6e-5 |
+
+The QH nfp 7 and N2-12 spectra decay, but need m above 128 and |n| of a few
+hundred: the strongly helical axis makes the surface nearly tangent to the phi
+planes (dphi/dzeta between 0.17 and 1.73 on the Frenet case), so they are
+refused. With `nested_equilibrium`'s memory growing like map_ntor^2
+([input page](nested-equilibrium-input.md)) such a solve would need several
+hundred GB.
 
 ## Open
 
