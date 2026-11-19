@@ -127,7 +127,8 @@ contains
     !> Whether every orbit of g through an n_theta x n_xi sample of (theta, xi)
     !> has its point inside the files' radial range. Orbits that leave it
     !> (near the axis or at high energy) are outside the model; the kernel
-    !> must not be solved for them.
+    !> must not be solved for them. Orbits that leave it only between the
+    !> samples are found by the kernel's quadrature (milca_dk_hp_energy).
     logical function hp_orbit_confined(g, n_theta, n_xi) result(ok)
         type(hp_orbit_geometry_t), intent(in) :: g
         integer, intent(in) :: n_theta, n_xi
