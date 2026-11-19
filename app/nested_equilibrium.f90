@@ -115,6 +115,7 @@ program nested_equilibrium
     ! Gamma_c: the convex hull of shell_section (the guess's section, or a
     ! solved Gamma_p when Gamma_c is re-placed) offset by shell_distance.
     real(dp), allocatable :: shell_section(:, :), shell_obstacles(:, :)
+    real(dp), allocatable :: shell_section_reference(:, :)
     real(dp) :: shell_box(4)
     integer :: replacements = 0
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
@@ -410,7 +411,7 @@ contains
             call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
                 shell_layers, shell_distance, mesh, chain, shell_positions, &
                 shell_lines, shell_t, local, plasma_cells=shell_cells, &
-                section=shell_section)
+                section=shell_section, section_reference=shell_section_reference)
             if (local /= 0) call fail('the free-boundary mesh failed')
             call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
                 0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
@@ -474,7 +475,8 @@ contains
         if (solve_status /= IDEAL_FB_OK .and. shell_layers > 0 .and. &
             replacements < 3) then
             replacements = replacements + 1
-            call ideal_fb_boundary_polygon(fb, 16, shell_section, local)
+            call ideal_fb_boundary_polygon(fb, 16, shell_section, local, &
+                reference=shell_section_reference)
             if (local /= 0) call fail('the solved boundary is not a closed chain')
             call fb_nested_offset_distance(shell_section, shell_box, shell_obstacles, &
                 coupling_margin*sqrt(fb_axes(1)*fb_axes(2)), shell_distance, local)

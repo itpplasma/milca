@@ -514,7 +514,7 @@ contains
 
     subroutine fb_nested_layer_mesh(boundary, centre, axes, nodes, degree, layers, &
                                     distance, mesh, chain, positions, lines, line_t, &
-                                    status, plasma_cells, section)
+                                    status, plasma_cells, section, section_reference)
         !! Reference mesh of the plasma disc (the reference ellipse, nodes
         !! boundary nodes) and a layered shell around it for
         !! ideal_fb_init(positions, lines, line_t). Every Gamma_p chain node y_p
@@ -538,6 +538,10 @@ contains
         !> polygon whose convex hull, offset by distance, is Gamma_c (default:
         !! the guess's mean section; a solved Gamma_p re-places Gamma_c)
         real(dp), intent(in), optional :: section(:, :)
+        !> reference-disc points of the section's vertices (a solved Gamma_p):
+        !! a chain node's ray then passes through the section point at its
+        !! reference angle, where the transferred map puts that node
+        real(dp), intent(in), optional :: section_reference(:, :)
         type(gs_state_t) :: disc
         integer, allocatable :: ring(:), lattice(:, :), tri(:, :)
         real(dp), allocatable :: points(:, :), xc(:, :)
@@ -578,6 +582,8 @@ contains
             alpha = atan2((disc%points(2, ring(i)) - centre(2))/axes(2), &
                 (disc%points(1, ring(i)) - centre(1))/axes(1))
             xp = section_point(boundary, centre, axes, alpha)
+            if (present(section) .and. present(section_reference)) &
+                xp = outline_at(alpha)
             tangent = (xp - origin)/norm2(xp - origin)
             lo = 0; hi = norm2(xp - origin) + 2*distance + maxval(abs(outline - &
                 spread(origin, 2, size(outline, 2))))
@@ -669,6 +675,30 @@ contains
         chain = disc%points(:, ring)
         status = IDEAL_FB_OK
     contains
+        function outline_at(angle) result(y)
+            ! section point at a reference angle, linear between vertices
+            real(dp), intent(in) :: angle
+            real(dp) :: y(2), t, da
+            real(dp), allocatable :: a(:)
+            integer :: m, n, j
+            n = size(section, 2)
+            allocate (a(n))
+            do m = 1, n
+                a(m) = atan2((section_reference(2, m) - centre(2))/axes(2), &
+                    (section_reference(1, m) - centre(1))/axes(1))
+            end do
+            y = section(:, 1)
+            do m = 1, n
+                j = mod(m, n) + 1
+                da = modulo(a(j) - a(m), 2*pi)
+                t = modulo(angle - a(m), 2*pi)
+                if (t <= da .and. da > 0) then
+                    y = section(:, m) + t/da*(section(:, j) - section(:, m))
+                    return
+                end if
+            end do
+        end function
+
         function lattice_point(c) result(y)
             integer, intent(in) :: c(2)
             real(dp) :: y(2)

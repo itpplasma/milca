@@ -5758,13 +5758,15 @@ contains
         status = 0
     end subroutine
 
-    subroutine ideal_fb_boundary_polygon(fb, samples, polygon, status)
+    subroutine ideal_fb_boundary_polygon(fb, samples, polygon, status, reference)
         !! The plasma boundary (n = 0 chart positions) as a closed polygon,
-        !! samples points per chain edge on its Lagrange interpolant.
+        !! samples points per chain edge on its Lagrange interpolant;
+        !! reference: the same points of the reference boundary.
         type(ideal_fb_t), intent(in) :: fb
         integer, intent(in) :: samples
         real(dp), allocatable, intent(out) :: polygon(:, :)
         integer, intent(out) :: status
+        real(dp), allocatable, intent(out), optional :: reference(:, :)
         integer, allocatable :: chain(:)
         real(dp) :: w(0:3), dw(0:3)
         integer :: nedge, e, k, l, nc
@@ -5772,14 +5774,19 @@ contains
         if (status /= 0) return
         nc = size(chain); nedge = nc/fb%order
         allocate (polygon(2, nedge*samples))
+        if (present(reference)) allocate (reference(2, nedge*samples))
         do e = 1, nedge
             do k = 1, samples
                 call edge_lagrange(fb%order, real(k - 1, dp)/samples, w(:fb%order), &
                     dw(:fb%order))
                 polygon(:, (e - 1)*samples + k) = 0
+                if (present(reference)) reference(:, (e - 1)*samples + k) = 0
                 do l = 0, fb%order
                     polygon(:, (e - 1)*samples + k) = polygon(:, (e - 1)*samples + k) &
                         + w(l)*fb%plasma%x(1:2, 1, chain(mod((e - 1)*fb%order + l, nc) + 1))
+                    if (present(reference)) reference(:, (e - 1)*samples + k) = &
+                        reference(:, (e - 1)*samples + k) + w(l)*fb%plasma%reference(:, &
+                        chain(mod((e - 1)*fb%order + l, nc) + 1))
                 end do
             end do
         end do
