@@ -109,7 +109,7 @@ module milca_ideal_free_boundary
     public :: ideal_fb_field_basis_t, ideal_fb_drive_traces, ideal_fb_full_turn_traces
     public :: ideal_fb_set_traces, ideal_fb_traces_jvp, ideal_fb_traces_vjp
     public :: ideal_fb_drive_traces_3d, ideal_fb_set_drive_3d
-    public :: ideal_fb_boundary_polygon, ideal_fb_worst_shell_cell
+    public :: ideal_fb_boundary_polygon, ideal_fb_worst_shell_cell, ideal_fb_fix_vertical
     integer, parameter, public :: IDEAL_FB_OK = 0, IDEAL_FB_BAD_INPUT = 1, &
         IDEAL_FB_MAP_FAILED = 2, IDEAL_FB_BEM_FAILED = 3, IDEAL_FB_FOLDED = 4, &
         IDEAL_FB_SOLVE_FAILED = 5, IDEAL_FB_NOT_CONVERGED = 6
@@ -5762,6 +5762,25 @@ contains
         status = 0
     end subroutine
 
+    subroutine ideal_fb_fix_vertical(fb)
+        !! Hold the mean n = 0 Z of the plasma nodes: one more bordered
+        !! gauge row next to the slide moments (its multiplier is the
+        !! vertical force a feedback field would supply). An up-down
+        !! symmetric deck (VMEC lasym = F) excludes the antisymmetric
+        !! vertical mode, which at fixed coil currents is unstable for an
+        !! elongated plasma; without this row the solve drifts down that
+        !! mode.
+        type(ideal_fb_t), intent(inout) :: fb
+        real(dp), allocatable :: slide(:, :, :)
+        integer :: nl
+        nl = size(fb%slide, 3)
+        allocate (slide(2, fb%plasma%nodes, nl + 1))
+        slide(:, :, :nl) = fb%slide
+        slide(1, :, nl + 1) = 0
+        slide(2, :, nl + 1) = 1/sqrt(real(fb%plasma%nodes, dp))
+        call move_alloc(slide, fb%slide)
+    end subroutine
+
     subroutine ideal_fb_worst_shell_cell(fb)
         !! Print the shell cell with the smallest Jacobian ratio J/det over
         !! its quadrature points: its vertices (role 1 Gamma_p, 2 interior,
@@ -5822,6 +5841,24 @@ contains
                 end do
             end do
         end do
+    end subroutine
+
+    subroutine trace_boundary(fb, it, residual, energy)
+        ! Gamma_p after each Newton step, appended to fb_trace.txt, so the
+        ! boundary path can be compared with a reference equilibrium.
+        type(ideal_fb_t), intent(in) :: fb
+        integer, intent(in) :: it
+        real(dp), intent(in) :: residual, energy
+        real(dp), allocatable :: poly(:, :), ref(:, :)
+        integer :: u, k, st
+        call ideal_fb_boundary_polygon(fb, 1, poly, st, reference=ref)
+        if (st /= 0) return
+        open (newunit=u, file='fb_trace.txt', position='append', action='write')
+        do k = 1, size(poly, 2)
+            write (u, '(i5,i5,2es14.6,4es24.16)') it, k, residual, energy, poly(:, k), &
+                ref(:, k)
+        end do
+        close (u)
     end subroutine
 
     subroutine chain_of_plasma(map, order, chain, status)
@@ -5991,6 +6028,7 @@ contains
             if (talk) print '(a,i3,a,es10.3,a,es22.14,a,es9.2)', 'fb inertia newton', it, &
                 ' res/sigmaV ', report%residual, ' E_red ', energy, ' delta ', &
                 opt%delta_last
+            if (talk) call trace_boundary(fb, it, report%residual, energy)
             if (res_tol > 0) then
                 if (report%residual <= res_tol) then
                     status = IDEAL_FB_OK; exit
