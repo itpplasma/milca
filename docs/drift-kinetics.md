@@ -419,54 +419,62 @@ speed grid and Legendre resolution, loaded 28-core node).
 volts on the grid of \(b\) and returns the response of every species to it
 (`d_phi`), together with the local parallel flow \(U(\theta,\zeta)\) of each
 standard drive (`flow_local`) and of the potential drive (`flow_local_phi`).
-With \(g = f_1 + Ze\Phi_1 f_M/T\) the parallel electric field of \(\Phi_1\) is
-absorbed, and the linearised equation keeps one new source, the radial
-\(E\times B\) drift acting on the Maxwellian gradient:
+The unknown is \(g = f - F\) with \(F = f_M(\psi, H)\) and the total energy
+\(H = mv^2/2 + Ze\Phi_1\), as in SFINCS. With \(\varepsilon = Ze\Phi_1/T\) the
+response linear in \(\Phi_1\) has three sources, all of order
+\(\Phi_1\nabla\ln p\):
 
-\[
-v_\parallel \nabla_\parallel g + (\mathbf v_d + \mathbf v_E)\cdot\nabla\psi\,
-\partial_\psi f_M = C(g), \qquad
-\frac{\mathbf v_E\cdot\nabla\psi}{\mathbf v_d\cdot\nabla\psi}
-= \frac{ZeB\,d_\perp\Phi_1}{T x^2 (1+\xi^2)\, d_\perp B},
-\]
+1. the radial \(E\times B\) drift on \(f_M\),
+   \(\mathbf v_E\cdot\nabla\psi/\mathbf v_d\cdot\nabla\psi =
+   ZeB\,d_\perp\Phi_1/(T x^2(1+\xi^2)\,d_\perp B)\) with
+   \(d_\perp = \partial_\theta - (I/G)\partial_\zeta\), a pure \(P_0\) source of
+   speed weight \(x^0\);
+2. the magnetic drift on the \(\Phi_1\) part of \(\partial_\psi F|_H\),
+   \(\varepsilon f_M[-f_1 + (1-x^2) f_2]\);
+3. the parallel electric field accelerating the gradient response
+   \(g_\nabla\): \(\dot x = -(v_t/2)\xi E\),
+   \(\dot\xi = -(v_t/2x)(1-\xi^2)E\), \(E = \mathbf b\cdot\nabla\varepsilon\),
+   in the conservative weak form of the electric speed and pitch advection.
 
-with \(d_\perp = \partial_\theta - (I/G)\partial_\zeta\), the same operator as
-the magnetic drift. The source is therefore the radial-drive row with
-\((1+\xi^2)x^2 (T/Ze)\, d_\perp b/b\) replaced by \(d_\perp\Phi_1\): pure
-\(P_0\), speed weight \(x^0\), and the same forces \(f_1, f_2\). For an
-\(n=0\) harmonic in an axisymmetric field it equals
-\((G/\iota B^2)\,\mathbf B\cdot\nabla\Phi_1\) and gives local parallel flow
-without a surface-averaged radial flux. The flow is normalised so that
+The E x B source alone is wrong by up to a factor 1000 for this case: terms 2
+and 3 are of the same order, and 3 is of order one against 1. A constant
+\(\Phi_1\) is not a gauge here: it rescales \(F\) by \(e^{-\varepsilon}\) and
+shifts \(\ln n'\) by \(\varepsilon T'/T\). The flow is normalised so that
 \(\langle bU\rangle\) (weight \(1/b^2\)) equals the parallel-flow entry of the
-same drive, and \(u_\parallel = 2 s U f\) in SI with \(s = q/(1+(I/G)/q)\), as
-in `surface_fluxes`. The same source form is used by SFINCS with
-`readExternalPhi1` (`evaluateResidual.F90` at the commit below).
+same drive, and \(u_\parallel = 2 s U f\) in SI with \(s = q/(1+(I/G)/q)\), as in
+`surface_fluxes`.
 
 Verification (`test_surface_phi1`):
 
-- `continuity`: particle conservation fixes the local flow of every drive up
-  to a constant,
-  \(B^2(\iota\partial_\theta+\partial_\zeta)(u_\parallel/B) + G S =
-  \mathrm{const}\), with \(S = (T/ZeB)\,d_\perp B\,(2f_1+5f_2)\) for the
-  magnetic drift and \(S = d_\perp\Phi_1 (f_1+\tfrac32 f_2)\) for the
-  \(E\times B\) drift (Maxwellian moments of \(x^2(1+\xi^2)(f_1+x^2f_2)\) and of
-  \(f_1+x^2f_2\)). It holds to \(10^{-14}\) with pitch-angle scattering for
-  both drives, which fixes the sign, density and energy weights of the new
-  source against the SFINCS-checked magnetic drive. With the full operator the
-  residual is the operator's density-conservation defect, first order in the
-  speed-element width (phi1 drive, force 1: \(2.1\times10^{-3}\) at 12
-  elements, \(1.0\times10^{-3}\) at 24; magnetic drive \(4\times10^{-4}\)).
+- `sfincs`: the local \(u_\parallel(\theta,\zeta)\) and \(\langle Bu_\parallel\rangle\)
+  of the \(\Phi_1\) response against SFINCS
+  ([fixture](../test/data/surface_phi1_sfincs.md)). Maximum local error
+  relative to \(\max|u_\parallel|\): \(4.1\times10^{-4}\) and
+  \(6.4\times10^{-5}\) with pitch-angle scattering (forces 1, 2),
+  \(4.9\times10^{-3}\) and \(3.3\times10^{-3}\) with the full operator.
+  \(\langle Bu_\parallel\rangle\) = 1.6358, 2.8757, 3.190 T m/s against SFINCS
+  1.6376, 2.8762, 3.202 T m/s.
+- `continuity`: particle conservation fixes the local flow up to a constant,
+  \(B^2(\iota\partial_\theta+\partial_\zeta)(u_\parallel/B) + G S = \mathrm{const}\),
+  with \(S = (T/ZeB)\,d_\perp B\,(2f_1+5f_2)\) for the magnetic drift and
+  \(S = d_\perp\Phi_1(f_1+\tfrac32 f_2) - \Phi_1(d_\perp B/B)(2f_1+3f_2)\) for
+  the \(\Phi_1\) sources. With pitch-angle scattering it holds to
+  \(10^{-14}\) for the magnetic drive and to \(1.9\times10^{-6}\),
+  \(1.6\times10^{-8}\), \(6.0\times10^{-11}\) at 12, 24, 48 speed elements for
+  the \(\Phi_1\) drive (the dropped \(x=0\) row of term 3). With the full
+  operator the residual is the operator's own density defect,
+  \(3.7\times10^{-3}\) at 12 elements.
 - `closure`: \(\langle bU\rangle\) reproduces the flow moments to
-  \(10^{-15}\), and a constant \(\Phi_1\) drives nothing.
+  \(10^{-15}\), and a constant \(\Phi_1\) equals the density rescaling to
+  \(10^{-13}\).
 
-Open: the SFINCS `readExternalPhi1` run of the same case is not linear in
-\(\Phi_1\) and already differs from `includePhi1 = .false.` at \(\Phi_1 = 0\)
-([lessons](lessons/drift-kinetic-transport.md#7-implementation-and-toolchain-defects)),
-so a direct SFINCS comparison of the response is pending. Quasineutral
-\(\Phi_1\) (#224) and helical-core geometry (#222) build on this.
+Open: the \(\Phi_1\) correction of the collision operator
+(`includePhi1InCollisionOperator` in SFINCS), the response to the inductive
+field, and quasineutral \(\Phi_1\) (#224).
 
 Sources: [SFINCS](https://github.com/landreman/sfincs/tree/8df5453472e982df0f6ae005243ce38d57a83711)
-(BSD 2-Clause), `evaluateResidual.F90`;
+(BSD 2-Clause), `evaluateResidual.F90` and `populateMatrix.F90` (external
+\(\Phi_1\) source and parallel-field term);
 [NEO-2 pull request 240](https://github.com/itpplasma/NEO-2/pull/240)
 (misaligned-potential drive in NEO-2-QL, our code).
 
@@ -495,13 +503,7 @@ goes like \(\delta^2\). The ratio of the changes at \(\delta\) and \(\delta/2\)
 is 3.982 (matrix) and 3.960 (bootstrap current) at \(\delta=0.01\), and 3.999
 and 3.998 at \(\delta=0.0025\).
 
-Observation, not yet checked independently: with equal species gradients the
-\(\Phi_1\)-driven current vanishes to rounding for \(n\neq0\) harmonics.
-Continuity fixes each species' flow by the density moment of its
-\(E\times B\) source, which does not depend on charge or mass.
-
-Open from #222: comparison with SFINCS on the same file (needs the
-`readExternalPhi1` question above settled only for \(\Phi_1\)), a helical-core
+Open from #222: comparison with SFINCS on the same file, a helical-core
 equilibrium from VMEC++ or MILCA's own solver, and refusal of surfaces whose
 orbit width exceeds the distance to the helical axis.
 

@@ -183,13 +183,27 @@ limit, three were input data and six were implementation defects.
   Newton steps on generated residuals with exact tangents (#323), as the
   differentiability principle of [DESIGN.md](../../DESIGN.md) requires.
 
-- SFINCS 8df5453 with `includePhi1 = readExternalPhi1 = .true.` (direct solver,
-  11 x 7 x 24 x 16, deuterium at 2 keV): at Phi_1 = 0 the flux-surface averaged
-  B u_par is -0.00683 (constraintScheme 2) or -0.017199 (constraintScheme 1)
-  against -0.017208 without Phi_1, the density sources rise from 1e-12 to
-  1e-7...1e-6, and the change at Phi1Hat = 1e-4 and 2e-4 is not linear
-  (63 and 2.0 T m/s per unit gradient, constraintScheme 1). The cause (input
-  or SFINCS) is not yet isolated, so these runs are no reference.
+- SFINCS 8df5453 sets the MUMPS pivoting threshold CNTL(1) to 1e-6. Its
+  direct solves are then inaccurate without a warning: the single linear step
+  of `RHSMode=1` left a relative residual of 1.8e-3 on the 11 x 7 x 24 x 16
+  Fokker-Planck case, and up to 1 with `includePhi1 = readExternalPhi1`, whose
+  explicit zeros change the pivot order. At Phi_1 = 0 this gave
+  <B u_par> = -0.00683 instead of -0.01720, and a response not linear in
+  Phi_1. The matrices with and without Phi_1 are equal there, and a sparse LU
+  solves them to 1e-12. `-mat_mumps_cntl_1 0.01` (the MUMPS default) gives
+  residuals of 1e-11, and is the default in the itpplasma fork. Check the true
+  residual of a reference solve, not only the solver status.
+- The first in-surface potential drive kept only the radial E x B drift of
+  Phi_1. The magnetic drift on the Phi_1 part of dF/dpsi at fixed total
+  energy and the parallel electric field acting on the gradient response are
+  of the same order, and SFINCS keeps both. Without them <B u_par> was off by
+  a factor 1.3 to 1000. Its continuity check passed, because each omitted
+  term conserves density or adds a source the check did not contain; a
+  conservation identity does not test completeness.
+- A Legendre matrix built with matmul starts at index 1. Reading it from 0
+  read memory out of bounds and made one force column change from run to run
+  (19.4 and 103.2 T m/s). Two runs of the same input disagreeing is a
+  memory defect, not a solver tolerance.
 - The energy-coupled full operator conserves density per surface point only
   to first order in the speed-element width; the continuity identity of
   `test_surface_phi1` measures it (2.1e-3 at 12, 1.0e-3 at 24 elements).
