@@ -189,8 +189,9 @@ an unexamined historical item. Missing original bodies are stated explicitly.
   [10.1088/1361-6587/ab9a61](https://doi.org/10.1088/1361-6587/ab9a61).
   Not found by title query. [Author manuscript](https://pure.mpg.de/rest/items/item_3245698_3/component/file_3246059/content),
   §II: computational boundary between plasma and coils, vacuum and virtual casing.
-- **SP26:** Balkovic et al., SPECTRE (2026 preprint),
-  [10.48550/arXiv.2607.27135](https://doi.org/10.48550/arXiv.2607.27135).
+- **SP26:** Balkovic et al., SPECTRE, Plasma Phys. Control. Fusion 68, 115021 (2026),
+  [10.1088/1361-6587/aebef8](https://doi.org/10.1088/1361-6587/aebef8); read as the
+  preprint [10.48550/arXiv.2607.27135](https://doi.org/10.48550/arXiv.2607.27135).
   Zotero WB4EHRK9 exists. [Body](https://arxiv.org/html/2607.27135v1), §§1.2, 2,
   3.3–3.5: unchanged MRxMHD equations, revised force, trust region and island examples.
 - **E05:** Drevlak, Monticello & Reiman, NF 45, 731–740 (2005),
@@ -983,7 +984,7 @@ an implementation or machine campaign without its required gates.
 [L16]: https://doi.org/10.1063/1.4967709
 [Q21]: https://doi.org/10.1088/1361-6587/ac2afc
 [F20]: https://doi.org/10.1088/1361-6587/ab9a61
-[SP26]: https://doi.org/10.48550/arXiv.2607.27135
+[SP26]: https://doi.org/10.1088/1361-6587/aebef8
 [E05]: https://doi.org/10.1088/0029-5515/45/7/022
 [B17]: https://doi.org/10.1109/TPS.2017.2780624
 [J17]: https://doi.org/10.1088/0029-5515/57/2/022013
