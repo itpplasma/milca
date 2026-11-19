@@ -852,6 +852,8 @@ foreach(name circular-tokamak circular-tokamak-current circular-tokamak-hermite
     milca_test_labels(equilibrium_nested_${name} fast CLASSES apps
         TARGETS nested_equilibrium test_nested_equilibrium_app)
 endforeach()
+milca_test_labels(equilibrium_nested_fresh-directory fast CLASSES apps
+    TARGETS nested_equilibrium test_nested_equilibrium_app)
 milca_test_labels(equilibrium_nested_qi-nfp2-current-free slow CLASSES apps equilibrium
     TARGETS nested_equilibrium test_nested_equilibrium_app)
 foreach(k 2 3)
