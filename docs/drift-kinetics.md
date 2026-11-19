@@ -436,6 +436,16 @@ response linear in \(\Phi_1\) has three sources, all of order
    \(\dot\xi = -(v_t/2x)(1-\xi^2)E\), \(E = \mathbf b\cdot\nabla\varepsilon\),
    in the conservative weak form of the electric speed and pitch advection.
 
+The inductive drive is proportional to \(F\), so its response has term 3,
+acting on the inductive response, and
+
+4. the Boltzmann factor of \(F\), \(-\varepsilon\) times the inductive source.
+
+Only the mean of \(\varepsilon\) drives a current through term 4. The varying
+part of \(\varepsilon B\) has \(\langle\varepsilon B^2\rangle = 0\) in the Boozer
+measure \(\propto 1/B^2\), so it is a parallel gradient whose response is a
+Boltzmann density without flow.
+
 The E x B source alone is wrong by up to a factor 1000 for this case: terms 2
 and 3 are of the same order, and 3 is of order one against 1. A constant
 \(\Phi_1\) is not a gauge here: it rescales \(F\) by \(e^{-\varepsilon}\) and
@@ -472,16 +482,31 @@ Verification (`test_surface_phi1`):
   of \(bU = c_1 + c_2 b^2\) leaves \(4\times10^{-12}\) or less (31 poloidal
   points) with both collision operators.
 - `closure`: \(\langle bU\rangle\) reproduces the flow moments to
-  \(10^{-15}\), and a constant \(\Phi_1\) equals the density rescaling to
-  \(10^{-13}\).
+  \(10^{-15}\), and a constant \(\Phi_1\) equals the density rescaling of all
+  three drives to \(10^{-14}\).
+- `continuity` for the inductive drive and its \(\Phi_1\) response: neither
+  has a density source, so \(u_\parallel \propto B\), to \(3\times10^{-14}\)
+  (pitch-angle scattering) and \(4\times10^{-11}\) (full operator).
+
+`test_dk_surface_device sfincs_phi1`: on the helical-core file the part of
+\(\langle Bu_\parallel\rangle\) of the inductive drive linear in \(\Phi_1\),
+relative to \(\langle Bu_\parallel\rangle\) without \(\Phi_1\), is
+\(9.9764\times10^{-5}\) and \(8.3812\times10^{-4}\) against SFINCS
+\(9.9760\times10^{-5}\) and \(8.3845\times10^{-4}\) (pitch-angle scattering,
+full operator; local values to the same relative error,
+[fixture](../test/data/dk_surface_helical_ephi1_sfincs.md)). SFINCS 8df5453
+omits the Boltzmann factor of the inductive drive. The reference supplies it
+through `EParallelHatSpec_bcdatFile`. Without it, SFINCS gives
+\(1.3976\times10^{-4}\) and \(8.7845\times10^{-4}\).
 
 Open: the \(\Phi_1\) correction of the collision operator
-(`includePhi1InCollisionOperator` in SFINCS), the response to the inductive
-field, and quasineutral \(\Phi_1\) (#224).
+(`includePhi1InCollisionOperator` in SFINCS) and quasineutral \(\Phi_1\)
+(#224).
 
 Sources: [SFINCS](https://github.com/landreman/sfincs/tree/8df5453472e982df0f6ae005243ce38d57a83711)
 (BSD 2-Clause), `evaluateResidual.F90` and `populateMatrix.F90` (external
-\(\Phi_1\) source and parallel-field term);
+\(\Phi_1\) source and parallel-field term), `geometry.F90` (`load_bcdat_file`,
+the \(E_\parallel\) profile);
 [NEO-2 pull request 240](https://github.com/itpplasma/NEO-2/pull/240)
 (misaligned-potential drive in NEO-2-QL, our code).
 
