@@ -971,6 +971,8 @@ milca_test_labels(equilibrium_d8_issan_3d_integer fast CLASSES mhd
 
 milca_test_labels(equilibrium_d8_landreman_3d_p3 fast CLASSES mhd
     TARGETS test_equilibrium_3d)
+milca_test_labels(equilibrium_d8_landreman_3d_p3_24 fast CLASSES mhd
+    TARGETS test_equilibrium_3d)
 
 foreach(gate rotation translation screw manufactured limit derivatives guards)
     milca_test_labels(grad_shafranov_rm0_${gate} fast CLASSES equilibrium

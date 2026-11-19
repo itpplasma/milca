@@ -649,6 +649,11 @@ add_test(NAME equilibrium_d8_landreman_3d_integer
 add_test(NAME equilibrium_d8_landreman_3d_p3
     COMMAND test_equilibrium_3d 0 4 4 16 3 2.3e-3 2.2e-2 3.3e-2 2 2 8 2)
 set_tests_properties(equilibrium_d8_landreman_3d_p3 PROPERTIES PROCESSORS 4 TIMEOUT 180)
+# 24 boundary nodes: the damped Hessian is indefinite near the solution
+# (relabelling near-nulls), which the inertia-controlled Newton must pass.
+add_test(NAME equilibrium_d8_landreman_3d_p3_24
+    COMMAND test_equilibrium_3d 0 4 4 24 3 2e-3 1.5e-2 2.2e-2 2 2 8 2)
+set_tests_properties(equilibrium_d8_landreman_3d_p3_24 PROPERTIES PROCESSORS 4 TIMEOUT 180)
 add_test(NAME equilibrium_d8_issan_3d_integer
     COMMAND test_equilibrium_3d 0.4 2 2 8 2 0.055 0.14 0.26)
 set_tests_properties(equilibrium_d8_landreman_3d_integer equilibrium_d8_issan_3d_integer

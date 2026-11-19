@@ -292,10 +292,19 @@ Damped Newton (Levenberg--Marquardt, Hessian diagonal metric) on the reduced
 modes coupled), factorised by threaded MUMPS LDL^T (nested dissection) when
 MILCA is built with MUMPS, serial SuperLU LU otherwise. The CSR pattern is
 built once per map. Steps must keep J > 0
-at every quadrature point. A step is accepted if W decreases clearly; inside
-the roundoff band of W it is accepted only if the trapezoidal energy change
-(g(x) + g(x + s)).s/2 is not positive (a plain gradient decrease test kept the
-damping at 1e-6..1e-9 and 300-600 steps of linear crawl). A trust
+at every quadrature point. The damped Hessian of every factored step must be
+positive definite (Cholesky, or the LDL^T inertia of the Krylov policy):
+relabelling near-nulls make H itself slightly indefinite near the solution
+(two eigenvalues of -1.8e-6 and -1.2e-6 against a diagonal of 29 on the
+Landreman P3 case at 16 boundary nodes), and a step towards that saddle
+raises the damping instead. Before, the pivoted LU of the indefinite matrix
+was used and the 24-node case stalled at 160 iterations with residual 1e-3.
+A step is accepted when W decreases beyond its roundoff band by at least a
+tenth of the reduction g.s + s.H s/2 predicts; inside the band, where the
+energy cannot rank steps, the trapezoidal energy change (g(x) + g(x + s)).s/2
+must not be positive (a plain gradient decrease test kept the damping at
+1e-6..1e-9 and 300-600 steps of linear crawl, and stops at other points of
+the near-null valleys). A trust
 region caps the nodal displacement at 5% of the reference extent and omega at
 1 rad per step, because the near-null directions carry large Newton components.
 Converged when the reduced free gradient falls by 1e-6 (tests; seed ladders
