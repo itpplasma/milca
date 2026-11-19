@@ -485,6 +485,8 @@ milca_test_labels(gs_response_3d_ampere_indicator_contract fast CLASSES mhd
     TARGETS gs_response_3d)
 milca_test_labels(gs_response_3d_kinetic_closure fast CLASSES mhd
     TARGETS gs_response_3d)
+milca_test_labels(gs_response_3d_reconnected_closure fast CLASSES mhd
+    TARGETS gs_response_3d)
 milca_test_labels(equilibrium_core_d7_readback_p3 fast CLASSES equilibrium
     TARGETS test_equilibrium_core)
 milca_test_labels(equilibrium_core_d3_solovev_p3 fast CLASSES equilibrium
@@ -850,7 +852,8 @@ foreach(family 1 2)
 endforeach()
 foreach(name circular-tokamak circular-tokamak-current circular-tokamak-hermite
         circular-tokamak-current-hermite doubled-boundary axis-current-free
-        wrong-sign-start vanishing-current bean-continuation-fold)
+        wrong-sign-start vanishing-current bean-continuation-fold
+        vanishing-current-ladder fold-between-planes)
     milca_test_labels(equilibrium_nested_${name} fast CLASSES apps
         TARGETS nested_equilibrium test_nested_equilibrium_app)
 endforeach()
@@ -878,6 +881,14 @@ milca_test_labels(ideal_map_field_angle fast CLASSES mhd
     TARGETS test_ideal_map_field_angle)
 milca_test_labels(equilibrium_map_3d_loop fast CLASSES mhd
     TARGETS test_map_3d_loop)
+milca_test_labels(ideal_map_hvp fast CLASSES mhd
+    TARGETS test_ideal_map_hvp)
+milca_test_labels(ideal_map_relabel fast CLASSES mhd
+    TARGETS test_ideal_map_relabel)
+milca_test_labels(ideal_map_mode_pc fast CLASSES mhd
+    TARGETS test_ideal_map_mode_pc)
+milca_test_labels(ideal_map_matrix_free fast CLASSES mhd
+    TARGETS test_ideal_map_matrix_free)
 milca_test_labels(ideal_seed_3d_winslow fast CLASSES mhd
     TARGETS test_winslow_seed)
 milca_test_labels(ideal_seed_3d_winslow_helias slow CLASSES mhd
@@ -969,6 +980,8 @@ milca_test_labels(equilibrium_d8_issan_3d_integer fast CLASSES mhd
     TARGETS test_equilibrium_3d)
 
 milca_test_labels(equilibrium_d8_landreman_3d_p3 fast CLASSES mhd
+    TARGETS test_equilibrium_3d)
+milca_test_labels(equilibrium_d8_landreman_3d_p3_24 fast CLASSES mhd
     TARGETS test_equilibrium_3d)
 
 foreach(gate rotation translation screw manufactured limit derivatives guards)

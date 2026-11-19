@@ -292,12 +292,72 @@ Damped Newton (Levenberg--Marquardt, Hessian diagonal metric) on the reduced
 modes coupled), factorised by threaded MUMPS LDL^T (nested dissection) when
 MILCA is built with MUMPS, serial SuperLU LU otherwise. The CSR pattern is
 built once per map. Steps must keep J > 0
-at every quadrature point. A step is accepted if W decreases clearly; inside
-the roundoff band of W it is accepted only if the trapezoidal energy change
-(g(x) + g(x + s)).s/2 is not positive (a plain gradient decrease test kept the
-damping at 1e-6..1e-9 and 300-600 steps of linear crawl). A trust
+at every quadrature point. The damped Hessian of every factored step must be
+positive definite (Cholesky, or the LDL^T inertia of the Krylov policy):
+relabelling near-nulls make H itself slightly indefinite near the solution
+(two eigenvalues of -1.8e-6 and -1.2e-6 against a diagonal of 29 on the
+Landreman P3 case at 16 boundary nodes), and a step towards that saddle
+raises the damping instead. Before, the pivoted LU of the indefinite matrix
+was used and the 24-node case stalled at 160 iterations with residual 1e-3.
+A step is accepted when W decreases beyond its roundoff band by at least a
+tenth of the reduction g.s + s.H s/2 predicts; inside the band, where the
+energy cannot rank steps, the trapezoidal energy change (g(x) + g(x + s)).s/2
+must not be positive (a plain gradient decrease test kept the damping at
+1e-6..1e-9 and 300-600 steps of linear crawl, and stops at other points of
+the near-null valleys). A trust
 region caps the nodal displacement at 5% of the reference extent and omega at
 1 rad per step, because the near-null directions carry large Newton components.
+`ideal_map_hvp` gives the reduced Hessian-vector product P^T H P d without
+the assembled matrix: the direction is evaluated on the toroidal planes,
+contracted with the same point Hessians (and the field-angle blocks of
+`hessian_angle`) at every quadrature point and plane, and projected back onto
+the Fourier coefficients, in O(nodes nphi) memory. CTest `ideal_map_hvp`
+requires agreement with the assembled matrix to 1e-12 (observed 6e-16 to
+8e-16, with and without the field angle).
+`ideal_map_store_hessians` keeps the point Hessians of one state (78 values
+per quadrature point and plane, O(cells nq nphi)), so that a product is a
+pass of contractions. `milca_ideal_map_mode_pc` preconditions H by an
+overlapping additive Schwarz method in the toroidal number: subdomain p holds
+the modes of n = p and p + 1 with their exact couplings (a principal
+submatrix, positive definite where H is), each a 2D mesh matrix factored by
+Cholesky, weighted by 1/sqrt(multiplicity) for symmetry; an axisymmetric
+state gives H^-1 (CTest `ideal_map_mode_pc`: 3e-13). A plane-averaged
+n-diagonal operator loses the φ-dependent near-null relabellings and needed
+330 CG iterations against Jacobi's 900. `milca_ideal_map_krylov` runs
+deflated preconditioned CG (Saad et al. 2000) with the Ritz vectors of the
+smallest Ritz values recycled from the previous solve. CG iterations on
+H + mu |diag H| at the solved Landreman P3 map (ntor 2):
+
+| nodes | mu | Schwarz to 1e-8 | Jacobi to 1e-8 | Schwarz to 1e-3 | deflated (40) to 1e-3 |
+|---|---|---|---|---|---|
+| 8 | 1e-2 | 46 | 211 | 20 | 20 |
+| 8 | 1e-4 | 122 | 1045 | 54 | 49 |
+| 8 | 1e-6 | 149 | 1193 | 82 | 44 |
+| 16 | 1e-2 | 64 | 229 | 26 | 26 |
+| 16 | 1e-4 | 289 | 2028 | 117 | 116 |
+| 16 | 1e-6 | 499 | 4020 | 290 | 128 |
+
+The spectrum of the preconditioned operator is a broad band (Ritz values
+0.03 to 7 at 8 nodes, mu = 1e-4), not a few outliers, and its lower end
+moves down under refinement.
+
+Relabelling directions (`ideal_map_relabel_space`, position gauge): the
+displacements f(rho) g(theta, phi) dX/dtheta with f = rho^k (1 - rho^2),
+k <= 3, and g = cos, sin(m theta - n nfp phi). Energy slope along them over
+the slope along a radial expansion (1 - rho^2)(X - X_axis), Landreman seed
+(P3, ntor 2) deformed without stellarator symmetry
+(`test/test_ideal_map_relabel.f90`):
+
+| radial nodes | 8 | 12 | 16 | 24 |
+|---|---|---|---|---|
+| reshuffles g = 1, largest | 0.13 | 0.059 | 0.012 | 0.011 |
+| m = 1, k = 0, largest | 1.6 | 1.6 | 1.6 | - |
+
+The reshuffles theta -> theta + f(rho) are continuum nulls (slope falls with
+h), the theta-dependent family is not (slope independent of h, a force).
+Only the reshuffles may be projected out of a gradient norm, the wider family
+serves as a coarse space.
+
 Converged when the reduced free gradient falls by 1e-6 (tests; seed ladders
 stop at 1e-11 x the gradient of X0 = id). Element energy, gradient and
 Hessian blocks are OpenMP-parallel over cells. The report gives wall time for

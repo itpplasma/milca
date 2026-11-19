@@ -15,7 +15,7 @@ module milca_inertia_newton
     !! stationarity norm decreases.
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-    use fortsparse, only: sparse_solver_t, sparse_factor, sparse_solve, sparse_destroy, &
+    use fortsparse, only: sparse_solver_t, sparse_refactor, sparse_solve, &
         fortsparse_status_t, status_ok, FORTSPARSE_BACKEND_NATIVE, &
         FORTSPARSE_SYM_INDEFINITE, FORTSPARSE_ORDER_AMD, sparse_inertia, &
         FORTSPARSE_INERTIA_RELIABLE, FORTSPARSE_INERTIA_UNCERTAIN, csc_normalize_symmetric_raw
@@ -90,12 +90,12 @@ contains
                 print '(2a)', 'inertia_newton_factor: ', trim(sst%msg)
                 return
             end if
-            if (factored) call sparse_destroy(solver)
+            ! multifrontal LDL^T; the same pattern over shifts and Newton steps
+            ! reuses its ordering and symbolic analysis
             solver%backend_id = FORTSPARSE_BACKEND_NATIVE
             solver%options%symmetry = FORTSPARSE_SYM_INDEFINITE
             solver%options%ordering = FORTSPARSE_ORDER_AMD
-            solver%options%ldlt_blocked = .true.
-            call sparse_factor(solver, n, n, size(scaled), rowptr, colidx, scaled, sst)
+            call sparse_refactor(solver, n, n, size(scaled), rowptr, colidx, scaled, sst)
             factored = status_ok(sst)
             opt%inertia = -1
             if (factored) then

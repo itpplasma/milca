@@ -481,10 +481,11 @@
     !> and field). Density conservation involves the dropped test row x = 0,
     !> returned unscaled: sum_k vt(a) d3(k) energy_w(p, k, kk, a) +
     !> energy0_w(p, kk, a) = 0, likewise field0_w for l = 0; energy0 and
-    !> field0 are their sums over p.
+    !> field0 are their sums over p. condense_isotropic returns the l = 0 rows
+    !> with the x = 0 node condensed (isotropic_rows).
     subroutine ntv_collision_rows(species, lnlambda, grid, model, n_leg, rows, ratio, &
             d3, d4, d6, vt, tz, status, energy, field, nu, energy_w, field_w, energy0, &
-            field0, energy0_w, field0_w)
+            field0, energy0_w, field0_w, condense_isotropic)
         type(collop_species_t), intent(in) :: species(:)
         real(dp), intent(in) :: lnlambda(:, :)
         type(collop_grid_t), intent(in) :: grid
@@ -495,6 +496,7 @@
         real(dp), allocatable, intent(out), optional :: energy(:, :, :), &
             field(:, :, :, :, :), nu(:, :), energy_w(:, :, :, :), field_w(:, :, :, :, :, :), &
             energy0(:, :), field0(:, :, :, :), energy0_w(:, :, :), field0_w(:, :, :, :, :)
+        logical, intent(in), optional :: condense_isotropic
     type(energy_system_t) :: e
     real(dp), allocatable :: ew(:, :, :, :), fw(:, :, :, :, :, :)
     real(dp) :: c
@@ -521,6 +523,12 @@
             ratio(k, a) = e%row(k, a)*e%vt(a)*e%m3(k, k)
         end do
     end do
+    if (present(condense_isotropic)) then
+        if (condense_isotropic) then
+            call isotropic_rows(species, lnlambda, grid, model, e, rows(:, :, :, :, 0), status)
+            if (status /= NTV_OK) return
+        end if
+    end if
     d3 = [(e%m3(k, k), k=1, e%nx)]
     d4 = e%d4
     d6 = e%d6
@@ -1124,6 +1132,64 @@
             end do
         end do
     end subroutine scaled_rows
+
+    !> l = 0 rows with the x = 0 node of every species condensed
+    !> (condensed_isotropic) instead of set to zero, scaled like scaled_rows.
+    !> Pitch-angle scattering has no isotropic part and keeps its rows.
+    subroutine isotropic_rows(species, lnlambda, grid, model, e, rows0, status)
+        type(collop_species_t), intent(in) :: species(:)
+        real(dp), intent(in) :: lnlambda(:, :)
+        type(collop_grid_t), intent(in) :: grid
+        integer, intent(in) :: model
+        type(energy_system_t), intent(in) :: e
+        real(dp), intent(inout) :: rows0(:, :, :, :)
+        integer, intent(out) :: status
+        type(collop_t) :: op
+        real(dp), allocatable :: g0(:, :)
+        integer :: a, b, kk, ng, st
+        status = NTV_OK
+        if (model == COLLOP_LORENTZ) return
+        status = NTV_SINGULAR
+        call collop_build(species, lnlambda, grid, model, 0, op, st)
+        if (st /= COLLOP_OK) return
+        ng = grid%n
+        g0 = condensed_isotropic(op%a(:, :, 0), e%ns, ng)
+        do b = 1, e%ns
+            do a = 1, e%ns
+                do kk = 1, e%nx
+                    rows0(kk, :, a, b) = e%row(kk, a)*g0((a - 1)*ng + 1 + kk, &
+                        (b - 1)*ng + 2:b*ng)*pi**1.5_dp/(4*pi*species(a)%n)
+                end do
+            end do
+        end do
+        status = NTV_OK
+    end subroutine isotropic_rows
+
+    !> Isotropic Galerkin block with the x = 0 nodes of all species condensed:
+    !> h_0(x = 0) is finite, and with the speed masses lumped at the GLL nodes
+    !> its test row carries collisions only, so A_KK - A_KZ A_ZZ^-1 A_ZK is the
+    !> exact operator on the remaining nodes. Each species' density test
+    !> function sums the rows of A to zero, so the condensed rows conserve
+    !> density exactly; setting h_0(0) = 0 instead lost it to first order in
+    !> the element width. Without isotropic collisions (A_ZZ = 0, pitch-angle
+    !> scattering) the block is returned unchanged.
+    function condensed_isotropic(a0, ns, ng) result(g)
+        real(dp), intent(in) :: a0(:, :)
+        integer, intent(in) :: ns, ng
+        real(dp) :: g(size(a0, 1), size(a0, 2))
+        real(dp) :: azz(ns, ns), azk(ns, size(a0, 2))
+        integer :: z(ns), piv(ns), info, a
+        g = a0
+        z = [((a - 1)*ng + 1, a=1, ns)]
+        azz = a0(z, z)
+        if (maxval(abs(azz)) == 0) return
+        azk = a0(z, :)
+        call dgesv(ns, size(a0, 2), azz, ns, piv, azk, ns, info)
+        if (info /= 0) return
+        g = a0 - matmul(a0(:, z), azk)
+        g(z, :) = 0
+        g(:, z) = 0
+    end function condensed_isotropic
 
     !> Dense block (j, jc) of species a with its preconditioner collisions,
     !> unknowns ordered (theta row of the pair block, node).

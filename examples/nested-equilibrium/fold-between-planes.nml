@@ -1,0 +1,12 @@
+! non-stellarator-symmetric boundary with a large n = 1 axis excursion
+! (input.basic_non_stellsym_simsopt of the VMEX examples): at the boundary's
+! map_ntor = 1 the solved map folds between the planes of the energy quadrature
+&nested_input
+  nfp = 1, mpol = 1, ntor = 1, phiedge = 119.416456038,
+  rbc(-1,1) = 0.5, rbc(0,0) = 5.0, rbc(0,1) = 1.25, rbc(1,0) = 1.25,
+  rbs(-1,1) = -0.5, rbs(0,1) = -0.1, rbs(1,0) = 0.1,
+  zbc(-1,1) = -0.5, zbc(0,1) = -0.1, zbc(1,0) = -0.1,
+  zbs(-1,1) = 0.5, zbs(0,1) = 1.25, zbs(1,0) = -1.5,
+  iota(0) = -0.14, boundary_nodes = 12, degree = 3, angle_mpol = 2,
+  fourier_tolerance = 1.0, tolerance = 1e-8
+/

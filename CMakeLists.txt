@@ -459,7 +459,7 @@ if(MILCA_ENABLE_CUDA_GS_SOLVE)
     enable_language(CUDA)
     set(FORTSPARSE_ENABLE_NATIVE_CUDA ON CACHE BOOL "" FORCE)
 endif()
-set(MILCA_FORTSPARSE_REVISION "a71660aead2fe8c7074bff9c5c1ba0e16df4f3c2")
+set(MILCA_FORTSPARSE_REVISION "514bade92fed2ecc0a9abf0510e0e59c30919438")
 set(FORTSPARSE_ENABLE_SUPERLU OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_UMFPACK_IPC OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_MUMPS OFF CACHE BOOL "" FORCE)
@@ -503,7 +503,7 @@ target_link_libraries(test_equilibrium_harness PRIVATE milca)
 add_test(NAME equilibrium_d8_registry_contract COMMAND test_equilibrium_harness)
 # N1: nonlinear 3D frozen-in energy map (fixed boundary), DESIGN 3D lane.
 target_sources(milca_mhd PRIVATE src/generated/milca_ideal_map_leaves.f90
-    src/mhd/ideal_map.f90 src/mhd/map_3d_equilibrium.f90
+    src/mhd/ideal_map.f90 src/mhd/ideal_map_mode_pc.f90 src/mhd/ideal_map_krylov.f90 src/mhd/ideal_map_matrix_free.f90 src/mhd/map_3d_equilibrium.f90
     src/mhd/equilibrium_3d_driver.f90
     src/generated/milca_map_3d_readback_leaves.f90 src/mhd/ideal_seed.f90
     src/generated/milca_ideal_field_angle_leaves.f90
@@ -656,6 +656,11 @@ add_test(NAME equilibrium_d8_landreman_3d_integer
 add_test(NAME equilibrium_d8_landreman_3d_p3
     COMMAND test_equilibrium_3d 0 4 4 16 3 2.3e-3 2.2e-2 3.3e-2 2 2 8 2)
 set_tests_properties(equilibrium_d8_landreman_3d_p3 PROPERTIES PROCESSORS 4 TIMEOUT 180)
+# 24 boundary nodes: the damped Hessian is indefinite near the solution
+# (relabelling near-nulls), which the inertia-controlled Newton must pass.
+add_test(NAME equilibrium_d8_landreman_3d_p3_24
+    COMMAND test_equilibrium_3d 0 4 4 24 3 2e-3 1.5e-2 2.2e-2 2 2 8 2)
+set_tests_properties(equilibrium_d8_landreman_3d_p3_24 PROPERTIES PROCESSORS 4 TIMEOUT 180)
 add_test(NAME equilibrium_d8_issan_3d_integer
     COMMAND test_equilibrium_3d 0.4 2 2 8 2 0.055 0.14 0.26)
 set_tests_properties(equilibrium_d8_landreman_3d_integer equilibrium_d8_issan_3d_integer
@@ -679,6 +684,26 @@ add_executable(test_map_3d_loop test/test_map_3d_loop.f90)
 target_link_libraries(test_map_3d_loop PRIVATE milca)
 add_test(NAME equilibrium_map_3d_loop COMMAND test_map_3d_loop)
 set_tests_properties(equilibrium_map_3d_loop PROPERTIES PROCESSORS 1 TIMEOUT 60)
+add_executable(test_ideal_map_hvp test/test_ideal_map_hvp.f90)
+target_link_libraries(test_ideal_map_hvp PRIVATE milca)
+add_test(NAME ideal_map_hvp COMMAND test_ideal_map_hvp)
+set_tests_properties(ideal_map_hvp PROPERTIES PROCESSORS 4
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_ideal_map_relabel test/test_ideal_map_relabel.f90)
+target_link_libraries(test_ideal_map_relabel PRIVATE milca)
+add_test(NAME ideal_map_relabel COMMAND test_ideal_map_relabel)
+set_tests_properties(ideal_map_relabel PROPERTIES PROCESSORS 4
+    ENVIRONMENT "OMP_NUM_THREADS=4")
+add_executable(test_ideal_map_mode_pc test/test_ideal_map_mode_pc.f90)
+target_link_libraries(test_ideal_map_mode_pc PRIVATE milca)
+add_test(NAME ideal_map_mode_pc COMMAND test_ideal_map_mode_pc)
+set_tests_properties(ideal_map_mode_pc PROPERTIES PROCESSORS 4
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_ideal_map_matrix_free test/test_ideal_map_matrix_free.f90)
+target_link_libraries(test_ideal_map_matrix_free PRIVATE milca)
+add_test(NAME ideal_map_matrix_free COMMAND test_ideal_map_matrix_free)
+set_tests_properties(ideal_map_matrix_free PROPERTIES PROCESSORS 4
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 add_executable(test_winslow_seed test/test_winslow_seed.f90)
 target_link_libraries(test_winslow_seed PRIVATE milca)
 add_test(NAME ideal_seed_3d_winslow COMMAND test_winslow_seed)
@@ -1134,10 +1159,11 @@ endforeach()
 add_executable(test_surface_phi1 test/test_surface_phi1.f90)
 target_link_libraries(test_surface_phi1 PRIVATE milca)
 add_test(NAME surface_phi1_closure COMMAND test_surface_phi1 closure)
+add_test(NAME surface_phi1_axisymmetric COMMAND test_surface_phi1 axisymmetric)
 add_test(NAME surface_phi1_continuity COMMAND test_surface_phi1 continuity)
 add_test(NAME surface_phi1_sfincs COMMAND test_surface_phi1 sfincs
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data/surface_phi1_sfincs.txt)
-foreach(check closure continuity sfincs)
+foreach(check closure axisymmetric continuity sfincs)
     milca_test_labels(surface_phi1_${check} fast CLASSES continuum
         TARGETS test_surface_phi1)
 endforeach()
@@ -1312,14 +1338,17 @@ target_link_libraries(test_nested_equilibrium_app PRIVATE milca_io)
 # PARVMEC (ns 101, mpol 8) on the same inputs: raxis, wb and, for iota, the
 # exact volume 2 pi^2 R a^2; GVEC gives raxis 3.03683 m for the iota case.
 # wrong-sign-start: the same deck started from iota = +0.3; bean-continuation-fold:
-# the same deck solved at 24 boundary nodes from its seed.
+# the same deck solved at 24 boundary nodes from its seed; fold-between-planes:
+# the same deck solved directly with map_ntor = 5.
 foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "circular-tokamak-hermite|3.0366;0.0750949;59.2176264"
         "circular-tokamak-current|3.04266;0.0755050"
         "circular-tokamak-current-hermite|3.04266;0.0755050"
         "doubled-boundary|failure" "axis-current-free|failure"
-        "wrong-sign-start|3.02142;0.0746517" "vanishing-current|failure"
-        "bean-continuation-fold|3.546325;9.045291")
+        "wrong-sign-start|3.02142;0.0746517" "vanishing-current|failure;iota"
+        "vanishing-current-ladder|failure;iota"
+        "bean-continuation-fold|3.546325;9.045291"
+        "fold-between-planes|4.982840;1676.8216")
     string(REPLACE "|" ";" parts "${case}")
     list(GET parts 0 name)
     list(SUBLIST parts 1 -1 expected)
@@ -1997,6 +2026,10 @@ target_link_libraries(test_dk_surface_device PRIVATE milca_ntv_geometry)
 add_test(NAME dk_surface_device_sfincs COMMAND test_dk_surface_device sfincs
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_sfincs.txt)
 milca_test_labels(dk_surface_device_sfincs fast CLASSES apps TARGETS test_dk_surface_device)
+add_test(NAME dk_surface_device_sfincs_phi1 COMMAND test_dk_surface_device sfincs_phi1
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_ephi1_sfincs.txt)
+milca_test_labels(dk_surface_device_sfincs_phi1 fast CLASSES apps
+    TARGETS test_dk_surface_device)
 foreach(check geometry helical)
     add_test(NAME dk_surface_device_${check} COMMAND test_dk_surface_device ${check})
     milca_test_labels(dk_surface_device_${check} fast CLASSES apps
@@ -2644,6 +2677,12 @@ add_test(NAME gs_response_3d_kinetic_closure COMMAND ${CMAKE_COMMAND}
     -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
     -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_kinetic.cmake)
 set_tests_properties(gs_response_3d_kinetic_closure PROPERTIES TIMEOUT 240
+    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+add_test(NAME gs_response_3d_reconnected_closure COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_reconnected
+    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
+    -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_reconnected.cmake)
+set_tests_properties(gs_response_3d_reconnected_closure PROPERTIES TIMEOUT 240
     ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
 add_executable(test_mhd_ideal_n test/test_mhd_ideal_n.f90)
 target_link_libraries(test_mhd_ideal_n PRIVATE milca)

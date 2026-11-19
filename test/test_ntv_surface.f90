@@ -416,6 +416,8 @@ contains
         ok = ok .and. st == NTV_OK .and. its == 2
     end function exact
 
+    !> surface_transport against ntv_surface_coefficients on the same
+    !> discretisation: h_0(0) = 0, as the energy solver sets it.
     logical function real_solver() result(ok)
         integer, parameter :: nt = 9, nz = 5
         type(collop_species_t) :: sp(2)
@@ -442,7 +444,7 @@ contains
                                       grid, COLLOP_FULL, 12, d, its, st)
         ok = ok .and. st == NTV_OK
         call surface_transport(helical(nt, nz), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
-                               COLLOP_FULL, 12, dr, its, st)
+                               COLLOP_FULL, 12, dr, its, st, condense_isotropic=.false.)
         ok = ok .and. st == SURFACE_OK
         if (.not. ok) return
         print '(a,i0)', 'FGMRES iterations: ', its
@@ -464,7 +466,7 @@ contains
                                       grid, COLLOP_FULL, 12, d, its, st)
         ok = ok .and. st == NTV_OK
         call surface_transport(helical(nt, nz), 1, q, ig, 1/(q*rmajor), sp, lnl, grid, &
-                               COLLOP_FULL, 12, dr, its, st)
+                               COLLOP_FULL, 12, dr, its, st, condense_isotropic=.false.)
         print '(a,i0)', 'four speed elements, surface_transport status: ', st
         ok = ok .and. st == SURFACE_OK
         if (.not. ok) return

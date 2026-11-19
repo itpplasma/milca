@@ -250,19 +250,24 @@ contains
     !>       replaced by d_perp Phi_1 (P_0 only);
     !>   (b) the magnetic drift on the Phi_1 part of d F/d psi at fixed H,
     !>       eps f_M (-f1 + (1 - x^2) f2);
-    !>   (c) the parallel electric field accelerating the gradient response g,
+    !>   (c) the parallel electric field accelerating the first-order response g,
     !>       x' = -(v_t/2) xi E, xi' = -(v_t/(2 x)) (1 - xi^2) E,
     !>       E = b.grad eps, in the conservative weak form.
+    !> The inductive drive is proportional to F, so its response has (c) and
+    !>   (d) the Boltzmann factor of F, -eps times the inductive source.
     !> d_phi(a, sb, i, jf) holds the moments of d for the response of species
-    !> a to these sources with force jf = 1, 2 of species sb (per unit force).
+    !> a to these sources with force jf = 1..3 of species sb (per unit force).
     !> flow_local(i, a, sb, jf) is the local parallel flow U at point i of the
     !> response to drive jf = 1..3, normalised so that <b U> = d(a, sb, 3, jf)
     !> with <.> of weight 1/b^2; flow_local_phi(i, a, sb, jf) the same for the
     !> phi1 drive, <b U> = d_phi(a, sb, 3, jf). Point i = i_theta +
-    !> n_theta (i_zeta - 1).
+    !> n_theta (i_zeta - 1). condense_isotropic (default true) condenses the
+    !> isotropic x = 0 node of the collision rows, which makes the collisions
+    !> conserve density exactly; false sets h_0(0) = 0 as the NTV energy
+    !> solvers do.
     subroutine surface_transport(b, nper, q, i_over_g, kappa, species, lnlambda, grid, &
             model, n_leg, d, iterations, status, electric_rate, d_drate, full_local_electric, &
-            phi1, d_phi, flow_local, flow_local_phi)
+            phi1, d_phi, flow_local, flow_local_phi, condense_isotropic)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa
         integer, intent(in) :: nper, n_leg
         type(collop_species_t), intent(in) :: species(:)
@@ -277,6 +282,7 @@ contains
         real(dp), intent(in), optional :: phi1(:, :)
         real(dp), intent(out), optional :: d_phi(:, :, :, :), flow_local(:, :, :, :), &
             flow_local_phi(:, :, :, :)
+        logical, intent(in), optional :: condense_isotropic
         type(mono_factor_t) :: geo
         type(mono_factor_t), allocatable :: modes(:)
         type(surface_full_exb_t) :: full_exb
@@ -288,9 +294,11 @@ contains
             pitch_a(:, :), pitch_b(:, :), d2(:, :), m1(:, :), unused(:, :), unused_v(:)
         real(dp) :: j0, rate
         integer :: n, lmax, ns, nx, nm, a, sb, jf, k, l, st, its
-        logical :: full
+        logical :: full, condense
 
         status = SURFACE_BAD_INPUT
+        condense = .true.
+        if (present(condense_isotropic)) condense = condense_isotropic
         iterations = 0
         ns = size(species)
         if (any(shape(d) /= [ns, ns, 3, 3]) .or. mod(n_leg, 2) /= 0) return
@@ -302,7 +310,7 @@ contains
             if (.not. all(ieee_is_finite(phi1))) return
         end if
         if (present(d_phi)) then
-            if (any(shape(d_phi) /= [ns, ns, 3, 2])) return
+            if (any(shape(d_phi) /= [ns, ns, 3, 3])) return
             d_phi = 0
         end if
         if (present(flow_local)) then
@@ -310,7 +318,7 @@ contains
             flow_local = 0
         end if
         if (present(flow_local_phi)) then
-            if (any(shape(flow_local_phi) /= [size(b), ns, ns, 2])) return
+            if (any(shape(flow_local_phi) /= [size(b), ns, ns, 3])) return
             flow_local_phi = 0
         end if
         rate = 0
@@ -333,7 +341,7 @@ contains
             if (st /= SURFACE_OK) return
         end if
         call ntv_collision_rows(species, lnlambda, grid, model, n_leg, rows, ratio, d3, &
-            d4, d6, vt, tz, st)
+            d4, d6, vt, tz, st, condense_isotropic=condense)
         if (st /= NTV_OK) return
         n = geo%n
         lmax = geo%lmax
@@ -370,7 +378,7 @@ contains
         j0 = sum(1/bv**2)
         allocate (rhs(n, 0:lmax, nm))
         if (present(phi1) .and. (present(d_phi) .or. present(flow_local_phi))) &
-            allocate (xg(n, 0:lmax, nm, ns, 2))
+            allocate (xg(n, 0:lmax, nm, ns, 3))
         do sb = 1, ns
             do jf = 1, 3
                 rhs = 0
@@ -395,7 +403,7 @@ contains
                     d(a, sb, :, jf) = moments(x, a)
                     if (present(flow_local)) flow_local(:, a, sb, jf) = local_flow(x, a)
                 end do
-                if (allocated(xg) .and. jf < 3) xg(:, :, :, sb, jf) = x
+                if (allocated(xg)) xg(:, :, :, sb, jf) = x
                 if (.not. present(d_drate)) cycle
                 if (full) then
                     call full_electric_action(x, rhs)
@@ -432,16 +440,20 @@ contains
             end if
             do sb = 1, ns
                 eps = reshape(phi1, [n])/tz(sb)
-                do jf = 1, 2
+                do jf = 1, 3
                     call parallel_field_action(xg(:, :, :, sb, jf), rhs)
                     rhs = -rhs
                     do k = 1, nx
                         associate (m => (sb - 1)*nx + k, row => ratio(k, sb)/(vt(sb)*d3(k)), &
                                 w => merge(-d4(k), d4(k) - d6(k), jf == 1))
-                            rhs(:, 0, m) = rhs(:, 0, m) + row*merge(d4(k), d6(k), jf == 1) &
-                                /grid%x(k + 1)**2*dphi/q + row*tz(sb)*w*radial*eps
-                            rhs(:, 2, m) = rhs(:, 2, m) + row*tz(sb)*w &
-                                *(-2/(kappa*q))*geo%p%drift2*eps
+                            if (jf < 3) then
+                                rhs(:, 0, m) = rhs(:, 0, m) + row*merge(d4(k), d6(k), jf == 1) &
+                                    /grid%x(k + 1)**2*dphi/q + row*tz(sb)*w*radial*eps
+                                rhs(:, 2, m) = rhs(:, 2, m) + row*tz(sb)*w &
+                                    *(-2/(kappa*q))*geo%p%drift2*eps
+                            else
+                                rhs(:, 1, m) = rhs(:, 1, m) - row*vt(sb)*d3(k)*geo%p%drive_e*eps
+                            end if
                         end associate
                     end do
                     call solve(rhs, x, its, st)
@@ -507,6 +519,8 @@ contains
                             + pitch_b(l + 1, j + 1)*matmul(samples(:, j, :), transpose(m1))
                     end do
                 end do
+                ! The x = 0 test function joins node 2 for l = 0 (density).
+                weak(:, 0, 2) = weak(:, 0, 2) + weak(:, 0, 1)
                 do k = 1, nx
                     m = (a - 1)*nx + k
                     do l = 0, lmax
@@ -702,6 +716,9 @@ contains
             do a = 1, ns
                 samples(:, :, 2:) = h(:, :, (a-1)*nx+1:a*nx)
                 call full_exb_action(full_exb, samples, weak)
+                ! The x = 0 test function joins node 2 for l = 0, so that the
+                ! kept test functions sum to one and the density is conserved.
+                weak(:, 0, 2) = weak(:, 0, 2) + weak(:, 0, 1)
                 do k = 1, nx
                     m = (a-1)*nx+k
                     do l = 0, lmax

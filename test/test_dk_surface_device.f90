@@ -11,7 +11,11 @@
 !!             3.998 at 0.0025 (matrix and bootstrap current);
 !!   sfincs    particle flux, kinetic-energy flux and <B u_par> for a density
 !!             gradient on the delta = 0.03 file against SFINCS
-!!             (test/data/dk_surface_helical_sfincs.md).
+!!             (test/data/dk_surface_helical_sfincs.md);
+!!   sfincs_phi1  the part of <B u_par> and of the local u_par that is linear
+!!             in a prescribed Phi_1, for the inductive drive, relative to
+!!             <B u_par> of that drive, against SFINCS
+!!             (test/data/dk_surface_helical_ephi1_sfincs.md).
 program test_dk_surface_device
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, boozer_surface_t, load_boozer_file, &
@@ -36,6 +40,9 @@ program test_dk_surface_device
     case ('sfincs')
         call get_command_argument(2, path)
         ok = sfincs(trim(path))
+    case ('sfincs_phi1')
+        call get_command_argument(2, path)
+        ok = sfincs_phi1(trim(path))
     case default
         print '(a)', 'unknown check '//trim(check)
         ok = .false.
@@ -162,6 +169,65 @@ contains
         end do
         close (unit)
     end function sfincs
+
+    !> eps = Z e Phi_1/T = 1e-4 [0.4 + cos th + 0.6 sin th + 0.5 cos(2 th - ze
+    !> + 0.3)] on the delta = 0.03 file, deuterium at 2 keV; the force
+    !> normalisation of the inductive drive cancels in both ratios. The mean
+    !> of eps carries the Boltzmann factor of the drive: the varying part of
+    !> eps B is a parallel gradient, whose response is a density without flow.
+    logical function sfincs_phi1(path) result(pass)
+        character(*), intent(in) :: path
+        integer, parameter :: nt = 11, nz = 7
+        type(boozer_file_t) :: bf
+        type(boozer_surface_t) :: surf
+        type(collop_species_t) :: sp(1)
+        type(collop_grid_t) :: grid
+        real(dp), allocatable :: b(:, :)
+        real(dp) :: bb0, q, ig, kappa, d(1, 1, 3, 3), d_phi(1, 1, 3, 3), lnl(1, 1), &
+            u(nt*nz, 1, 1, 3), u_phi(nt*nz, 1, 1, 3), phi1(nt, nz), th, ze, &
+            expected_ratio, expected(nt*nz), ratio, local(nt*nz), err_mean, err_local
+        integer :: st, its, unit, cases, c, model, i, j
+        call write_file('dk_surface_ephi1.bc', 0.03_dp)
+        call load_boozer_file('dk_surface_ephi1.bc', bf, st)
+        pass = st == BOOZER_OK
+        if (.not. pass) return
+        call boozer_surface(bf, s_eval, surf, st)
+        call dk_surface_geometry(surf, nt, nz, b, bb0, q, ig, kappa, st)
+        pass = st == DKS_OK
+        if (.not. pass) return
+        sp(1) = collop_species_t(3.3435837768e-27_dp, 1.0_dp, 3e19_dp, 2000*elementary)
+        call collop_make_grid(6.0_dp, 12, 6, grid, st)
+        do j = 1, nz
+            do i = 1, nt
+                th = twopi*(i - 1)/nt
+                ze = twopi*(j - 1)/nz
+                phi1(i, j) = 2000*1e-4_dp*(0.4_dp + cos(th) + 0.6_dp*sin(th) &
+                    + 0.5_dp*cos(2*th - ze + 0.3_dp))
+            end do
+        end do
+        open (newunit=unit, file=path, status='old')
+        read (unit, *) cases
+        do c = 1, cases
+            read (unit, *) model
+            read (unit, *) expected_ratio
+            read (unit, *) expected
+            lnl = 136.0478_dp
+            call surface_transport(b, surf%nper, q, ig, kappa, sp, lnl, grid, model, 24, d, &
+                its, st, phi1=phi1, d_phi=d_phi, flow_local=u, flow_local_phi=u_phi)
+            pass = pass .and. st == SURFACE_OK
+            ratio = d_phi(1, 1, 3, 3)/d(1, 1, 3, 3)
+            ! <B u_par> = B0 <b U> 2 s f and u_par = 2 s U f, so u_par/<B u_par>
+            ! = U/(B0 d(3, 3)).
+            local = u_phi(:, 1, 1, 3)/(bb0*d(1, 1, 3, 3))
+            err_mean = abs(ratio - expected_ratio)/abs(expected_ratio)
+            err_local = maxval(abs(local - expected))/maxval(abs(expected))
+            print '(a,i0,a,es12.4,a,es12.4,a,2es10.2)', 'SFINCS collision ', model, &
+                ': Phi_1 part of <B u_par> over <B u_par> ', ratio, ' (SFINCS ', &
+                expected_ratio, '), errors mean and local ', err_mean, err_local
+            pass = pass .and. st == SURFACE_OK .and. max(err_mean, err_local) < 2e-3_dp
+        end do
+        close (unit)
+    end function sfincs_phi1
 
     subroutine solve(delta, r, pass)
         real(dp), intent(in) :: delta

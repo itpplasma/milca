@@ -67,6 +67,8 @@ module milca_ideal_map
     private
     public :: ideal_map_t, ideal_frozen_t
     public :: ideal_map_init, ideal_map_freeze, ideal_map_energy, ideal_map_hessian
+    public :: ideal_map_hvp, ideal_map_point_hessian, ideal_map_angle_diagonal
+    public :: ideal_map_hessian_store_t, ideal_map_store_hessians
     public :: ideal_map_solve, ideal_map_point, ideal_map_dof, ideal_map_mode_norms
     public :: ideal_map_reduce, ideal_map_expand, ideal_map_rdof, ideal_map_axis_dof
     public :: ideal_map_prolong, ideal_map_residual, ideal_map_position_gauge
@@ -74,10 +76,14 @@ module milca_ideal_map
     public :: ideal_map_solve_report_t, ideal_map_eliminate_omega
     public :: ideal_map_gauge_project, ideal_map_angle_enable, ideal_map_angle_rdof
     public :: ideal_map_angle_value, ideal_map_parallel_mass
+    public :: ideal_map_relabel_space, ideal_map_relabel_project
     integer, parameter, public :: IDEAL_MAP_OK = 0, IDEAL_MAP_FOLDED = 1, &
         IDEAL_MAP_NOT_CONVERGED = 2, IDEAL_MAP_SOLVE_FAILED = 3, &
         IDEAL_MAP_BAD_INPUT = 4
     ! Factor policies of the Krylov-step trials (ideal_map_t%factor_policy).
+    ! Count of Hessian assemblies: the factor cache rebuilds its values once
+    ! per assembly instead of comparing a copy of them.
+    integer, save :: hessian_stamp = 0
     integer, parameter, public :: IDEAL_MAP_FACTOR_SPD_LU = 0, &
         IDEAL_MAP_FACTOR_LDLT = 1
 
@@ -235,11 +241,11 @@ module milca_ideal_map
     end type
 
     type :: factor_cache_t
-        ! Per-pattern data of factor_masked. base is the masked, symmetrised
-        ! matrix with the diagonal unshifted, so that a trial only rewrites the
-        ! diagonal of val. keep/gauge/pattern identify the entries, raw the
-        ! Hessian values that base was built from.
-        integer :: nc = -1
+        ! Per-pattern data of factor_masked. a%val holds the masked, symmetrised
+        ! matrix, bdiag its unshifted diagonal, so that a trial only rewrites
+        ! the diagonal. keep/gauge/pattern identify the entries, stamp the
+        ! Hessian assembly (hessian_stamp) the values were built from.
+        integer :: nc = -1, stamp = -1
         logical :: pattern_ok = .false., base_ok = .false.
         real(dp) :: scale = 0, correction = 0
         logical, allocatable :: keep(:)
@@ -250,8 +256,9 @@ module milca_ideal_map
         integer, allocatable :: rowptr(:), colidx(:), src(:), dpos(:), refl(:)
         integer, allocatable :: mpos(:), gpos(:)
         real(dp), allocatable :: mval(:), gval(:)
-        real(dp), allocatable :: raw(:), base(:), bdiag(:)
-        ! The factor input itself (a%val: base with the trial diagonal). It
+        real(dp), allocatable :: bdiag(:)
+        ! The factor input itself (a%val: the masked matrix with the trial
+        ! diagonal). It
         ! goes through FortSparse's csc_t entry points, which keep the symbolic
         ! analysis after a failed numeric factor, unlike the raw-array ones.
         type(csc_t) :: a
@@ -283,6 +290,16 @@ module milca_ideal_map
         ! Hessian assemblies and accepted quasi-Newton steps (map%lagged_hessian).
         integer :: hessians = 0, quasi_steps = 0
         type(factor_cache_t), private :: cache
+    end type
+
+    ! Point Hessians of the map energy at every quadrature point g, plane j and
+    ! cell e (without the quadrature weight): hp(78, g, j, e) packed as
+    ! point_hessian, and with field-angle coefficients hbb(6, ...) and
+    ! hvb(36, ...) of point_field. They make a Hessian-vector product a pass
+    ! of contractions (ideal_map_hvp with store). O(cells nq nphi) memory.
+    type :: ideal_map_hessian_store_t
+        logical :: ready = .false.
+        real(dp), allocatable :: hp(:, :, :, :), hbb(:, :, :, :), hvb(:, :, :, :)
     end type
 contains
     pure integer function ideal_map_dof(map, component, mode, node) result(dof)
@@ -968,6 +985,150 @@ contains
                 end do
             end do
         end do
+    end subroutine
+
+    subroutine ideal_map_relabel_space(map, x, basis, status, rho_order, mpol, ntor)
+        ! Orthonormal reduced vectors (position gauge) of the poloidal
+        ! relabellings theta -> theta + f(rho) g(theta, phi) of the map x:
+        ! f g dX/dtheta with f = rho^k (1 - rho^2), k = 0..rho_order, and
+        ! g = cos, sin(m theta - n nfp phi), 0 <= m <= mpol, |n| <= ntor.
+        ! The default mpol = ntor = 0 gives the reshuffles theta -> theta + f(rho),
+        ! the continuum nulls of the frozen-flux energy (area- and field-preserving
+        ! on the reference disk), along which the discrete gradient vanishes with
+        ! h. Larger mpol, ntor add the soft but physical directions of a coarse
+        ! space, along which the gradient is a force. dX/dtheta at a node is the
+        ! derivative of the interpolant along a rotation of the reference point
+        ! about the disk centre, and f g dX/dtheta is projected onto the map's
+        ! toroidal modes by least squares over the energy planes. Toroidal
+        ! relabellings need a toroidal displacement, which the position gauge
+        ! does not have. Wall and field-angle dofs carry none, dependent
+        ! directions are dropped. Default rho_order 3.
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), allocatable, intent(out) :: basis(:, :)
+        integer, intent(out) :: status
+        integer, intent(in), optional :: rho_order, mpol, ntor
+        real(dp), parameter :: rotation = 1.0e-6_dp
+        real(dp) :: centre(2), radius, y(2), turned(2), xi(2), rho, theta, f, before
+        real(dp) :: shape(TRIANGLE_MAX_NODES), gradient(2, TRIANGLE_MAX_NODES)
+        real(dp), allocatable :: dq(:, :, :), dtheta(:, :), proj(:, :), gram(:, :), &
+            lam(:), v(:, :), g(:)
+        integer, allocatable :: first(:), next(:), cell_of(:)
+        integer :: a, e, i, j, k, l, m, n, kmax, mmax, nmax, located, nv, ncol, item
+        status = IDEAL_MAP_BAD_INPUT
+        allocate (basis(map%nred, 0))
+        if (.not. map%position_gauge) return
+        kmax = 3; mmax = 0; nmax = 0
+        if (present(rho_order)) kmax = rho_order
+        if (present(mpol)) mmax = mpol
+        if (present(ntor)) nmax = min(ntor, map%ntor)
+        if (kmax < 0 .or. mmax < 0 .or. nmax < 0) return
+        centre = (maxval(map%reference, dim=2) + minval(map%reference, dim=2))/2
+        radius = maxval(norm2(map%reference - spread(centre, 2, map%nodes), dim=1))
+        ! cells incident to each node, as linked lists
+        allocate (first(map%nodes), next(map%cells*map%nloc), cell_of(map%cells*map%nloc))
+        first = 0; item = 0
+        do e = 1, map%cells
+            do i = 1, map%nloc
+                item = item + 1
+                cell_of(item) = e
+                next(item) = first(map%conn(i, e))
+                first(map%conn(i, e)) = item
+            end do
+        end do
+        allocate (dq(2, map%nmode, map%nodes))
+        dq = 0
+        do a = 1, map%nodes
+            if (map%boundary(a)) cycle
+            y = map%reference(:, a) - centre
+            turned = centre + [cos(rotation)*y(1) - sin(rotation)*y(2), &
+                sin(rotation)*y(1) + cos(rotation)*y(2)]
+            item = first(a)
+            do while (item > 0)
+                e = cell_of(item); item = next(item)
+                call triangle_locate(map%reference(:, map%conn(:, e)), turned, xi, located)
+                if (located /= 0) cycle
+                if (minval([xi, 1 - sum(xi)]) < -1.0e-9_dp) cycle
+                call triangle_basis_jet(xi, shape(:map%nloc), gradient(:, :map%nloc))
+                do m = 1, map%nmode
+                    dq(:, m, a) = (matmul(x(1:2, m, map%conn(:, e)), shape(:map%nloc)) &
+                        - x(1:2, m, a))/rotation
+                end do
+                exit
+            end do
+        end do
+        ! least-squares projection of plane values onto the toroidal modes
+        gram = matmul(map%trig, transpose(map%trig))
+        call symmetric_eigen(gram, lam, status)
+        if (status /= IDEAL_MAP_OK) return
+        status = IDEAL_MAP_BAD_INPUT
+        where (lam > 1.0e-12_dp*maxval(lam))
+            lam = 1/lam
+        elsewhere
+            lam = 0
+        end where
+        proj = matmul(gram, matmul(diag_scale(lam, gram), map%trig))
+        ncol = (kmax + 1)*(2*(mmax*(2*nmax + 1) + nmax) + 1)
+        allocate (v(map%nred, ncol), dtheta(2, map%nphi), g(map%nphi))
+        v = 0; nv = 0
+        do k = 0, kmax
+            do m = 0, mmax
+                do n = merge(0, -nmax, m == 0), nmax
+                    do l = 1, 2
+                        if (l == 2 .and. m == 0 .and. n == 0) cycle
+                        nv = nv + 1
+                        do a = 1, map%nodes
+                            if (map%boundary(a)) cycle
+                            y = map%reference(:, a) - centre
+                            rho = norm2(y)/radius
+                            theta = atan2(y(2), y(1))
+                            f = rho**k*(1 - rho**2)
+                            do j = 1, map%nphi
+                                g(j) = merge(cos(m*theta - n*map%nfp*map%phi(j)), &
+                                    sin(m*theta - n*map%nfp*map%phi(j)), l == 1)
+                            end do
+                            dtheta = matmul(dq(:, :, a), map%trig)
+                            do i = 1, 2
+                                v([(ideal_map_rdof(map, i, j, a), j=1, map%nmode)], nv) = &
+                                    matmul(proj, f*g*dtheta(i, :))
+                            end do
+                        end do
+                    end do
+                end do
+            end do
+        end do
+        where (spread(map%fixed, 2, nv)) v(:, :nv) = 0
+        ! modified Gram-Schmidt, twice
+        k = 0
+        do j = 1, nv
+            before = norm2(v(:, j))
+            if (.not. before > 0) cycle
+            do l = 1, 2
+                do i = 1, k
+                    v(:, j) = v(:, j) - dot_product(v(:, i), v(:, j))*v(:, i)
+                end do
+            end do
+            if (.not. norm2(v(:, j)) > 1.0e-8_dp*before) cycle
+            k = k + 1
+            v(:, k) = v(:, j)/norm2(v(:, j))
+        end do
+        basis = v(:, :k)
+        status = IDEAL_MAP_OK
+    contains
+        pure function diag_scale(d, q) result(r)
+            ! diag(d) q^T
+            real(dp), intent(in) :: d(:), q(:, :)
+            real(dp) :: r(size(q, 2), size(q, 1))
+            r = spread(d, 2, size(q, 1))*transpose(q)
+        end function
+    end subroutine
+
+    pure subroutine ideal_map_relabel_project(basis, v)
+        ! v <- v - B B^T v, the part of v orthogonal to the orthonormal
+        ! columns of B (ideal_map_relabel_space)
+        real(dp), intent(in) :: basis(:, :)
+        real(dp), intent(inout) :: v(:)
+        v = v - matmul(basis, matmul(v, basis))
     end subroutine
 
     subroutine ideal_map_prolong(fine, coarse, status)
@@ -1748,6 +1909,280 @@ contains
                 with_slots=.true.)
         ! The blocks are exactly symmetric (reflected above).
         call csr_assemble_blocks(matrix, map%redconn, blocks, symmetric=.true.)
+        !$omp atomic
+        hessian_stamp = hessian_stamp + 1
+    end subroutine
+
+    subroutine ideal_map_point_hessian(map, e, g, j, x, hv)
+        ! Full symmetric d2w/dv2 (12 x 12) of v = (q, dq/ds) at quadrature point
+        ! g of cell e, plane j, with the frozen density including the field
+        ! angle; v(3 r + c) belongs to the test function f(r) of
+        ! test_functions.
+        type(ideal_map_t), intent(in) :: map
+        integer, intent(in) :: e, g, j
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), intent(out) :: hv(12, 12)
+        real(dp), allocatable :: et(:), ep(:)
+        real(dp) :: hp(78), w, jac, gv(12), bp(3)
+        integer :: k, pi, pj
+        allocate (et(map%nangle), ep(map%nangle))
+        call point_density(map, map%angle, e, g, j, bp, et, ep)
+        call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+        do k = 1, 78
+            call hessian_packed_pair(k, pi, pj)
+            hv(pi, pj) = hp(k); hv(pj, pi) = hp(k)
+        end do
+    end subroutine
+
+    subroutine ideal_map_angle_diagonal(map, x, diag)
+        ! Diagonal of the angle block of the Hessian, sum w B_k^T d2w/db2 B_k
+        ! over quadrature points and planes (hessian_angle without the mixed
+        ! rows).
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), intent(out) :: diag(:)
+        real(dp), allocatable :: et(:), ep(:), part(:)
+        real(dp) :: bp(3), hbb(6), hvb(12, 3), h3(3, 3), bk(3), weight, dphi
+        integer :: e, g, j, k
+        diag = 0
+        if (map%nangle == 0) return
+        dphi = 2*acos(-1.0_dp)/(map%nfp*map%nphi)
+        !$omp parallel default(shared) private(e, g, j, k, et, ep, part, bp, hbb, hvb, &
+        !$omp h3, bk, weight)
+        allocate (et(map%nangle), ep(map%nangle), part(map%nangle))
+        part = 0
+        !$omp do schedule(dynamic)
+        do e = 1, map%cells
+            do g = 1, map%nq
+                weight = map%weight(g)*dphi
+                do j = 1, map%nphi
+                    call point_density(map, map%angle, e, g, j, bp, et, ep)
+                    call point_field(map, e, g, j, x, bp, hbb, hvb)
+                    h3 = reshape([hbb(1), hbb(2), hbb(4), hbb(2), hbb(3), hbb(5), &
+                        hbb(4), hbb(5), hbb(6)], [3, 3])
+                    do k = 1, map%nangle
+                        bk = map%angle_form(:, 1, g, e)*et(k) + map%angle_form(:, 2, g, e)*ep(k)
+                        part(k) = part(k) + weight*dot_product(bk, matmul(h3, bk))
+                    end do
+                end do
+            end do
+        end do
+        !$omp end do
+        !$omp critical
+        diag = diag + part
+        !$omp end critical
+        deallocate (et, ep, part)
+        !$omp end parallel
+    end subroutine
+
+    pure subroutine hessian_packed_pair(n, pi, pj)
+        ! (row, column) of entry n of the hp packing (gen/gen_ideal_map.f90)
+        integer, intent(in) :: n
+        integer, intent(out) :: pi, pj
+        integer :: tt
+        if (n <= 45) then
+            pj = 1
+            do while (pj*(pj + 1)/2 < n)
+                pj = pj + 1
+            end do
+            pi = n - pj*(pj - 1)/2
+        else if (n <= 72) then
+            tt = n - 46
+            pj = 10 + tt/9
+            pi = 1 + mod(tt, 9)
+        else
+            tt = n - 73
+            pj = 10
+            do while ((pj - 9)*(pj - 8)/2 < tt + 1)
+                pj = pj + 1
+            end do
+            pi = 10 + tt - (pj - 10)*(pj - 9)/2
+        end if
+    end subroutine
+
+    subroutine ideal_map_store_hessians(map, x, store)
+        ! The weighted point Hessians of the energy at x (ideal_map_hessian_store_t).
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        type(ideal_map_hessian_store_t), intent(inout) :: store
+        real(dp), allocatable :: et(:), ep(:)
+        real(dp) :: w, jac, gv(12), bp(3), hp(78), hbb(6), hvb(12, 3)
+        integer :: e, g, j
+        if (.not. allocated(store%hp)) then
+            allocate (store%hp(78, map%nq, map%nphi, map%cells))
+        else if (any(shape(store%hp) /= [78, map%nq, map%nphi, map%cells])) then
+            deallocate (store%hp)
+            allocate (store%hp(78, map%nq, map%nphi, map%cells))
+        end if
+        if (allocated(store%hbb)) deallocate (store%hbb, store%hvb)
+        if (map%nangle > 0) allocate (store%hbb(6, map%nq, map%nphi, map%cells), &
+            store%hvb(36, map%nq, map%nphi, map%cells))
+        !$omp parallel default(shared) private(e, g, j, et, ep, w, jac, gv, bp, &
+        !$omp hp, hbb, hvb)
+        allocate (et(map%nangle), ep(map%nangle))
+        !$omp do schedule(dynamic)
+        do e = 1, map%cells
+            do j = 1, map%nphi
+                do g = 1, map%nq
+                    call point_density(map, map%angle, e, g, j, bp, et, ep)
+                    call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                    store%hp(:, g, j, e) = hp
+                    if (map%nangle == 0) cycle
+                    call point_field(map, e, g, j, x, bp, hbb, hvb)
+                    store%hbb(:, g, j, e) = hbb
+                    store%hvb(:, g, j, e) = reshape(hvb, [36])
+                end do
+            end do
+        end do
+        !$omp end do
+        deallocate (et, ep)
+        !$omp end parallel
+        store%ready = .true.
+    end subroutine
+
+    subroutine ideal_map_hvp(map, x, direction, product, status, store)
+        ! Reduced Hessian-vector product P^T H P d of the energy at x without the
+        ! assembled Hessian: the direction is evaluated on the toroidal planes,
+        ! contracted with the point Hessians d2w/dv2 of v = (q, dq/ds) at every
+        ! quadrature point and plane, and projected back onto the Fourier
+        ! coefficients, with the omega gauge of the cells. Memory O(nodes nphi);
+        ! the same point leaves as ideal_map_hessian, so the product agrees with
+        ! the assembled matrix to roundoff. Field-angle coefficients enter
+        ! through b = b0 + B eta with the mixed and angle blocks of
+        ! hessian_angle.
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :), direction(:)
+        real(dp), intent(out) :: product(:)
+        integer, intent(out) :: status
+        ! stored point Hessians of x (ideal_map_store_hessians)
+        type(ideal_map_hessian_store_t), intent(in), optional :: store
+        logical :: stored
+        real(dp), allocatable :: d(:), y(:), dq(:, :, :, :), acc(:, :, :, :), et(:), ep(:)
+        real(dp), allocatable :: deta(:), yeta(:)
+        real(dp) :: hp(78), hv(12, 12), dv(12), r(12), w, jac, gv(12), bp(3), weight, dphi
+        real(dp) :: f(0:3), t, hbb(6), hvb(12, 3), h3(3, 3), db(3), z(3)
+        integer :: e, g, j, a, node, m, k, i, l, c
+        integer :: pi_(78), pj_(78), na, nc
+        status = IDEAL_MAP_BAD_INPUT
+        product = 0
+        if (size(direction) /= map%nred .or. size(product) /= map%nred) return
+        stored = .false.
+        if (present(store)) stored = store%ready
+        do k = 1, 78
+            call hessian_packed_pair(k, pi_(k), pj_(k))
+        end do
+        allocate (d(map%ndof), y(map%ndof))
+        call ideal_map_expand(map, direction, d)
+        ! direction on the planes: dq(:, 1, j, node) values, dq(:, 2, j, node)
+        ! toroidal derivatives
+        allocate (dq(3, 2, map%nphi, map%nodes), acc(3, 2, map%nphi, map%nodes))
+        !$omp parallel do default(shared) private(node, j, m, k) schedule(static)
+        do node = 1, map%nodes
+            dq(:, :, :, node) = 0
+            do j = 1, map%nphi
+                do m = 1, map%nmode
+                    k = ideal_map_dof(map, 1, m, node)
+                    dq(:, 1, j, node) = dq(:, 1, j, node) + d(k:k + 2)*map%trig(m, j)
+                    dq(:, 2, j, node) = dq(:, 2, j, node) + d(k:k + 2)*map%dtrig(m, j)
+                end do
+            end do
+        end do
+        !$omp end parallel do
+        acc = 0
+        dphi = 2*acos(-1.0_dp)/(map%nfp*map%nphi)
+        na = map%nangle
+        nc = 3*map%nmode*map%nodes
+        allocate (deta(na), yeta(na))
+        deta = d(nc + 1:nc + na); yeta = 0
+        !$omp parallel default(shared) private(e, g, j, a, node, hp, hv, dv, r, w, &
+        !$omp jac, gv, bp, weight, f, i, l, c, k, et, ep, hbb, hvb, h3, db, z) &
+        !$omp reduction(+: yeta, acc)
+        allocate (et(na), ep(na))
+        !$omp do schedule(dynamic)
+        do e = 1, map%cells
+            do g = 1, map%nq
+                weight = map%weight(g)*dphi
+                do j = 1, map%nphi
+                    if (stored) then
+                        if (na > 0) call angle_basis(map, e, g, j, et, ep)
+                        hp = store%hp(:, g, j, e)
+                    else
+                        call point_density(map, map%angle, e, g, j, bp, et, ep)
+                        call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                    end if
+                    do k = 1, 78
+                        hv(pi_(k), pj_(k)) = hp(k); hv(pj_(k), pi_(k)) = hp(k)
+                    end do
+                    dv = 0
+                    do a = 1, map%nloc
+                        node = map%conn(a, e)
+                        dv(1:3) = dv(1:3) + map%shape(a, g)*dq(:, 1, j, node)
+                        dv(4:6) = dv(4:6) + map%dshape(1, a, g)*dq(:, 1, j, node)
+                        dv(7:9) = dv(7:9) + map%dshape(2, a, g)*dq(:, 1, j, node)
+                        dv(10:12) = dv(10:12) + map%shape(a, g)*dq(:, 2, j, node)
+                    end do
+                    r = weight*matmul(hv, dv)
+                    if (na > 0) then
+                        ! b = b0 + B eta: d2w/dv db B deta into the map rows,
+                        ! B^T (d2w/db2 B deta + d2w/db dv dv) into the angle rows
+                        if (stored) then
+                            hbb = store%hbb(:, g, j, e)
+                            hvb = reshape(store%hvb(:, g, j, e), [12, 3])
+                        else
+                            call point_field(map, e, g, j, x, bp, hbb, hvb)
+                        end if
+                        db = map%angle_form(:, 1, g, e)*dot_product(et, deta) &
+                            + map%angle_form(:, 2, g, e)*dot_product(ep, deta)
+                        h3 = reshape([hbb(1), hbb(2), hbb(4), hbb(2), hbb(3), hbb(5), &
+                            hbb(4), hbb(5), hbb(6)], [3, 3])
+                        r = r + weight*matmul(hvb, db)
+                        z = weight*(matmul(h3, db) + matmul(transpose(hvb), dv))
+                        yeta = yeta + et*dot_product(map%angle_form(:, 1, g, e), z) &
+                            + ep*dot_product(map%angle_form(:, 2, g, e), z)
+                    end if
+                    do a = 1, map%nloc
+                        node = map%conn(a, e)
+                        f(0) = map%shape(a, g); f(1) = map%dshape(1, a, g)
+                        f(2) = map%dshape(2, a, g)
+                        do c = 1, 3
+                            acc(c, 1, j, node) = acc(c, 1, j, node) + f(0)*r(c) &
+                                + f(1)*r(3 + c) + f(2)*r(6 + c)
+                            acc(c, 2, j, node) = acc(c, 2, j, node) + f(0)*r(9 + c)
+                        end do
+                    end do
+                end do
+            end do
+        end do
+        !$omp end do
+        deallocate (et, ep)
+        !$omp end parallel
+        y = 0
+        y(nc + 1:nc + na) = yeta
+        !$omp parallel do default(shared) private(node, j, m, k, t) schedule(static)
+        do node = 1, map%nodes
+            do m = 1, map%nmode
+                k = ideal_map_dof(map, 1, m, node)
+                do j = 1, map%nphi
+                    y(k:k + 2) = y(k:k + 2) + acc(:, 1, j, node)*map%trig(m, j) &
+                        + acc(:, 2, j, node)*map%dtrig(m, j)
+                end do
+            end do
+        end do
+        !$omp end parallel do
+        ! omega gauge of the cells on (omega, mode 1)
+        if (allocated(map%omega_gauge)) then
+            do e = 1, map%cells
+                do a = 1, map%nloc
+                    i = ideal_map_dof(map, 3, 1, map%conn(a, e))
+                    do l = 1, map%nloc
+                        y(i) = y(i) + map%omega_gauge(a, l, e) &
+                            *d(ideal_map_dof(map, 3, 1, map%conn(l, e)))
+                    end do
+                end do
+            end do
+        end if
+        call ideal_map_reduce(map, y, product)
+        status = IDEAL_MAP_OK
     end subroutine
 
     subroutine hessian_angle(map, x, nr, blocks)
@@ -2278,18 +2713,22 @@ contains
                         if (direct) then
                             use_lu = .false.
                             spd = .false.
+                            ! Inertia control: the damped Hessian H + shift must be
+                            ! positive definite (Cholesky; LDL^T inertia for the
+                            ! Krylov policy), so the step descends; near-null
+                            ! relabelling and slightly negative directions raise mu
+                            ! instead of entering a Newton step towards a saddle.
                             if (map%krylov_step) then
-                                ! The preconditioner must be SPD (map%factor_policy);
-                                ! an indefinite factor is used for this trial only.
                                 call factor_masked(map, matrix, .not. map%fixed, shift, &
                                     solver, factored, estatus, report, lu=lsolver, &
                                     lu_done=lfactored, use_lu=use_lu, spd=spd)
                             else
                                 call factor_masked(map, matrix, .not. map%fixed, shift, &
-                                    solver, factored, estatus, report)
+                                    solver, factored, estatus, report, spd=spd, &
+                                    definite=.true.)
                             end if
                             retained = estatus == 0 .and. spd
-                            if (estatus /= 0) then
+                            if (estatus /= 0 .or. .not. spd) then
                                 mu = mu*10; cycle
                             end if
                             if (use_lu) then
@@ -2325,22 +2764,27 @@ contains
                         call ideal_map_energy(map, trial, trial_energy, estatus, &
                             angle=trial_angle)
                         report%energy_s = report%energy_s + wall_seconds() - t0
+                        ! Outside the roundoff band of W a step is accepted when
+                        ! the actual reduction is at least a tenth of the one the
+                        ! quadratic model g.s + s.H s/2 predicts.
                         if (estatus == IDEAL_MAP_OK .and. trial_energy < energy &
-                            - 64*epsilon(1.0_dp)*abs(energy)) then
-                            accepted = .true.; exit
+                            - 1024*epsilon(1.0_dp)*abs(energy)) then
+                            if (energy - trial_energy >= 0.1_dp*predicted_reduction()) then
+                                accepted = .true.; exit
+                            end if
                         end if
                         ! Within the roundoff band of W the energy cannot rank steps.
                         ! Rank them by the trapezoidal energy change
                         ! (g(x) + g(x + s)) . s / 2 (error O(|s|^3), no cancellation
-                        ! against W); near-null directions need full Newton steps that
-                        ! do not decrease |g| monotonically.
-                        if (estatus == IDEAL_MAP_OK .and. trial_energy <= energy &
-                            + 1024*epsilon(1.0_dp)*abs(energy)) then
+                        ! against W); with a positive definite damped Hessian the
+                        ! step descends along the near-null directions as well.
+                        if (estatus == IDEAL_MAP_OK .and. abs(trial_energy - energy) &
+                            <= 1024*epsilon(1.0_dp)*abs(energy)) then
                             call ideal_map_energy(map, trial, trial_energy, estatus, grad, &
                                 angle=trial_angle)
                             call ideal_map_reduce(map, grad, rhs)
                             where (map%fixed) rhs = 0
-                            if (dot_product(gred + rhs, step) <= 0) then
+                            if (estatus == IDEAL_MAP_OK .and. dot_product(gred + rhs, step) <= 0) then
                                 accepted = .true.; exit
                             end if
                         end if
@@ -2546,8 +2990,11 @@ contains
             do row = 1, map%nred
                 acc = 0
                 do kk = report%cache%rowptr(row), report%cache%rowptr(row + 1) - 1
-                    acc = acc + report%cache%base(kk)*input(report%cache%colidx(kk))
+                    acc = acc + report%cache%a%val(kk)*input(report%cache%colidx(kk))
                 end do
+                ! a%val carries the diagonal of the last factor's shift
+                if (report%cache%dpos(row) > 0) acc = acc + (report%cache%bdiag(row) &
+                    - report%cache%a%val(report%cache%dpos(row)))*input(row)
                 if (.not. map%fixed(row)) then
                     if (report%cache%dpos(row) > 0) acc = acc + shift(row)*input(row)
                 end if
@@ -2641,6 +3088,20 @@ contains
                 mu = mu*10
             end do
         end subroutine
+
+        real(dp) function predicted_reduction()
+            ! -(g.s + s.H s/2) of the undamped Hessian along the reduced step
+            real(dp) :: hs
+            integer :: r, q
+            predicted_reduction = -dot_product(gred, step)
+            do r = 1, map%nred
+                hs = 0
+                do q = matrix%rowptr(r), matrix%rowptr(r + 1) - 1
+                    hs = hs + matrix%val(q)*step(matrix%colidx(q))
+                end do
+                predicted_reduction = predicted_reduction - step(r)*hs/2
+            end do
+        end function
 
         subroutine cleanup()
             if (factored) call sparse_destroy(solver)
@@ -2795,7 +3256,7 @@ contains
     end function
 
     subroutine factor_masked(map, matrix, keep, shift, slv, done, info, report, gauge, &
-                             lu, lu_done, use_lu, spd)
+                             lu, lu_done, use_lu, spd, definite)
         ! Factorise the reduced Hessian restricted to the keep rows/columns
         ! (identity elsewhere), plus shift on the diagonal. done: slv holds a
         ! factorisation of this pattern (only the numerical one is redone).
@@ -2807,7 +3268,9 @@ contains
         ! policy map%factor_policy. slv holds the Cholesky or LDL^T and lu the
         ! pivoted LU of the same matrix; use_lu tells which one holds the
         ! factor of this trial and spd whether it is the positive definite
-        ! factor in slv. Without them, slv holds the pivoted LU.
+        ! factor in slv. Without them, slv holds the pivoted LU. definite (with
+        ! spd, without lu): the Cholesky factor only; info /= 0 when the matrix
+        ! is not positive definite.
         type(ideal_map_t), intent(in) :: map
         type(csr_matrix_t), intent(in) :: matrix
         logical, intent(in) :: keep(:)
@@ -2820,6 +3283,7 @@ contains
         type(sparse_solver_t), intent(inout), optional :: lu
         logical, intent(inout), optional :: lu_done
         logical, intent(out), optional :: use_lu, spd
+        logical, intent(in), optional :: definite
         type(fortsparse_status_t) :: sstatus
         logical :: krylov
         integer :: row, nc
@@ -2850,6 +3314,14 @@ contains
         ! trial: an indefinite LDL^T, or the pivoted LU of the same matrix
         ! after a failed Cholesky, serves this trial only. Without lu, the
         ! pivoted LU is the factor (the direct-step policy).
+        if (present(definite)) then
+            if (definite .and. nc == 0) then
+                call factor_one(slv, done, CHOLESKY, info, sstatus)
+                spd = info == 0
+                if (.not. spd) report%indefinite_trials = report%indefinite_trials + 1
+                return
+            end if
+        end if
         if (.not. krylov) then
             call factor_one(slv, done, PIVOTED_LU, info, sstatus)
             return
@@ -2907,7 +3379,6 @@ contains
             case (LDLT)
                 s%options%symmetry = FORTSPARSE_SYM_INDEFINITE
                 s%options%lu_method = FORTSPARSE_LU_SCALAR
-                s%options%ldlt_supernodal = .true.
             case default
                 s%options%symmetry = FORTSPARSE_SYM_GENERAL
                 s%options%lu_method = FORTSPARSE_LU_SUPERNODAL
@@ -2991,16 +3462,9 @@ contains
         end if
         info = 1
         if (.not. c%pattern_ok) return
-        if (c%base_ok) then
-            same = .true.
-            !$omp parallel do default(shared) private(k) &
-            !$omp reduction(.and.: same) schedule(static)
-            do k = 1, size(c%raw)
-                same = same .and. abs(c%raw(k) - matrix%val(k)) <= 0.0_dp
-            end do
-            !$omp end parallel do
-            c%base_ok = same
-        end if
+        ! a new Hessian assembly (or one modified after it, which refreshes
+        ! before its first factor) has a new stamp
+        if (c%base_ok) c%base_ok = c%stamp == hessian_stamp
         if (.not. c%base_ok) call factor_cache_refresh(map, matrix, c, info)
         if (c%base_ok) info = 0
     end subroutine
@@ -3129,11 +3593,10 @@ contains
                 if (col > row) c%refl(k) = p
             end do
         end do
-        c%raw = [(0.0_dp, k=1, size(matrix%val))]
-        c%base = [(0.0_dp, k=1, nz)]
         c%bdiag = [(0.0_dp, k=1, map%nred)]
         c%a%nrow = n; c%a%ncol = n; c%a%nnz = nz
-        c%a%col_ptr = c%rowptr; c%a%row_idx = c%colidx; c%a%val = c%base
+        c%a%col_ptr = c%rowptr; c%a%row_idx = c%colidx
+        c%a%val = [(0.0_dp, k=1, nz)]
         c%pattern_ok = .true.
     end subroutine
 
@@ -3178,21 +3641,21 @@ contains
         ! O(nnz) gathers, checks and copies, shared by the team; max and
         ! logical reductions are exact, so nothing depends on the thread count.
         !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%base)
-            if (c%src(k) > 0) c%base(k) = matrix%val(c%src(k))
+        do k = 1, size(c%a%val)
+            if (c%src(k) > 0) c%a%val(k) = matrix%val(c%src(k))
         end do
         !$omp end parallel do
-        c%base(c%gpos) = c%gval
-        c%base(c%mpos) = c%mval
+        c%a%val(c%gpos) = c%gval
+        c%a%val(c%mpos) = c%mval
         finite = .true.; scale = 0; correction = 0
         !$omp parallel do default(shared) private(k, p, delta) schedule(static) &
         !$omp reduction(.and.: finite) reduction(max: scale, correction)
-        do k = 1, size(c%base)
-            finite = finite .and. ieee_is_finite(c%base(k))
-            scale = max(scale, abs(c%base(k)))
+        do k = 1, size(c%a%val)
+            finite = finite .and. ieee_is_finite(c%a%val(k))
+            scale = max(scale, abs(c%a%val(k)))
             p = c%refl(k)
             if (p == 0) cycle
-            delta = abs(c%base(k) - c%base(p))
+            delta = abs(c%a%val(k) - c%a%val(p))
             if (delta <= 0.0_dp) cycle
             correction = max(correction, nearest(delta, 1.0_dp))
         end do
@@ -3204,30 +3667,20 @@ contains
         if (c%correction > rtol*c%scale) return
         ! Reflection targets are strict lower entries, never sources.
         !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%base)
-            if (c%refl(k) > 0) c%base(c%refl(k)) = c%base(k)
-        end do
-        !$omp end parallel do
-        !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%base)
-            c%a%val(k) = c%base(k)
-        end do
-        !$omp end parallel do
-        !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%raw)
-            c%raw(k) = matrix%val(k)
+        do k = 1, size(c%a%val)
+            if (c%refl(k) > 0) c%a%val(c%refl(k)) = c%a%val(k)
         end do
         !$omp end parallel do
         do row = 1, map%nred
-            if (c%dpos(row) > 0) c%bdiag(row) = c%base(c%dpos(row))
+            if (c%dpos(row) > 0) c%bdiag(row) = c%a%val(c%dpos(row))
         end do
         if (map%verify_factor) then
             ! Debug: FortSparse's canonical projection must find nothing to do.
-            reference = c%base
+            reference = c%a%val
             call csc_normalize_symmetric_raw(size(c%rowptr) - 1, c%rowptr, c%colidx, &
                 reference, rtol, delta, sstatus)
             if (.not. status_ok(sstatus) .or. delta > 0.0_dp .or. &
-                any(abs(reference - c%base) > 0.0_dp)) &
+                any(abs(reference - c%a%val) > 0.0_dp)) &
                 error stop 'ideal_map: cached factor input is not canonical'
         end if
         c%base_ok = .true.
