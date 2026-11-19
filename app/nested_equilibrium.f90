@@ -98,6 +98,7 @@ program nested_equilibrium
     real(dp), allocatable :: filament_drive(:, :), filament_load(:, :)
     real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
     real(dp), allocatable :: fb_curve(:), fb_section(:)
+    real(dp) :: guess_scale = 1
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -248,6 +249,8 @@ program nested_equilibrium
             'clearance of the coupling surface around the guess / minor radius')
         call result%write('coil_closure', coil_closure, 'T m', &
             'largest curl-free mismatch of the coil traces on the coupling surface')
+        call result%write('guess_scale', guess_scale, '1', &
+            'factor of the m > 0 boundary modes that made the guess fit the coils')
         call result%write('circulation', circulation, 'T m', &
             'poloidal circulation of the vacuum field around the plasma')
         call result%write('vacuum_f', fb%f_vac, 'T m', 'R B_phi of the coil field')
@@ -351,10 +354,20 @@ contains
         print '(a,3i5,a,i0,a,i0)', 'mgrid ir jz kp', grid%ir, grid%jz, grid%kp, &
             ', nfp ', grid%nfp, ', coil groups ', grid%nextcur
         call mgrid_current_nodes(coil_basis, extcur(:grid%nextcur), coils_inside)
-        call fb_nested_geometry(boundary_input, nfp, coupling_margin, [grid%rmin, &
-            grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
-            fb_curve, fb_section, margin_used, local, message)
+        ! A guess that reaches a coil or the grid edge is only a start: it is
+        ! shrunk about its m = 0 curve until the coupling surface fits.
+        guess_scale = 1
+        do
+            call fb_nested_geometry(boundary_input, nfp, coupling_margin, [grid%rmin, &
+                grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
+                fb_curve, fb_section, margin_used, local, message)
+            if (local == 0 .or. guess_scale < 0.6_dp) exit
+            guess_scale = 0.9_dp*guess_scale
+            boundary_input(:, :, 1:) = 0.9_dp*boundary_input(:, :, 1:)
+        end do
         if (local /= 0) call fail(trim(message))
+        if (guess_scale < 1) print '(a,f6.3)', 'guess shrunk by ', guess_scale
+        call set_toroidal_level(ntor_level)
         print '(a,2f9.4,a,2f8.4,a,f6.3)', 'reference disc centre', fb_centre, &
             ' half-widths', fb_axes, ', coupling margin', margin_used
         filament%source = fb_centre
