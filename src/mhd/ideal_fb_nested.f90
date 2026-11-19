@@ -20,7 +20,8 @@ module milca_ideal_fb_nested
     implicit none
     private
     public :: fb_nested_geometry, fb_nested_mesh, fb_nested_seed, fb_nested_transfer
-    public :: fb_nested_settle, fb_nested_layer_mesh, fb_nested_offset_distance
+    public :: fb_nested_settle, fb_nested_layer_mesh, fb_nested_offset_distance, &
+        fb_nested_section
     public :: filament_basis_t
     real(dp), parameter :: pi = acos(-1.0_dp)
     ! Gamma_c is a star-shaped curve r(alpha) about the centre, sampled on
@@ -397,43 +398,110 @@ contains
         if (.not. all(ieee_is_finite(fb%xs))) status = IDEAL_FB_FOLDED
     end subroutine
 
-    subroutine fb_nested_offset_distance(boundary, centre, axes, box, obstacles, cap, &
-                                         distance, status)
-        !! Distance d of Gamma_c as an outward normal offset of the guess's
-        !! mean section: below the reach of its normal lines (0.9 times the
-        !! smallest radius of curvature where the section is concave; a convex
-        !! section has unbounded reach), half the smallest gap to the coils
-        !! inside the box and to the box edge, and cap.
-        real(dp), intent(in) :: boundary(:, :, 0:), centre(2), axes(2), box(4)
-        real(dp), intent(in) :: obstacles(:, :), cap
+    subroutine fb_nested_offset_distance(section, box, obstacles, cap, distance, &
+                                         status)
+        !! Distance d of Gamma_c from the convex hull of a section polygon
+        !! (fb_nested_section): half the smallest gap of the hull to the coils
+        !! inside the box and to the box edge, and at most cap. The offset of
+        !! a convex curve has no concave reach limit.
+        real(dp), intent(in) :: section(:, :), box(4), obstacles(:, :), cap
         real(dp), intent(out) :: distance
         integer, intent(out) :: status
-        integer, parameter :: ns = 1024
-        real(dp) :: x(2, ns), t(2), tt(2), kappa, gap, reach
-        integer :: j, jm, jp, k
+        real(dp), allocatable :: hull(:, :)
+        real(dp) :: gap
+        integer :: j, k
         status = IDEAL_FB_BAD_INPUT
-        do j = 1, ns
-            x(:, j) = section_point(boundary, centre, axes, 2*pi*(j - 1)/ns)
+        call convex_hull(section, hull)
+        if (size(hull, 2) < 3) return
+        gap = huge(1.0_dp)
+        do j = 1, size(hull, 2)
+            gap = min(gap, hull(1, j) - box(1), box(2) - hull(1, j), hull(2, j) - box(3), &
+                box(4) - hull(2, j))
         end do
-        reach = huge(1.0_dp); gap = huge(1.0_dp)
-        do j = 1, ns
-            jm = modulo(j - 2, ns) + 1; jp = mod(j, ns) + 1
-            t = (x(:, jp) - x(:, jm))/2
-            tt = x(:, jp) - 2*x(:, j) + x(:, jm)
-            ! signed curvature, positive where the counter-clockwise section
-            ! turns left (convex)
-            kappa = (t(1)*tt(2) - t(2)*tt(1))/norm2(t)**3
-            if (kappa < 0) reach = min(reach, 0.9_dp/(-kappa))
-            gap = min(gap, x(1, j) - box(1), box(2) - x(1, j), x(2, j) - box(3), &
-                box(4) - x(2, j))
-            do k = 1, size(obstacles, 2)
-                gap = min(gap, norm2(obstacles(:, k) - x(:, j)))
-            end do
+        do k = 1, size(obstacles, 2)
+            gap = min(gap, hull_distance(hull, obstacles(:, k)))
         end do
-        distance = min(reach, gap/2, cap)
+        distance = min(gap/2, cap)
         if (.not. distance > 0) return
         status = IDEAL_FB_OK
     end subroutine
+
+    subroutine fb_nested_section(boundary, centre, axes, section)
+        !! The guess's mean (n = 0) section as a 1024-point polygon.
+        real(dp), intent(in) :: boundary(:, :, 0:), centre(2), axes(2)
+        real(dp), allocatable, intent(out) :: section(:, :)
+        integer, parameter :: ns = 1024
+        integer :: j
+        allocate (section(2, ns))
+        do j = 1, ns
+            section(:, j) = section_point(boundary, centre, axes, 2*pi*(j - 1)/ns)
+        end do
+    end subroutine
+
+    subroutine convex_hull(points, hull)
+        ! Counter-clockwise convex hull (Andrew's monotone chain).
+        real(dp), intent(in) :: points(:, :)
+        real(dp), allocatable, intent(out) :: hull(:, :)
+        integer, allocatable :: order(:)
+        real(dp), allocatable :: p(:, :), h(:, :)
+        integer(int64), allocatable :: keys(:)
+        integer :: n, i, k, lower
+        n = size(points, 2)
+        allocate (order(n), keys(n), h(2, 2*n))
+        ! sort by x then y through rank keys
+        keys = rank_keys()
+        call sort_key_order(keys, order)
+        p = points(:, order)
+        k = 0
+        do i = 1, n
+            do while (k >= 2)
+                if (cross2(h(:, k) - h(:, k - 1), p(:, i) - h(:, k - 1)) > 0) exit
+                k = k - 1
+            end do
+            k = k + 1; h(:, k) = p(:, i)
+        end do
+        lower = k + 1
+        do i = n - 1, 1, -1
+            do while (k >= lower)
+                if (cross2(h(:, k) - h(:, k - 1), p(:, i) - h(:, k - 1)) > 0) exit
+                k = k - 1
+            end do
+            k = k + 1; h(:, k) = p(:, i)
+        end do
+        hull = h(:, :k - 1)
+    contains
+        function rank_keys() result(r)
+            integer(int64) :: r(n)
+            integer, allocatable :: ox(:)
+            integer(int64), allocatable :: kx(:)
+            integer :: m
+            ! rank in x, ties broken by y, from a scaled pair of integers
+            allocate (kx(n), ox(n))
+            do m = 1, n
+                kx(m) = nint((points(1, m) - minval(points(1, :)))*1.0e8_dp, int64) &
+                    *4000000000_int64 + nint((points(2, m) - minval(points(2, :))) &
+                    *1.0e8_dp, int64)
+            end do
+            r = kx
+        end function
+    end subroutine
+
+    pure real(dp) function hull_distance(hull, x) result(d)
+        ! Distance of x to a counter-clockwise convex polygon, 0 inside.
+        real(dp), intent(in) :: hull(:, :), x(2)
+        real(dp) :: e(2), t
+        integer :: j, k
+        logical :: inside
+        inside = .true.; d = huge(1.0_dp)
+        do j = 1, size(hull, 2)
+            k = mod(j, size(hull, 2)) + 1
+            e = hull(:, k) - hull(:, j)
+            if (cross2(e, x - hull(:, j)) < 0) inside = .false.
+            t = max(0.0_dp, min(1.0_dp, dot_product(x - hull(:, j), e)/dot_product(e, e)))
+            d = min(d, norm2(x - hull(:, j) - t*e))
+        end do
+        if (inside) d = 0
+    end function
 
     function section_point(boundary, centre, axes, alpha) result(x)
         ! Mean (n = 0) section of the guess at reference angle alpha.
@@ -446,7 +514,7 @@ contains
 
     subroutine fb_nested_layer_mesh(boundary, centre, axes, nodes, degree, layers, &
                                     distance, mesh, chain, positions, lines, line_t, &
-                                    status, spines, spine_origins, plasma_cells)
+                                    status, spines, spine_origins, plasma_cells, section)
         !! Reference mesh of the plasma disc (the reference ellipse, nodes
         !! boundary nodes) and a layered shell around it for
         !! ideal_fb_init(positions, lines, line_t). Every Gamma_p chain node y_p
@@ -472,11 +540,15 @@ contains
         real(dp), allocatable, intent(out), optional :: spine_origins(:, :)
         !> the disc cells (the first ones)
         logical, allocatable, intent(out), optional :: plasma_cells(:)
+        !> polygon whose convex hull, offset by distance, is Gamma_c (default:
+        !! the guess's mean section; a solved Gamma_p re-places Gamma_c)
+        real(dp), intent(in), optional :: section(:, :)
         type(gs_state_t) :: disc
         integer, allocatable :: ring(:), lattice(:, :), tri(:, :)
         real(dp), allocatable :: points(:, :), xc(:, :)
         real(dp) :: nu(2), delta, xp(2), tangent(2), alpha, t, area
-        real(dp), parameter :: eps = 1.0e-6_dp
+        real(dp), allocatable :: outline(:, :), hull(:, :)
+        real(dp) :: origin(2), lo, hi
         integer :: np, nring, nr, i, r, k, e, l, nloc, ncell, ntri, a, b, next
         integer :: local(2, 10), corner(2, 3), j
         status = IDEAL_FB_BAD_INPUT
@@ -494,16 +566,34 @@ contains
         if (status /= 0) return
         status = IDEAL_FB_BAD_INPUT
         nring = size(ring); nr = degree*layers
-        ! Gamma_c of every chain node: offset of the mean section along its
-        ! outward normal at the same reference angle.
+        ! Gamma_c: the convex hull of the section offset by distance. The
+        ! segment of chain node i runs on the ray from the section centroid
+        ! through its guess point, so segments never cross while the section
+        ! is star shaped about the centroid; its Gamma_c point solves
+        ! dist(x, hull) = distance on that ray (bisection).
+        if (present(section)) then
+            outline = section
+        else
+            call fb_nested_section(boundary, centre, axes, outline)
+        end if
+        call convex_hull(outline, hull)
+        origin = sum(outline, dim=2)/size(outline, 2)
         allocate (xc(2, nring))
         do i = 1, nring
             alpha = atan2((disc%points(2, ring(i)) - centre(2))/axes(2), &
                 (disc%points(1, ring(i)) - centre(1))/axes(1))
             xp = section_point(boundary, centre, axes, alpha)
-            tangent = section_point(boundary, centre, axes, alpha + eps) &
-                - section_point(boundary, centre, axes, alpha - eps)
-            xc(:, i) = xp + distance*[tangent(2), -tangent(1)]/norm2(tangent)
+            tangent = (xp - origin)/norm2(xp - origin)
+            lo = 0; hi = norm2(xp - origin) + 2*distance + maxval(abs(outline - &
+                spread(origin, 2, size(outline, 2))))
+            do k = 1, 200
+                if (hull_distance(hull, origin + (lo + hi)/2*tangent) < distance) then
+                    lo = (lo + hi)/2
+                else
+                    hi = (lo + hi)/2
+                end if
+            end do
+            xc(:, i) = origin + lo*tangent
         end do
         ! Lattice (chain node, layer node) -> mesh node; layer 0 is Gamma_p.
         allocate (lattice(nring, 0:nr), points(2, np + nring*nr))

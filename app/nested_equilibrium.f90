@@ -26,10 +26,11 @@ program nested_equilibrium
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
-        ideal_fb_hessian, ideal_fb_step
+        ideal_fb_hessian, ideal_fb_step, ideal_fb_boundary_polygon
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
     use milca_ideal_fb_nested, only: fb_nested_offset_distance, fb_nested_layer_mesh, &
+        fb_nested_section, &
         fb_nested_geometry, fb_nested_mesh, &
         fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t
     use milca_mgrid_file, only: mgrid_t, mgrid_read
@@ -114,6 +115,11 @@ program nested_equilibrium
     integer, allocatable :: shell_lines(:, :)
     real(dp), allocatable :: shell_spines(:, :), shell_origins(:, :)
     logical, allocatable :: shell_cells(:)
+    ! Gamma_c: the convex hull of shell_section (the guess's section, or a
+    ! solved Gamma_p when Gamma_c is re-placed) offset by shell_distance.
+    real(dp), allocatable :: shell_section(:, :), shell_obstacles(:, :)
+    real(dp) :: shell_box(4)
+    integer :: replacements = 0
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -377,8 +383,10 @@ contains
             fb_curve, margin_used, local, message)
         if (local /= 0) call fail(trim(message))
         if (shell_layers > 0) then
-            call fb_nested_offset_distance(boundary_input, fb_centre, fb_axes, &
-                [grid%rmin, grid%rmax, grid%zmin, grid%zmax], coils_inside, &
+            call fb_nested_section(boundary_input, fb_centre, fb_axes, shell_section)
+            shell_box = [grid%rmin, grid%rmax, grid%zmin, grid%zmax]
+            shell_obstacles = coils_inside
+            call fb_nested_offset_distance(shell_section, shell_box, shell_obstacles, &
                 coupling_margin*sqrt(fb_axes(1)*fb_axes(2)), shell_distance, local)
             if (local /= 0) call fail('no room for the coupling surface between the' &
                 //' guess and the coils')
@@ -395,7 +403,7 @@ contains
         if (prescribe_current) circulation = mu0*current_target(1.0_dp)
     end subroutine
 
-    subroutine fb_level(nodes, first)
+    recursive subroutine fb_level(nodes, first)
         ! Free boundary at the mesh of nodes boundary nodes and the current
         ! toroidal modes: coupling-surface operators and traces, the start
         ! from the guess (first) or from the solved level, and the solve.
@@ -410,7 +418,8 @@ contains
             call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
                 shell_layers, shell_distance, mesh, chain, shell_positions, &
                 shell_lines, shell_t, local, spines=shell_spines, &
-                spine_origins=shell_origins, plasma_cells=shell_cells)
+                spine_origins=shell_origins, plasma_cells=shell_cells, &
+                section=shell_section)
             if (local /= 0) call fail('the free-boundary mesh failed')
             block
                 ! DEBUG: MILCA_FB_SPINES selects the spined shell
@@ -492,6 +501,23 @@ contains
             end if
         end block
         call fb_solve(tolerance)
+        ! A solve that converges only with the fold barrier active (or folds)
+        ! has Gamma_c too close: Gamma_c is re-placed around the solved
+        ! boundary and the level is solved again from the transferred map.
+        if (solve_status /= IDEAL_FB_OK .and. shell_layers > 0 .and. &
+            replacements < 3) then
+            replacements = replacements + 1
+            call ideal_fb_boundary_polygon(fb, 16, shell_section, local)
+            if (local /= 0) call fail('the solved boundary is not a closed chain')
+            call fb_nested_offset_distance(shell_section, shell_box, shell_obstacles, &
+                coupling_margin*sqrt(fb_axes(1)*fb_axes(2)), shell_distance, local)
+            if (local /= 0) call fail('no room for the coupling surface around the' &
+                //' solved boundary')
+            print '(a,f6.3)', 'Gamma_c re-placed around the solved boundary at d/a ', &
+                shell_distance/sqrt(fb_axes(1)*fb_axes(2))
+            call fb_level(nodes, .false.)
+            replacements = replacements - 1
+        end if
     end subroutine
 
     subroutine interior_equilibrium(target)

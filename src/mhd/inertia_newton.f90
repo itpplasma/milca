@@ -5,7 +5,7 @@ module milca_inertia_newton
     !! positive diagonal congruence (units), reads the inertia and raises
     !! delta until it equals the target (n_pos, n_neg, 0), with the IPOPT
     !! update (Waechter and Biegler, Math. Program. 106 (2006) 25, sec. 3.1):
-    !! first trial max(delta_min, delta_last/3), or delta_first when the
+    !! delta = 0 first, then max(delta_min, delta_last/3), or delta_first when the
     !! last step needed none, then delta_factor times per rejection. shift
     !! selects the rows that may be regularised (primal blocks) with their
     !! weight; rows with shift 0 (multipliers, a maximised block) keep their
@@ -66,9 +66,10 @@ contains
         end do
         if (any(.not. opt%scale > 0)) return
         opt%scale = 1/sqrt(opt%scale)
+        ! delta = 0 first (the Newton step whenever the inertia allows it),
+        ! then from max(delta_min, delta_last/3)
         delta = 0
-        if (opt%delta_last > 0) delta = max(opt%delta_min, opt%delta_last/3)
-        if (present(minimum)) delta = max(delta, minimum)
+        if (present(minimum)) delta = minimum
         factored = .false.
         do
             do i = 1, n
@@ -105,7 +106,9 @@ contains
             end if
             if (opt%inertia(1) == n_pos .and. opt%inertia(2) == n_neg .and. &
                 opt%inertia(3) == 0) exit
-            if (delta == 0) then
+            if (delta == 0 .and. opt%delta_last > 0) then
+                delta = max(opt%delta_min, opt%delta_last/3)
+            else if (delta == 0) then
                 delta = opt%delta_first
             else
                 delta = opt%delta_factor*delta

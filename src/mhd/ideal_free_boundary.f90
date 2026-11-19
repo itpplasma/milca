@@ -110,6 +110,7 @@ module milca_ideal_free_boundary
     public :: ideal_fb_field_basis_t, ideal_fb_drive_traces, ideal_fb_full_turn_traces
     public :: ideal_fb_set_traces, ideal_fb_traces_jvp, ideal_fb_traces_vjp
     public :: ideal_fb_drive_traces_3d, ideal_fb_set_drive_3d
+    public :: ideal_fb_boundary_polygon
     integer, parameter, public :: IDEAL_FB_OK = 0, IDEAL_FB_BAD_INPUT = 1, &
         IDEAL_FB_MAP_FAILED = 2, IDEAL_FB_BEM_FAILED = 3, IDEAL_FB_FOLDED = 4, &
         IDEAL_FB_SOLVE_FAILED = 5, IDEAL_FB_NOT_CONVERGED = 6
@@ -272,6 +273,10 @@ module milca_ideal_free_boundary
         real(dp) :: fold_barrier = 1, fold_threshold = 0.1_dp
         ! Active barrier weight mu (J/m^3; 0 outside the escape).
         real(dp) :: fold_mu = 0
+        ! Area factor the barrier compares with (default: the reference det;
+        ! inertia_solve sets the shell's own Jacobian at its start, so the
+        ! barrier is zero there by construction whatever the reference).
+        real(dp), allocatable :: barrier_det(:, :)
         ! Evaluate ideal_fb_hypotheses at every Newton state and print it
         ! (verbose solves only; a diagnostic, never a stopping criterion).
         logical :: monitor_hypotheses = .false.
@@ -1557,6 +1562,7 @@ contains
         ! Fold barrier (ideal_fb_t%fold_mu): L carries -E_v, so +B enters as
         ! -B in the vacuum density.
         det0 = fb%det(g, e)
+        if (allocated(fb%barrier_det)) det0 = fb%barrier_det(g, e)
         barrier = fb%fold_mu > 0
         if (barrier) barrier = jac < fb%fold_threshold*det0
         if (barrier) then
@@ -5953,6 +5959,33 @@ contains
         end do
     end subroutine
 
+    subroutine ideal_fb_boundary_polygon(fb, samples, polygon, status)
+        !! The plasma boundary (n = 0 chart positions) as a closed polygon,
+        !! samples points per chain edge on its Lagrange interpolant.
+        type(ideal_fb_t), intent(in) :: fb
+        integer, intent(in) :: samples
+        real(dp), allocatable, intent(out) :: polygon(:, :)
+        integer, intent(out) :: status
+        integer, allocatable :: chain(:)
+        real(dp) :: w(0:3), dw(0:3)
+        integer :: nedge, e, k, l, nc
+        call chain_of_plasma(fb%plasma, fb%order, chain, status)
+        if (status /= 0) return
+        nc = size(chain); nedge = nc/fb%order
+        allocate (polygon(2, nedge*samples))
+        do e = 1, nedge
+            do k = 1, samples
+                call edge_lagrange(fb%order, real(k - 1, dp)/samples, w(:fb%order), &
+                    dw(:fb%order))
+                polygon(:, (e - 1)*samples + k) = 0
+                do l = 0, fb%order
+                    polygon(:, (e - 1)*samples + k) = polygon(:, (e - 1)*samples + k) &
+                        + w(l)*fb%plasma%x(1:2, 1, chain(mod((e - 1)*fb%order + l, nc) + 1))
+                end do
+            end do
+        end do
+    end subroutine
+
     subroutine chain_of_plasma(map, order, chain, status)
         ! Plasma boundary nodes in chain order (order per boundary edge).
         type(ideal_map_t), intent(in) :: map
@@ -6060,7 +6093,23 @@ contains
         if (fb%fold_barrier > 0) then
             block
                 real(dp), allocatable :: gx(:, :, :), gf(:, :)
-                real(dp) :: ev, mins, volume
+                real(dp) :: ev, mins, volume, wpt, jac, gv(15), hv(15, 15)
+                integer :: e, g, j
+                if (allocated(fb%barrier_det)) deallocate (fb%barrier_det)
+                allocate (fb%barrier_det(fb%plasma%nq, fb%ncell))
+                fb%barrier_det = huge(1.0_dp)
+                do e = 1, fb%ncell
+                    do j = 1, fb%plasma%nphi
+                        do g = 1, fb%plasma%nq
+                            call shell_point(fb, fb%xs, fb%phi, e, g, j, wpt, jac, gv, hv, &
+                                .false.)
+                            fb%barrier_det(g, e) = min(fb%barrier_det(g, e), jac)
+                        end do
+                    end do
+                end do
+                if (.not. all(fb%barrier_det > 0)) then
+                    status = IDEAL_FB_FOLDED; return
+                end if
                 allocate (gx(3, fb%nmode, fb%ns), gf(fb%nmode, fb%ns))
                 call shell_energy(fb, fb%xs, fb%phi, ev, gx, gf, mins)
                 volume = sum(spread(fb%plasma%weight(1:fb%plasma%nq), 2, fb%ncell) &
