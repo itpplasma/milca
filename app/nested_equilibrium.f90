@@ -451,6 +451,7 @@ contains
         else
             call fb_nested_transfer(next, fb, local)
             if (local /= IDEAL_FB_OK) call fail('the resolution level transfer failed')
+            call require_valid(next, 'the transferred state')
         end if
         if (first) then
             if (prescribe_current) call seed_current(next)
@@ -570,6 +571,28 @@ contains
         target%circulation = circulation
         call ideal_fb_set_traces(target, d, l, f, local)
         if (local /= IDEAL_FB_OK) call fail('the vacuum traces are not finite')
+    end subroutine
+
+    subroutine require_valid(state, what)
+        ! A state handed to a solve must evaluate: no shell or plasma cell
+        ! folded, finite Lagrangian and gradient (blocks named on failure).
+        type(ideal_fb_t), intent(in) :: state
+        character(*), intent(in) :: what
+        real(dp), allocatable :: g(:)
+        real(dp) :: lagrangian, jacobian
+        integer :: local
+        allocate (g(state%n))
+        call ideal_fb_gradient(state, g, local, lagrangian=lagrangian, &
+            min_jacobian=jacobian)
+        print '(3a,es10.2,a,i0,a,4l2)', 'check of ', what, ': min jacobian ratio ', &
+            jacobian, ', status ', local, ', finite (L, plasma, shell, potential) ', &
+            ieee_is_finite(lagrangian), all(ieee_is_finite(g(:state%np))), &
+            all(ieee_is_finite(g(state%np + 1:state%np + 2*state%nx))), &
+            all(ieee_is_finite(g(state%np + 2*state%nx + 1:)))
+        if (local /= IDEAL_FB_OK .or. .not. jacobian > 0) &
+            call fail(what//' has a folded cell')
+        if (.not. ieee_is_finite(lagrangian) .or. .not. all(ieee_is_finite(g))) &
+            call fail(what//' does not evaluate to a finite residual')
     end subroutine
 
     subroutine fb_solve(target)
