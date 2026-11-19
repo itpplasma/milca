@@ -1331,11 +1331,13 @@ target_link_libraries(test_nested_equilibrium_app PRIVATE milca_io)
 # exact volume 2 pi^2 R a^2; GVEC gives raxis 3.03683 m for the iota case.
 # wrong-sign-start: the same deck started from iota = +0.3; bean-continuation-fold:
 # the same deck solved at 24 boundary nodes from its seed; fold-between-planes:
-# the same deck solved directly with map_ntor = 5.
+# the same deck solved directly with map_ntor = 5. circular-tokamak-current-matrix-free:
+# the same deck with every map solve matrix-free (map_memory_gib below its need).
 foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "circular-tokamak-hermite|3.0366;0.0750949;59.2176264"
         "circular-tokamak-current|3.04266;0.0755050"
         "circular-tokamak-current-hermite|3.04266;0.0755050"
+        "circular-tokamak-current-matrix-free|3.04266;0.0755050"
         "doubled-boundary|failure" "axis-current-free|failure"
         "wrong-sign-start|3.02142;0.0746517" "vanishing-current|failure;iota"
         "vanishing-current-ladder|failure;iota"

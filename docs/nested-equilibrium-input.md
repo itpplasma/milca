@@ -29,6 +29,7 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `ladder_nodes(:)`, `ladder_degree(:)` | coarser levels solved first; each corrects the next seed (`ideal_map_prolong_correction`) | none |
 | `angle_mpol` | poloidal modes of the boundary field-line angle; -1 pins the boundary angle | -1 |
 | `tolerance`, `max_iterations` | free reduced-gradient reduction and Newton limit per level | 1e-8, 200 |
+| `map_memory_gib` | memory budget of the direct map solve; above its estimate (90 B per Hessian nonzero) the matrix-free Newton runs | 4 |
 | `prescribe_current` | match the enclosed toroidal current `current(k)` (A, coefficients of s^k) instead of keeping `iota` | false |
 | `max_current_iterations`, `current_tolerance` | Newton steps on iota and the largest iota increment of the last step; with automatic resolution at most a tenth of the active `fourier_tolerance`, `mesh_tolerance` and `iota_tolerance` | 30, 1e-5 |
 | `iota_nodes`, `iota_tolerance` | Chebyshev-Gauss surfaces of the matched iota polynomial, 2 to 32, or -1 to raise them from 6 under error control | -1, 1e-4 |

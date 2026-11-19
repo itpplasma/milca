@@ -2617,6 +2617,9 @@ contains
         logical :: talk, accepted, factored, ofactored, lfactored, use_lu, nested
         logical :: retained, direct, pc_failed, spd
         real(dp) :: eta, ginit
+        ! Levenberg-Marquardt update of Nielsen (1999): growth factor nu after
+        ! rejections, mu scaled by max(1/3, 1 - (2 ratio - 1)^3) after acceptance
+        real(dp) :: nu, ratio
         ! Quasi-Newton state (map%lagged_hessian): qn_slot 1/2: solver/lsolver
         ! holds the last factor (0: none); secant pairs qs, qy with 1/(s.y) in
         ! qrho, qcount valid ones, the newest at qhead.
@@ -2703,6 +2706,7 @@ contains
                 end if
                 if (.not. nested) then
                     eta = min(0.5_dp, sqrt(gnorm/max(ginit, tiny(1.0_dp))))
+                    nu = 2; ratio = 1
                     do tries = 1, 30
                         t0 = wall_seconds()
                         shift = merge(mu*(abs(diag) + 1.0e-12_dp*scale), 0.0_dp, damped)
@@ -2729,7 +2733,7 @@ contains
                             end if
                             retained = estatus == 0 .and. spd
                             if (estatus /= 0 .or. .not. spd) then
-                                mu = mu*10; cycle
+                                mu = mu*nu; nu = 2*nu; cycle
                             end if
                             if (use_lu) then
                                 call sparse_solve(lsolver, rhs, step, sstatus)
@@ -2769,7 +2773,8 @@ contains
                         ! quadratic model g.s + s.H s/2 predicts.
                         if (estatus == IDEAL_MAP_OK .and. trial_energy < energy &
                             - 1024*epsilon(1.0_dp)*abs(energy)) then
-                            if (energy - trial_energy >= 0.1_dp*predicted_reduction()) then
+                            ratio = (energy - trial_energy)/predicted_reduction()
+                            if (ratio >= 0.1_dp) then
                                 accepted = .true.; exit
                             end if
                         end if
@@ -2785,10 +2790,10 @@ contains
                             call ideal_map_reduce(map, grad, rhs)
                             where (map%fixed) rhs = 0
                             if (estatus == IDEAL_MAP_OK .and. dot_product(gred + rhs, step) <= 0) then
-                                accepted = .true.; exit
+                                ratio = 1; accepted = .true.; exit
                             end if
                         end if
-                        mu = mu*10
+                        mu = mu*nu; nu = 2*nu
                     end do
                 end if
             end if
@@ -2818,7 +2823,7 @@ contains
                 energy, gnorm/g0, maxval(abs(step(1::2))), maxval(abs(step(2::2))), mu, &
                 tries, alpha, norm2(gred(2:2*map%nodes:2))/gnorm, &
                 norm2(step(2:2*map%nodes:2))/norm2(step)
-            if (.not. alpha < 1 .and. .not. quasi) mu = max(mu/100, 1.0e-14_dp)
+            if (.not. alpha < 1 .and. .not. quasi) mu = max(mu*max(1.0_dp/3, 1 - (2*ratio - 1)**3), 1.0e-14_dp)
             if (report%step <= 1.0e-13_dp*maxval(abs(map%reference))) then
                 status = IDEAL_MAP_OK; exit
             end if

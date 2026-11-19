@@ -304,7 +304,12 @@ tenth of the reduction g.s + s.H s/2 predicts; inside the band, where the
 energy cannot rank steps, the trapezoidal energy change (g(x) + g(x + s)).s/2
 must not be positive (a plain gradient decrease test kept the damping at
 1e-6..1e-9 and 300-600 steps of linear crawl, and stops at other points of
-the near-null valleys). A trust
+the near-null valleys). The damping follows Nielsen (1999): a rejected
+trial multiplies mu by nu = 2, 4, 8, ..., an accepted full step multiplies it
+by max(1/3, 1 - (2 rho - 1)^3), rho the ratio of actual to predicted
+reduction. At 16 nodes (mpol = ntor = 4) the Newton count falls from 127 to
+98 against the earlier rule (x10 on rejection, /100 after a full step), which
+cycled through two rejected trials per iteration. A trust
 region caps the nodal displacement at 5% of the reference extent and omega at
 1 rad per step, because the near-null directions carry large Newton components.
 `ideal_map_hvp` gives the reduced Hessian-vector product P^T H P d without
@@ -579,6 +584,36 @@ solution psi_2D on the same mesh is the second oracle.
   for an L2 force); discrete solution 2.7e-2, 6.2e-3, 1.5e-3 (order 2.1,
   2.1 = k). The solution is stationary in the gauge space only, so the
   tangential components stay at discretisation level.
+
+## Resonant slide of the Landreman integer case
+
+The integer oracle family (`nested_integer_driver`, nfp 2) has iota = 2
+on every surface: zero shear, and every surface is resonant with the
+field-aligned harmonics cos(m theta - n nfp phi), n/m = 1. At 16 boundary
+nodes (P3, mpol = ntor = 4) the map energy keeps falling along a direction of
+negative curvature of the discrete Hessian after the gradient has dropped to
+1e-5. About 70 % of the step norm squared is relabelling with m <= 2,
+|n| <= 2, the rest is in the n = 1 modes at rho = 0.1 to 0.5. Along this
+slide the sampled errors against the oracle grow
+(`nested_integer_driver`, direct solve stopped after the given Newton
+iterations):
+
+| Newton iterations | W - W_end | B error | p error | label error |
+|---|---|---|---|---|
+| 10 | 6.7e-8 | 1.4e-3 | 4.8e-3 | 1.1e-2 |
+| 20 | 1.6e-8 | 1.1e-3 | 9.9e-3 | 1.5e-2 |
+| 40 | 6.6e-9 | 1.6e-3 | 4.1e-2 | 5.8e-2 |
+| 98 (converged, 1e-8) | 0 | 1.9e-3 | 5.2e-2 | 6.6e-2 |
+
+At 12 nodes the solve converges in 22 iterations without the slide (B, p,
+label errors 1.4e-3, 4.5e-3, 9.5e-3). Field-aligned harmonics bend no field
+lines, so nothing in the ideal energy stabilises the oracle against
+field-aligned surface deformation, and the discrete energy finds lower states
+once the mesh resolves them. This is consistent with the slide, but it is
+not a proof, because no delta W of the oracle has been computed. On this case
+refinement does not converge the surfaces. It belongs to the islands
+roadmap. Two damping paths ended at energies 2.5e-7 apart (relative), so the
+end point is not unique.
 
 ## Not yet done
 

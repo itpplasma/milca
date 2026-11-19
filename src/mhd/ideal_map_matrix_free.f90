@@ -10,11 +10,12 @@ module milca_ideal_map_matrix_free
     ! the direct path. The globalisation is that of ideal_map_solve: the
     ! displacement cap of 5 % of the reference extent, acceptance by a tenth of
     ! the predicted reduction -(g.s + s.H s/2) outside the roundoff band of W
-    ! and by the trapezoidal energy change inside it, mu / 100 after a full
-    ! accepted step. Memory: the point Hessians, O(cells nq nphi), and the
+    ! and by the trapezoidal energy change inside it, and the damping update of
+    ! Nielsen (1999). Memory: the point Hessians, O(cells nq nphi), and the
     ! Schwarz factors, O(nodes nmode).
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use milca_ideal_map, only: ideal_map_t, ideal_map_solve_report_t, ideal_map_energy, &
+        ideal_map_solve, &
         ideal_map_reduce, ideal_map_expand, ideal_map_hvp, ideal_map_hessian_store_t, &
         ideal_map_store_hessians, ideal_map_rdof, ideal_map_angle_rdof, &
         ideal_map_angle_diagonal, ideal_map_dof, IDEAL_MAP_OK, IDEAL_MAP_BAD_INPUT, &
@@ -25,6 +26,12 @@ module milca_ideal_map_matrix_free
     implicit none
     private
     public :: ideal_map_solve_matrix_free, ideal_map_hessian_diagonal
+    public :: ideal_map_hessian_nonzeros, ideal_map_solve_auto
+    public :: IDEAL_MAP_DIRECT_BYTES_PER_NONZERO
+    ! peak resident bytes of ideal_map_solve per nonzero of the reduced Hessian:
+    ! slope of 70, 81, 124, 163 MB at 0.42, 0.67, 1.12, 1.53 million nonzeros
+    ! (Landreman P3, 8 to 24 nodes) is 84 B
+    real(dp), parameter :: IDEAL_MAP_DIRECT_BYTES_PER_NONZERO = 90
     ! recycled Ritz directions kept across Newton steps
     integer, parameter :: max_recycled = 40
 contains
@@ -43,6 +50,7 @@ contains
         real(dp), allocatable :: grad(:), gred(:), diag(:), shift(:), step(:), full(:), &
             trial(:, :, :), hs(:), rhs(:), w(:, :), ritz(:, :), trial_angle(:)
         real(dp) :: energy, trial_energy, g0, gnorm, ginit, mu, scale, alpha, cap, eta, pred
+        real(dp) :: nu, ratio
         real(dp) :: t0
         integer :: it, tries, estatus, nred, its, nc
         logical :: accepted, negative, talk
@@ -81,6 +89,7 @@ contains
             scale = maxval(abs(diag), mask=.not. map%fixed)
             eta = min(0.5_dp, sqrt(gnorm/max(ginit, tiny(1.0_dp))))
             accepted = .false.
+            nu = 2; ratio = 1
             do tries = 1, 30
                 report%trials = report%trials + 1
                 t0 = wall()
@@ -93,7 +102,7 @@ contains
                 end if
                 if (estatus /= IDEAL_MAP_OK) then
                     report%factor_s = report%factor_s + wall() - t0
-                    mu = mu*10; cycle
+                    mu = mu*nu; nu = 2*nu; cycle
                 end if
                 report%factorizations = report%factorizations + max(1, map%ntor)
                 rhs = -gred
@@ -104,7 +113,7 @@ contains
                 report%factor_s = report%factor_s + wall() - t0
                 if (negative) then
                     report%indefinite_trials = report%indefinite_trials + 1
-                    mu = mu*10; cycle
+                    mu = mu*nu; nu = 2*nu; cycle
                 end if
                 where (map%fixed) step = 0
                 call ideal_map_expand(map, step, full)
@@ -122,7 +131,8 @@ contains
                     - 1024*epsilon(1.0_dp)*abs(energy)) then
                     call ideal_map_hvp(map, map%x, step, hs, estatus, store)
                     pred = -dot_product(gred, step) - dot_product(step, hs)/2
-                    if (energy - trial_energy >= 0.1_dp*pred) then
+                    ratio = (energy - trial_energy)/pred
+                    if (ratio >= 0.1_dp) then
                         accepted = .true.; exit
                     end if
                 end if
@@ -133,10 +143,10 @@ contains
                     call ideal_map_reduce(map, grad, rhs)
                     where (map%fixed) rhs = 0
                     if (estatus == IDEAL_MAP_OK .and. dot_product(gred + rhs, step) <= 0) then
-                        accepted = .true.; exit
+                        ratio = 1; accepted = .true.; exit
                     end if
                 end if
-                mu = mu*10
+                mu = mu*nu; nu = 2*nu
             end do
             if (.not. accepted) exit
             report%step = maxval(abs(trial - map%x))
@@ -150,7 +160,7 @@ contains
             report%energy = energy; report%gradient = gnorm/g0; report%damping = mu
             if (talk) print '(a,i4,es14.6,es11.3,es10.2,i4,i5,es10.2)', &
                 'matrix-free newton', it, energy, gnorm/g0, mu, tries, its, alpha
-            if (.not. alpha < 1) mu = max(mu/100, 1.0e-14_dp)
+            if (.not. alpha < 1) mu = max(mu*max(1.0_dp/3, 1 - (2*ratio - 1)**3), 1.0e-14_dp)
             if (report%step <= 1.0e-13_dp*maxval(abs(map%reference))) then
                 status = IDEAL_MAP_OK; exit
             end if
@@ -281,5 +291,66 @@ contains
                 unpacked = hp(72 + (lo - 9) + (hi - 10)*(hi - 9)/2)
             end if
         end function
+    end subroutine
+
+    integer(int64) function ideal_map_hessian_nonzeros(map) result(nnz)
+        ! Nonzeros of the reduced Hessian that ideal_map_solve assembles: the
+        ! (2 nmode)^2 block of every pair of nodes sharing a cell, the angle
+        ! columns and rows (dense against all dofs) and the angle block.
+        type(ideal_map_t), intent(in) :: map
+        integer, allocatable :: first(:), next(:), cell_of(:), mark(:)
+        integer(int64) :: pairs
+        integer :: a, e, i, item
+        allocate (first(map%nodes), next(map%cells*map%nloc), cell_of(map%cells*map%nloc), &
+            mark(map%nodes))
+        first = 0; item = 0
+        do e = 1, map%cells
+            do i = 1, map%nloc
+                item = item + 1
+                cell_of(item) = e
+                next(item) = first(map%conn(i, e))
+                first(map%conn(i, e)) = item
+            end do
+        end do
+        mark = 0; pairs = 0
+        do a = 1, map%nodes
+            item = first(a)
+            do while (item > 0)
+                e = cell_of(item); item = next(item)
+                do i = 1, map%nloc
+                    if (mark(map%conn(i, e)) == a) cycle
+                    mark(map%conn(i, e)) = a
+                    pairs = pairs + 1
+                end do
+            end do
+        end do
+        nnz = pairs*int(2*map%nmode, int64)**2 &
+            + 2*int(map%nangle, int64)*(map%nred - map%nangle) + int(map%nangle, int64)**2
+    end function
+
+    subroutine ideal_map_solve_auto(map, tolerance, max_iterations, report, status, &
+            memory_budget, matrix_free, reference_gradient, verbose)
+        ! ideal_map_solve when its estimated peak memory,
+        ! IDEAL_MAP_DIRECT_BYTES_PER_NONZERO times the Hessian nonzeros, fits
+        ! memory_budget (bytes), ideal_map_solve_matrix_free otherwise. The
+        ! matrix-free path needs the position gauge, without it the direct path
+        ! runs. matrix_free tells which path ran.
+        type(ideal_map_t), intent(inout) :: map
+        real(dp), intent(in) :: tolerance, memory_budget
+        integer, intent(in) :: max_iterations
+        type(ideal_map_solve_report_t), intent(out) :: report
+        integer, intent(out) :: status
+        logical, intent(out) :: matrix_free
+        real(dp), intent(in), optional :: reference_gradient
+        logical, intent(in), optional :: verbose
+        matrix_free = map%position_gauge .and. IDEAL_MAP_DIRECT_BYTES_PER_NONZERO &
+            *real(ideal_map_hessian_nonzeros(map), dp) > memory_budget
+        if (matrix_free) then
+            call ideal_map_solve_matrix_free(map, tolerance, max_iterations, report, status, &
+                reference_gradient, verbose)
+        else
+            call ideal_map_solve(map, tolerance, max_iterations, report, status, verbose, &
+                reference_gradient=reference_gradient)
+        end if
     end subroutine
 end module

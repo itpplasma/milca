@@ -10,7 +10,9 @@ program nested_equilibrium
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
         ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate
-    use milca_ideal_map, only: ideal_map_t, ideal_map_solve, ideal_map_solve_report_t, &
+    use milca_ideal_map_matrix_free, only: ideal_map_solve_auto, ideal_map_hessian_nonzeros, &
+        IDEAL_MAP_DIRECT_BYTES_PER_NONZERO
+    use milca_ideal_map, only: ideal_map_t, ideal_map_solve_report_t, &
         ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction, ideal_map_freeze, &
         ideal_map_sensitivity
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
@@ -48,6 +50,9 @@ program nested_equilibrium
     logical :: automatic_ntor, automatic_mesh, automatic_iota
     logical :: mesh_confirmed, modes_confirmed, iota_confirmed
     logical :: iota_vanishes = .false.
+    ! memory budget of the direct map solve, matrix-free Newton above it
+    real(dp) :: map_memory_gib
+    logical :: matrix_free_announced = .false.
     ! the solved map of the level folds at the volume-integral points
     logical :: level_folded = .false.
     real(dp) :: fourier_tolerance, fourier_error, mesh_tolerance, mesh_error
@@ -107,7 +112,7 @@ program nested_equilibrium
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
         iota_nodes, iota_tolerance, free_boundary, mgrid_file, extcur, mgrid_degree, &
-        coupling_margin
+        coupling_margin, map_memory_gib
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -119,7 +124,7 @@ program nested_equilibrium
     mesh_tolerance = 1e-4_dp
     iota_nodes = -1; iota_tolerance = 1e-4_dp
     free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
-    coupling_margin = 0.5_dp
+    coupling_margin = 0.5_dp; map_memory_gib = 4
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -147,6 +152,7 @@ program nested_equilibrium
         error stop 'nested_equilibrium: iota_nodes from 2 to 32, or -1'
     if (free_boundary .and. len_trim(mgrid_file) == 0) &
         error stop 'nested_equilibrium: free_boundary needs mgrid_file'
+    if (.not. map_memory_gib > 0) error stop 'nested_equilibrium: map_memory_gib must be positive'
     if (free_boundary .and. .not. coupling_margin > 0) &
         error stop 'nested_equilibrium: coupling_margin must be positive'
     call run%open_resolved(unit)
@@ -330,8 +336,7 @@ contains
                 call ideal_map_prolong_correction(map, coarse, coarse_seed, status)
                 if (status /= 0) call fail('the resolution ladder correction failed')
             end if
-            call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-                reference_gradient=reference)
+            call solve_map(tolerance, solve_status)
             coarse = map; coarse_seed = seed_x
         end do
     end subroutine
@@ -445,8 +450,7 @@ contains
         call ideal_map_freeze(map, seed, local)
         if (local /= 0) call fail('the seed folded when frozen for its interior')
         reference = free_gradient()
-        call ideal_map_solve(map, tolerance, max_iterations, report, local, &
-            reference_gradient=reference)
+        call solve_map(tolerance, local)
         print '(a,i0,a,i0)', 'fixed-boundary interior of the seed: status ', local, &
             ', iterations ', report%iterations
         fb_solving = .false.
@@ -746,8 +750,7 @@ contains
             call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
             if (status /= 0) call fail('the resolution level correction failed')
         end if
-        call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-            reference_gradient=reference)
+        call solve_map(tolerance, solve_status)
         call finish_level()
         ! The energy sees the map only at its quadrature points, and the
         ! continued start can reach a stationary point that folds between
@@ -760,8 +763,7 @@ contains
             if (status /= 0) call fail('the seed of a resolution level is not admitted')
             reference = free_gradient()
             seed_x = map%x
-            call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-                reference_gradient=reference)
+            call solve_map(tolerance, solve_status)
             call finish_level()
         end if
     end subroutine
@@ -914,8 +916,7 @@ contains
                 if (fb_solving) then
                     call fb_solve(solve_tolerance)
                 else
-                    call ideal_map_solve(map, solve_tolerance, max_iterations, report, &
-                        solve_status, reference_gradient=reference)
+                    call solve_map(solve_tolerance, solve_status)
                 end if
                 cycle
             end if
@@ -1149,8 +1150,23 @@ contains
         call ideal_map_freeze(map, seed, local)
         if (local /= 0) return
         ! the same absolute target as the first solve, relative to its seed
-        call ideal_map_solve(map, solve_tolerance, max_iterations, report, solve_status, &
-            reference_gradient=reference)
+        call solve_map(solve_tolerance, solve_status)
+    end subroutine
+
+    subroutine solve_map(tol, st)
+        ! ideal_map_solve, or the matrix-free Newton when the estimated memory of
+        ! the direct path exceeds map_memory_gib
+        real(dp), intent(in) :: tol
+        integer, intent(out) :: st
+        logical :: free
+        call ideal_map_solve_auto(map, tol, max_iterations, report, st, &
+            map_memory_gib*1024.0_dp**3, free, reference_gradient=reference)
+        if (free .and. .not. matrix_free_announced) then
+            print '(a,f8.2,a)', 'map solve: matrix-free Newton (direct path estimated at', &
+                IDEAL_MAP_DIRECT_BYTES_PER_NONZERO*real(ideal_map_hessian_nonzeros(map), dp) &
+                /1024.0_dp**3, ' GiB)'
+            matrix_free_announced = .true.
+        end if
     end subroutine
 
     real(dp) function free_gradient()

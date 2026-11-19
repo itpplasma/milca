@@ -2,13 +2,14 @@ program test_ideal_map_matrix_free
     ! Matrix-free Newton against the direct ideal_map_solve on the Landreman
     ! nested seed (P3, 8 boundary nodes, toroidal modes 2): the Hessian
     ! diagonal from the stored point Hessians equals that of the assembled
-    ! matrix to roundoff, and both solves reach the gradient tolerance with
+    ! matrix to roundoff, the nonzero estimate of the memory-based selection
+    ! equals its pattern, and both solves reach the gradient tolerance with
     ! the same energy to 1e-10.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_ideal_map, only: ideal_map_t, ideal_map_hessian, ideal_map_solve, &
         ideal_map_solve_report_t, ideal_map_hessian_store_t, ideal_map_store_hessians
     use milca_ideal_map_matrix_free, only: ideal_map_solve_matrix_free, &
-        ideal_map_hessian_diagonal
+        ideal_map_hessian_diagonal, ideal_map_hessian_nonzeros
     use milca_ideal_seed_3d, only: ideal_seed_3d_init, ideal_seed_disk_mesh
     use milca_equilibrium_3d_driver, only: equilibrium_3d_driver_t, nested_integer_driver
     use milca_nested_oracles, only: nested_oracle_t
@@ -60,6 +61,22 @@ program test_ideal_map_matrix_free
     error = maxval(abs(dg - dm))/maxval(abs(dg))
     print '(a,es10.3)', 'Hessian diagonal: max relative difference ', error
     if (.not. error < 1e-12_dp) error stop 'Hessian diagonal differs'
+    print '(a,2i10)', 'Hessian nonzeros: assembled, estimated', h%rowptr(size(h%rowptr)) - 1, &
+        ideal_map_hessian_nonzeros(driver%map)
+    if (ideal_map_hessian_nonzeros(driver%map) /= h%rowptr(size(h%rowptr)) - 1) &
+        error stop 'Hessian nonzero estimate differs from the assembled pattern'
+    block
+        type(ideal_map_t) :: angled
+        type(csr_matrix_t) :: ha
+        call ideal_seed_3d_init(angled, driver%seed, mesh, driver%boundary, driver%nfp, &
+            driver%toroidal_flux, driver%profile, status, angle_mpol=2)
+        if (status /= 0) error stop 'seed with field angle'
+        call ideal_map_hessian(angled, angled%x, ha)
+        print '(a,2i10)', 'with field angle: assembled, estimated', &
+            ha%rowptr(size(ha%rowptr)) - 1, ideal_map_hessian_nonzeros(angled)
+        if (ideal_map_hessian_nonzeros(angled) /= ha%rowptr(size(ha%rowptr)) - 1) &
+            error stop 'Hessian nonzero estimate differs with field angle'
+    end block
     direct = driver%map; free = driver%map
     call ideal_map_solve(direct, 1.0e-8_dp, 200, rd, status)
     if (status /= 0) error stop 'direct solve'
@@ -81,8 +98,9 @@ contains
             call ideal_map_solve_matrix_free(driver%map, 1.0e-8_dp, 200, rd, status)
         end if
         call system_clock(c1)
-        print '(a,a,a,i8,a,i4,a,es22.14,a,es10.3,a,i6,a,f8.2)', trim(only), &
-            ': unknowns', '', driver%map%nred, ' iterations', rd%iterations, ' energy', &
+        print '(a,a,a,i8,a,i10,a,i4,a,es22.14,a,es10.3,a,i6,a,f8.2)', trim(only), &
+            ': unknowns', '', driver%map%nred, ' Hessian nonzeros', &
+            ideal_map_hessian_nonzeros(driver%map), ' iterations', rd%iterations, ' energy', &
             rd%energy, ' gradient', rd%gradient, ' CG', rd%krylov_iterations, ' seconds', &
             real(c1 - c0)/rate
     end subroutine
