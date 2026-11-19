@@ -458,6 +458,15 @@ axisymmetric Γ_c.
   inside Γ_c, with an n = 0 closure of 0.1 T m each; with it all 21 groups
   close to 1e-8 T m. A clearance squeezed between plasma and coils leaves a
   thin shell, and the mesh then takes cells of at most twice the narrowest gap.
+- Shell reference. The shell map is the harmonic extension of the Γ_p
+  displacement from its reference, so a reference Γ_p far from the guess
+  carries that displacement across the shell. With the plasma's elliptic
+  reference disc as the shell's Γ_p, the DIII-D guess (triangular, 4 to 8 cm
+  from Γ_c inboard) started folded. The shell therefore has its own reference
+  (`ideal_fb_init(..., plasma_points=)`): the mesh is built with Γ_p on the
+  mean section of the guess, and the plasma cells get the elliptic reference
+  through the radial map y ↦ c + (y − c) ρ_e(α)/ρ_s(α) between the section
+  ρ_s and the ellipse ρ_e at polar angle α (`fb_nested_mesh`).
 - Plasma current. The multivalued part c θ/2π continues outside Γ_c as an
   axisymmetric filament of unit circulation at the reference centre
   (`filament_basis_t`), so that the traces are those of c times its field plus

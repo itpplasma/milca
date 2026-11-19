@@ -144,7 +144,8 @@ The coupling surface Gamma_c is an axisymmetric curve that keeps
 and stays inside the grid and off the coils that lie inside it (grid nodes
 where the curl of the field is not small). Where they are closer, the
 clearance shrinks to 70 % of the room. The reference disc of the frozen field
-is the ellipse inscribed in the mean bounding box of the sections.
+is the ellipse inscribed in the mean bounding box of the sections, and the
+shell's reference Γ_p is the mean section of the guess.
 
 A prescribed current fixes the circulation c = mu0 I(1) of the vacuum field.
 Before the first free-boundary solve the interior of the guess is brought to
