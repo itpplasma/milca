@@ -30,6 +30,16 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `prescribe_current` | match the enclosed toroidal current `current(k)` (A, coefficients of s^k) instead of keeping `iota` | false |
 | `max_current_iterations`, `current_tolerance` | Newton steps on iota and the largest iota increment of the last step; with automatic resolution at most a tenth of the active `fourier_tolerance`, `mesh_tolerance` and `iota_tolerance` | 30, 1e-5 |
 | `iota_nodes`, `iota_tolerance` | Chebyshev-Gauss surfaces of the matched iota polynomial, 2 to 32, or -1 to raise them from 6 under error control | -1, 1e-4 |
+| `gamma` | adiabatic index; 0 holds the pressure profile fixed, gamma > 0 holds the mass profile fixed and `pressure` is then VMEC's mass profile (see below) | 0 |
+| `adiabatic_degree` | Legendre degree of the projected V'(s) with `gamma > 0` | 8 |
+
+With `gamma > 0` the pressure follows the volume of each flux surface,
+p(s) = K(s)/V'(s)^gamma with V' = dV/ds, and the mass K is fixed by VMEC's
+normalisation K(s) = mu0 P(s) (2 pi |phiedge| R00)^gamma, P the `pressure`
+profile and R00 = `rbc(0,0)`, so that P is the pressure of a state with
+V' = 2 pi |phiedge| R00
+([ideal-map-adiabatic](ideal-map-adiabatic.md)). `pressure_axis` and
+`betatotal` are then those of the solved state.
 
 A `hermite` profile is C1 and cubic on each knot interval; the iota integral
 from the axis is exact on it. Any other profile form (VMEC's splines, sums of

@@ -47,6 +47,7 @@ overview and [scope and design principles](scope.md) for the long-term aims.
   [verification harness](equilibrium-harness.md)
 - [Ideal frozen-in map equilibrium](ideal-map-3d.md),
   [boundary and profile initializer](ideal-seed-3d.md),
+  [adiabatic pressure](ideal-map-adiabatic.md),
   [GLL map experiment](ideal-map-gll.md)
 - Free boundary: [formulation and proof obligations](free-boundary-theory.md),
   [map-lane free boundary](ideal-free-boundary.md),
