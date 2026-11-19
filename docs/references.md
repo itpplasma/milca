@@ -244,9 +244,9 @@ only.
   against SIESTA (boundary given analytically, eq. 3-1), free-boundary CFQS
   against published HINT results at ⟨β⟩ ≈ 1.4–1.6%, helical-core tokamak and
   RFP quasi-single-helicity states.
-- [Balkovic et al., arXiv:2607.27135](https://arxiv.org/abs/2607.27135),
-  "SPECTRE: A robust solver for 3D equilibria with arbitrary topology"
-  (29 Jul 2026). Abstract and section list read: MRxMHD, fixed and free
+- [Balkovic et al., Plasma Phys. Control. Fusion 68, 115021 (2026)](https://doi.org/10.1088/1361-6587/aebef8),
+  "SPECTRE: a robust solver for 3D equilibria with arbitrary topology";
+  preprint [arXiv:2607.27135](https://arxiv.org/abs/2607.27135) (29 Jul 2026). Abstract and section list read: MRxMHD, fixed and free
   boundary, QA vacuum, free-boundary stellarator vacuum, classical-stellarator
   finite-β free boundary, rotating-ellipse free boundary, finite-β QI with a
   core island compared with HINT.

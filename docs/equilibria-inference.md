@@ -85,7 +85,7 @@ with different assumptions:
   in the poloidal plane times toroidal Fourier modes, no nested-surface
   assumption.
 - HINT/HINT2 and PIES are earlier nonnested full-pressure iterations.
-- SPEC and [SPECTRE](https://arxiv.org/abs/2607.27135) solve the multi-region
+- SPEC and [SPECTRE](https://doi.org/10.1088/1361-6587/aebef8) solve the multi-region
   relaxed MHD (MRxMHD) model, which has stepped pressure and a different
   constraint set.
 - ANIMEC ([Cooper et al., CPC 180, 1524, 2009](https://doi.org/10.1016/j.cpc.2009.04.006))
