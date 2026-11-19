@@ -117,6 +117,9 @@ module milca_ideal_free_boundary
     ! Largest roundoff asymmetry of the last assembled Hessian before
     ! symmetrize_csr: relative to its largest entry and to the row scales.
     real(dp), save, protected, public :: assembly_asymmetry(2) = 0
+    ! Smallest plasma and shell Jacobian ratios of the last ideal_fb_gradient
+    ! (verbose reports of which map is crushed).
+    real(dp), save :: last_jacobian(2) = 0
 
     ! External field of real Fourier harmonic k (n = k*nfp) at (R, Z):
     ! B = bcos cos(n phi) + bsin sin(n phi), components (B_R, B_phi, B_Z).
@@ -1945,6 +1948,7 @@ contains
         if (allocated(fb%shift)) grad = grad - fb%shift
         if (present(lagrangian)) lagrangian = wp - ev - ec + sum(fb%lam*res)
         if (present(min_jacobian)) min_jacobian = min(minp, mins)
+        last_jacobian = [minp, mins]
     end subroutine
 
     subroutine ideal_fb_hessian(fb, rowptr, colidx, val)
@@ -5877,6 +5881,10 @@ contains
         real(dp), allocatable :: val(:), smat(:), grad(:), gtrial(:), w(:), diag(:)
         real(dp), allocatable :: shift(:), sol(:), s(:), x0(:, :, :), xs0(:, :, :)
         real(dp), allocatable :: phi0(:, :), lam0(:, :, :), hs(:), gp(:)
+        ! last accepted state with every Jacobian ratio above the barrier
+        ! activation
+        real(dp), allocatable :: xsafe(:, :, :), xssafe(:, :, :), phisafe(:, :)
+        real(dp), allocatable :: lamsafe(:, :, :)
         real(dp) :: energy, etrial, minjac, gnorm, gtrial_norm, predicted, delta, dmin
         real(dp) :: disp, rot, cap, sscale
         integer :: it, tries, st, nslide, n_pos, n_neg, i, p
@@ -5929,6 +5937,9 @@ contains
         if (st /= IDEAL_FB_OK) then
             status = IDEAL_FB_FOLDED; return
         end if
+        if (st == IDEAL_FB_OK .and. minjac >= fb%fold_threshold) then
+            xsafe = fb%plasma%x; xssafe = fb%xs; phisafe = fb%phi; lamsafe = fb%lam
+        end if
         do it = 0, max_iterations
             call ideal_fb_hessian(fb, rowptr, colidx, val)
             do i = 1, fb%n
@@ -5972,7 +5983,16 @@ contains
                 if (.not. factored) then
                     if (talk) print '(a,3i8,a,2i8)', '   inertia', opt%inertia, &
                         ' target', n_pos, n_neg
-                    status = IDEAL_FB_SOLVE_FAILED; exit
+                    status = IDEAL_FB_SOLVE_FAILED
+                    ! The inertia target is lost once a cell has crushed below
+                    ! the barrier activation: return the last state above it,
+                    ! from which Gamma_c can be re-placed.
+                    if (allocated(xsafe) .and. minjac < fb%fold_threshold) then
+                        fb%plasma%x = xsafe; fb%xs = xssafe; fb%phi = phisafe
+                        fb%lam = lamsafe
+                        status = IDEAL_FB_FOLDED
+                    end if
+                    exit
                 end if
                 call inertia_newton_solve(opt, solver, [-grad, (0.0_dp, i = 1, nslide)], &
                     sol, st)
@@ -5998,9 +6018,10 @@ contains
                         accepted = gtrial_norm < gnorm
                     end if
                 end if
-                if (talk) print '(a,i3,a,es9.2,a,es9.2,a,es12.4,a,es12.4,a,es9.2,a,i0,a,l2)', &
+                if (talk) print '(a,i3,a,es9.2,a,es9.2,a,es12.4,a,es12.4,a,es9.2,a,2es9.2,a,i0,a,l2)', &
                     '   try', tries, ' delta', delta, ' |s|', min(disp, cap), &
                     ' dE', etrial - energy, ' predicted', -predicted, ' min jac', minjac, &
+                    ' (plasma, shell)', last_jacobian, &
                     ' status ', st, ' accepted', accepted
                 if (accepted) exit
                 fb%plasma%x = x0; fb%xs = xs0; fb%phi = phi0; fb%lam = lam0
@@ -6008,6 +6029,9 @@ contains
             end do
             if (.not. accepted) exit
             grad = gtrial; energy = etrial
+            if (minjac >= fb%fold_threshold) then
+                xsafe = fb%plasma%x; xssafe = fb%xs; phisafe = fb%phi; lamsafe = fb%lam
+            end if
             report%iterations = it + 1
             report%step = min(disp, cap)
             report%min_jacobian = minjac

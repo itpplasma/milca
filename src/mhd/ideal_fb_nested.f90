@@ -514,7 +514,8 @@ contains
 
     subroutine fb_nested_layer_mesh(boundary, centre, axes, nodes, degree, layers, &
                                     distance, mesh, chain, positions, lines, line_t, &
-                                    status, plasma_cells, section, section_reference)
+                                    status, plasma_cells, section, section_reference, &
+                                    box, obstacles)
         !! Reference mesh of the plasma disc (the reference ellipse, nodes
         !! boundary nodes) and a layered shell around it for
         !! ideal_fb_init(positions, lines, line_t). Every Gamma_p chain node y_p
@@ -542,11 +543,16 @@ contains
         !! a chain node's ray then passes through the section point at its
         !! reference angle, where the transferred map puts that node
         real(dp), intent(in), optional :: section_reference(:, :)
+        !> grid box (rmin, rmax, zmin, zmax) and coil points: with them the
+        !! offset is local, half the gap of the hull point on each ray to the
+        !! coils and the box edge, at most distance, smoothed over 5 nodes,
+        !! so the shell is thin only where the coils or the grid force it
+        real(dp), intent(in), optional :: box(4), obstacles(:, :)
         type(gs_state_t) :: disc
         integer, allocatable :: ring(:), lattice(:, :), tri(:, :)
         real(dp), allocatable :: points(:, :), xc(:, :)
         real(dp) :: nu(2), delta, xp(2), tangent(2), alpha, t, area
-        real(dp), allocatable :: outline(:, :), hull(:, :)
+        real(dp), allocatable :: outline(:, :), hull(:, :), dray(:, :), local_d(:)
         real(dp) :: origin(2), lo, hi
         integer :: np, nring, nr, i, r, k, e, l, nloc, ncell, ntri, a, b, next
         integer :: local(2, 10), corner(2, 3), j
@@ -577,24 +583,32 @@ contains
         end if
         call convex_hull(outline, hull)
         origin = sum(outline, dim=2)/size(outline, 2)
-        allocate (xc(2, nring))
+        allocate (xc(2, nring), dray(2, nring), local_d(nring))
         do i = 1, nring
             alpha = atan2((disc%points(2, ring(i)) - centre(2))/axes(2), &
                 (disc%points(1, ring(i)) - centre(1))/axes(1))
             xp = section_point(boundary, centre, axes, alpha)
             if (present(section) .and. present(section_reference)) &
                 xp = outline_at(alpha)
-            tangent = (xp - origin)/norm2(xp - origin)
-            lo = 0; hi = norm2(xp - origin) + 2*distance + maxval(abs(outline - &
-                spread(origin, 2, size(outline, 2))))
-            do k = 1, 200
-                if (hull_distance(hull, origin + (lo + hi)/2*tangent) < distance) then
-                    lo = (lo + hi)/2
-                else
-                    hi = (lo + hi)/2
-                end if
-            end do
-            xc(:, i) = origin + lo*tangent
+            dray(:, i) = (xp - origin)/norm2(xp - origin)
+            ! local gap of the hull point on this ray
+            local_d(i) = distance
+            if (present(box) .and. present(obstacles)) then
+                tangent = origin + ray_to(dray(:, i), 0.0_dp)*dray(:, i)
+                lo = min(tangent(1) - box(1), box(2) - tangent(1), &
+                    tangent(2) - box(3), box(4) - tangent(2))
+                do k = 1, size(obstacles, 2)
+                    lo = min(lo, norm2(obstacles(:, k) - tangent))
+                end do
+                local_d(i) = min(distance, lo/2)
+            end if
+        end do
+        ! smoothed over 5 neighbouring nodes, never above the local value
+        local_d = min(local_d, (cshift(local_d, -2) + cshift(local_d, -1) + local_d &
+            + cshift(local_d, 1) + cshift(local_d, 2))/5)
+        if (.not. all(local_d > 0)) return
+        do i = 1, nring
+            xc(:, i) = origin + ray_to(dray(:, i), local_d(i))*dray(:, i)
         end do
         ! Lattice (chain node, layer node) -> mesh node; layer 0 is Gamma_p.
         allocate (lattice(nring, 0:nr), points(2, np + nring*nr))
@@ -675,6 +689,23 @@ contains
         chain = disc%points(:, ring)
         status = IDEAL_FB_OK
     contains
+        real(dp) function ray_to(e, offset) result(r)
+            ! distance along the ray e from origin to dist(x, hull) = offset
+            real(dp), intent(in) :: e(2), offset
+            real(dp) :: low, high
+            integer :: m
+            low = 0; high = 2*offset + 2*maxval(abs(outline - &
+                spread(origin, 2, size(outline, 2)))) + 1
+            do m = 1, 200
+                if (hull_distance(hull, origin + (low + high)/2*e) <= offset) then
+                    low = (low + high)/2
+                else
+                    high = (low + high)/2
+                end if
+            end do
+            r = low
+        end function
+
         function outline_at(angle) result(y)
             ! section point at a reference angle, linear between vertices
             real(dp), intent(in) :: angle

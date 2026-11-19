@@ -411,9 +411,11 @@ contains
         seed%profile = profile
         if (shell_layers > 0) then
             call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
-                shell_layers, shell_distance, mesh, chain, shell_positions, &
+                shell_layers, coupling_margin*sqrt(fb_axes(1)*fb_axes(2)), mesh, chain, &
+                shell_positions, &
                 shell_lines, shell_t, local, plasma_cells=shell_cells, &
-                section=shell_section, section_reference=shell_section_reference)
+                section=shell_section, section_reference=shell_section_reference, &
+                box=shell_box, obstacles=shell_obstacles)
             if (local /= 0) call fail('the free-boundary mesh failed')
             call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
                 0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
