@@ -1047,6 +1047,42 @@ one dense factorisation of all nodes and species for the two lowest Legendre
 pair blocks and pair-block factorisations per node and species above them.
 `ntv_profile` selects it with a collision model on its fourth input line.
 
+`milca_dk_hp_energy` (`hp_energy_setup`, `hp_energy_coefficients`) solves the
+same equation with the spectral-element angular discretisation of `dk_hp`
+instead of the Legendre-Fourier one, with the Lorentz, test-particle and full
+models. Each speed node has its own mesh and geometry, so that at finite orbit
+width (`milca_ntv_orbit_geometry`) every energy has its own orbit classes.
+All velocity-space couplings act at the same physical point (theta, xi at the
+orbit point of psi*). The phase-space measure m(x, theta, xi) of the orbits
+enters the speed integral expanded in the speed basis, sum_p phi_p(x) m_p,
+which gives the symmetric weak form
+
+    sum_p sum_k' E^(p)(k, k') V_{p,k}^T W_p V_{p,k'} h_k',
+
+E^(p) the energy rows with phi_p inside the speed integral, W_p the weights of
+the mass quadrature on the mesh of node p and V_{p,k} the interpolant of node
+k at those points (`hp_locate`). The field-particle part uses the pitch
+moments of every node on theta lines common to all meshes and loads that
+integrate the measure of node p over its own rows, with P_l(xi) of l >= 1
+less its mean in that measure along the line: the orbit measure depends on
+xi, and without the shift the l >= 1 field terms would change the density
+in proportion to the orbit width (8e-6 of the density moment at mass factor
+4e-3 in `test_ntv_orbit_geometry energy_conservation`). On one mesh and geometry
+V^T W V is the mass M, and the energy part is the Legendre kernel's energy
+rows times M. Density is conserved on any set of meshes and geometries up to
+the dropped x = 0 node, -sum_k' a_0(1, k') <h_k'>_p, because the interpolant
+reproduces constants at every point and the field loads of l >= 1 have zero
+mean. Energy and momentum are conserved by the
+full operator in the thin limit, the latter to the discretisation accuracy of
+xi on curved rows; at finite width the speed dependence of the measure leaves
+defects that fall with the orbit width. The system is solved by GMRES, which
+minimises the residual weighted by the speed mass v_a d3_k. It is
+right-preconditioned by a coarse Galerkin correction (per node the low
+pitch-theta harmonics, those near the perturbation harmonics and functions of
+the stream function) followed by three symmetric block Gauss-Seidel passes
+over the speed nodes with sparse factors of the node blocks; the field part
+enters only the coarse matrix.
+
 ## Axisymmetric Boozer oracle adapter
 
 `milca_ntv_geometry` adapts an axisymmetric Boozer surface to the existing

@@ -286,6 +286,7 @@ target_sources(milca_continuum PRIVATE src/continuum/vlasov_response.f90
     src/generated/milca_dk_mono_leaves.f90 src/continuum/dk_mono.f90
     src/continuum/dk_mono_thermal.f90
     src/generated/milca_dk_hp_leaves.f90 src/continuum/dk_hp.f90
+    src/continuum/dk_hp_energy.f90
     src/generated/milca_dk_ntv_leaves.f90 src/continuum/dk_ntv.f90
     src/continuum/dk_surface.f90
     src/generated/milca_dk_collop_leaves.f90 src/continuum/dk_collop.f90
@@ -1148,7 +1149,7 @@ milca_test_labels(dk_ntv_line fast CLASSES continuum TARGETS test_dk_ntv)
 add_executable(test_dk_collop test/test_dk_collop.f90)
 target_link_libraries(test_dk_collop PRIVATE milca)
 foreach(check maxwellian_null rates jvp zero_jvp fp_moments conservation self_adjoint conservation_pair
-        exchange_pair)
+        exchange_pair weighted_blocks)
     add_test(NAME dk_collop_${check} COMMAND test_dk_collop ${check})
     milca_test_labels(dk_collop_${check} fast CLASSES continuum TARGETS test_dk_collop)
 endforeach()
@@ -1187,9 +1188,17 @@ milca_test_labels(dk_mono_neo2_tok02 fast CLASSES continuum equilibrium
 add_executable(test_dk_hp test/test_dk_hp.f90)
 target_link_libraries(test_dk_hp PRIVATE milca)
 foreach(check reference onsager collisionless banana pfirsch_schlueter estimate
-        ntv_reference ntv_superbanana_plateau ntv_one_over_nu ntv_rotation)
+        ntv_reference ntv_superbanana_plateau ntv_one_over_nu ntv_rotation
+        terms_recombine line_moments transfer energy_lorentz energy_density)
     add_test(NAME dk_hp_${check} COMMAND test_dk_hp ${check})
     milca_test_labels(dk_hp_${check} fast CLASSES continuum TARGETS test_dk_hp)
+endforeach()
+# Minutes each: nine speed nodes of fine meshes and the Legendre reference;
+# energy_full and collision_identities with two species.
+foreach(check energy_test_particle energy_two_mesh energy_iterations energy_full
+        collision_identities)
+    add_test(NAME dk_hp_${check} COMMAND test_dk_hp ${check})
+    milca_test_labels(dk_hp_${check} slow CLASSES continuum TARGETS test_dk_hp)
 endforeach()
 add_executable(test_dk_pitch test/test_dk_pitch.f90)
 target_link_libraries(test_dk_pitch PRIVATE milca)
@@ -1943,6 +1952,17 @@ add_executable(test_ntv_orbit_geometry test/test_ntv_orbit_geometry.f90)
 target_link_libraries(test_ntv_orbit_geometry PRIVATE milca_ntv_geometry)
 add_test(NAME ntv_orbit_geometry_thin COMMAND test_ntv_orbit_geometry)
 milca_test_labels(ntv_orbit_geometry_thin fast CLASSES apps TARGETS test_ntv_orbit_geometry)
+add_test(NAME ntv_orbit_geometry_thin_negative COMMAND test_ntv_orbit_geometry thin_negative)
+milca_test_labels(ntv_orbit_geometry_thin_negative fast CLASSES apps
+    TARGETS test_ntv_orbit_geometry)
+# The energy-coupled kernel on orbit geometries: a geometry and mesh per
+# speed node, seconds to minutes each.
+foreach(check energy_lorentz energy_manufactured energy_width energy_conservation
+        energy_electrons)
+    add_test(NAME ntv_orbit_geometry_${check} COMMAND test_ntv_orbit_geometry ${check})
+    milca_test_labels(ntv_orbit_geometry_${check} slow CLASSES apps
+        TARGETS test_ntv_orbit_geometry)
+endforeach()
 add_executable(test_ntv_device test/test_ntv_device.f90)
 target_link_libraries(test_ntv_device PRIVATE milca_ntv_geometry)
 add_test(NAME ntv_device COMMAND test_ntv_device)

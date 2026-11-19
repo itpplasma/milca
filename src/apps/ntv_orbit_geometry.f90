@@ -18,7 +18,8 @@
 !! carry omega_E = pre = 0 (the orbit's zeta_dot holds both). The drive and
 !! torque weights are those of the full drift weight (wsign = +1) with b at
 !! the orbit point; the perturbation harmonics are taken at s* (first stage).
-!! Pitch-angle scattering acts at fixed psi* (first stage of collisions).
+!! Collisions act at fixed psi* (first stage): pitch-angle scattering here,
+!! energy scattering and the field-particle part in milca_dk_hp_energy.
 module milca_ntv_orbit_geometry
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, boozer_field_t, boozer_field, boozer_field_eval, &

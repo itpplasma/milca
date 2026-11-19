@@ -31,6 +31,7 @@ module milca_dk_hp
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortnum_quadrature, only: gauss_legendre, gauss_lobatto_legendre
     use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
+    use fortnum_special_legendre, only: legendre_p
     use fortsparse, only: csc_t, csc_z_t, csc_from_triplet, sparse_solver_t, sparse_factor, &
         sparse_solve_op, sparse_destroy, fortsparse_status_t, status_ok, &
         FORTSPARSE_OP_NORMAL, FORTSPARSE_OP_TRANSPOSE, FORTSPARSE_BACKEND_NATIVE, &
@@ -41,8 +42,12 @@ module milca_dk_hp
     private
     public :: hp_geometry_t, hp_field_t, hp_field, hp_mesh_t, hp_default_mesh, hp_system_t, &
         hp_assemble, hp_factor, hp_solve, hp_coefficients, hp_free, hp_estimate, &
-        hp_refine, hp_operator_t, hp_ntv_kernel, hp_ntv_estimate
-    integer, parameter, public :: HP_OK = 0, HP_BAD_INPUT = 1, HP_SINGULAR = 2
+        hp_refine, hp_operator_t, hp_ntv_kernel, hp_ntv_estimate, hp_ntv_factor_t, &
+        hp_ntv_factor, hp_ntv_solve, hp_ntv_free, hp_terms_t, hp_ntv_terms, &
+        hp_node_matrix, hp_mass, hp_mesh_join, hp_locate, hp_lines_t, hp_lines, &
+        hp_line_ops
+    integer, parameter, public :: HP_OK = 0, HP_BAD_INPUT = 1, HP_SINGULAR = 2, &
+        HP_NO_CONVERGENCE = 3
 
     real(dp), parameter :: pi = 4*atan(1.0_dp)
 
@@ -143,11 +148,15 @@ module milca_dk_hp
     !! loc maps local element nodes to unknowns.
     !> Equilibrated sparse factor of an NTV system: A, its row and column
     !> scales and the factor of R A C.
-    type :: ntv_factor_t
+    type :: hp_ntv_factor_t
         type(csc_z_t) :: a
         real(dp), allocatable :: rs(:), cs(:)
         type(sparse_solver_t) :: solver
     end type
+
+    interface hp_ntv_factor
+        module procedure factor_elements, factor_matrix
+    end interface
 
     type :: hp_system_t
         integer :: n = 0
@@ -158,6 +167,33 @@ module milca_dk_hp
         type(csc_t) :: a
         type(sparse_solver_t) :: solver
         logical :: factored = .false.
+    end type
+
+    !> The NTV system of one mesh with its terms apart, so that systems at
+    !> other nu, v, omega_E and pre need no new quadrature. Element matrices
+    !> (column major, columns of the arrays): the streaming bracket s, pitch
+    !> scattering per unit nu c, the factor ph of -i n q, the mass m in the
+    !> measure and the factor pr of i n pre/v. On the n unknowns: the drive
+    !> load3 without its 1/v, the torque weight load4, the radial drive load1
+    !> of the axisymmetric problem and the density weight; theta and xi of
+    !> the nodes. With source_dlf10 the element matrices mir and ls give the
+    !> load (mir + nu ls) f_10 of f_10 on the same mesh. The quadrature of the
+    !> mass: angles q_theta(t), t = (column - 1) nq + i, and at each the points
+    !> q_xi(j, t), j = (row - 1) nq + i, with weights q_w (measure included),
+    !> nq = 2 p + 3; m is the sum of q_w phi_a phi_b over them.
+    type :: hp_terms_t
+        integer :: n = 0, p = 0
+        real(dp) :: norm = 0
+        integer, allocatable :: loc(:, :)
+        real(dp), allocatable :: s(:, :), c(:, :), ph(:, :), m(:, :), pr(:, :), load1(:), &
+            density(:), theta(:), xi(:), q_theta(:), q_xi(:, :), q_w(:, :)
+        complex(dp), allocatable :: load3(:), load4(:), mir(:, :), ls(:, :)
+    end type
+
+    !> Angles theta with weights w, sum w = 2 pi, on which meshes of one
+    !> surface exchange pitch moments.
+    type :: hp_lines_t
+        real(dp), allocatable :: theta(:), w(:)
     end type
 
 contains
@@ -242,7 +278,7 @@ contains
     !> Element matrices, loads and the map of local nodes to unknowns:
     !! periodic in theta, the trapped nodes on theta_x (the X point) one
     !! unknown. mat holds each element matrix column major.
-    subroutine elements(f, mesh, op, sys, mat, status, f10)
+    subroutine elements(f, mesh, op, sys, mat, status, f10, terms)
         class(hp_geometry_t), intent(in) :: f
         type(hp_mesh_t), intent(in) :: mesh
         type(hp_operator_t), intent(in) :: op
@@ -251,55 +287,51 @@ contains
         integer, intent(out) :: status
         ! f_10 per unit speed on the unknowns of the same mesh (source_dlf10).
         real(dp), intent(in), optional :: f10(:)
-        integer :: p, n_col, n_row, n_lev, n_th, n_jr, ec, er, e, i, j, a1, a2, &
-            n_loc, j_lo, j_hi, n_el, c
+        ! The split of mat and the f_10 operators (never together with f10).
+        type(hp_terms_t), intent(inout), optional :: terms
+        integer :: p, n_col, n_row, n_th, ec, er, e, a1, a2, n_loc, n_el, c, k, i
         integer, allocatable :: dof(:, :), curve_kind(:)
         real(dp), allocatable :: curve_val(:), node(:), wn(:), xq(:), wq(:), xi_n(:, :), &
-            xi_q(:, :)
+            xi_q(:, :), parts(:, :), qx(:, :), qw(:, :)
+        complex(dp), allocatable :: f10_ops(:, :)
         real(dp) :: th_a, th, d
 
         status = HP_BAD_INPUT
         p = mesh%p
         if (p < 1 .or. op%nu <= 0 .or. op%k == 0) return
         n_col = size(mesh%theta) - 1
-        n_lev = size(mesh%lam)
-        ! Curves from xi = -1 to xi = 1: passing levels (sigma = -1), the
-        ! trapped rows, passing levels (sigma = +1).
-        curve_val = [mesh%lam(1:n_lev - 1), mesh%zeta, mesh%lam(n_lev - 1:1:-1)]
-        curve_kind = [(-1, i=1, n_lev - 1), (0, i=1, size(mesh%zeta)), &
-            (1, i=1, n_lev - 1)]
+        call row_curves(mesh, curve_kind, curve_val)
         n_row = size(curve_val) - 1
         n_th = n_col*p
-        n_jr = n_row*p
-        j_lo = (n_lev - 1)*p
-        j_hi = (n_lev - 1 + size(mesh%zeta) - 1)*p
-        allocate (dof(0:n_th - 1, 0:n_jr))
-        sys%n = 0
-        do j = 0, n_jr
-            do i = 0, n_th - 1
-                if (i == 0 .and. j > j_lo .and. j <= j_hi) then
-                    dof(i, j) = dof(0, j_lo)
-                else
-                    sys%n = sys%n + 1
-                    dof(i, j) = sys%n
-                end if
-            end do
-        end do
+        call numbering(mesh, dof, sys%n)
 
         n_loc = (p + 1)**2
         n_el = n_col*n_row
         allocate (sys%loc(n_loc, n_el), sys%load(n_loc, 4, n_el), &
             sys%dens(n_loc, n_el), mat(n_loc**2, n_el))
+        if (present(terms)) then
+            allocate (terms%s(n_loc**2, n_el), terms%c(n_loc**2, n_el), &
+                terms%ph(n_loc**2, n_el), terms%m(n_loc**2, n_el), &
+                terms%pr(n_loc**2, n_el), terms%theta(sys%n), terms%xi(sys%n))
+            if (op%source_dlf10) allocate (terms%mir(n_loc**2, n_el), &
+                terms%ls(n_loc**2, n_el))
+            allocate (terms%q_theta(n_col*(2*p + 3)), terms%q_xi(n_row*(2*p + 3), &
+                n_col*(2*p + 3)), terms%q_w(n_row*(2*p + 3), n_col*(2*p + 3)))
+        end if
         allocate (node(p + 1), wn(p + 1), xq(2*p + 3), wq(2*p + 3))
         call gauss_lobatto_legendre(p + 1, node, wn)
         call gauss_legendre(2*p + 3, xq, wq)
         ! Column by column: every row curve once at the column's nodes and
         ! quadrature angles, shared by the elements above and below it.
         !$omp parallel do default(shared) schedule(dynamic) &
-        !$omp private(e, ec, er, a1, a2, c, th_a, th, d, xi_n, xi_q)
+        !$omp private(e, ec, er, a1, a2, c, k, th_a, th, d, xi_n, xi_q, parts, f10_ops, qx, qw)
         do ec = 1, n_col
             allocate (xi_n(n_row + 1, p + 1), xi_q(n_row + 1, 2*p + 3))
+            if (present(terms)) allocate (parts(n_loc**2, 5), f10_ops(n_loc**2, 2), &
+                qx(2*p + 3, 2*p + 3), qw(2*p + 3, 2*p + 3))
             th_a = (mesh%theta(ec + 1) - mesh%theta(ec))/2
+            if (present(terms)) terms%q_theta((ec - 1)*(2*p + 3) + 1:ec*(2*p + 3)) = &
+                mesh%theta(ec) + th_a*(1 + xq)
             do c = 1, n_row + 1
                 do a1 = 1, p + 1
                     th = mesh%theta(ec) + th_a*(1 + node(a1))
@@ -318,7 +350,34 @@ contains
                             (er - 1)*p + a2)
                     end do
                 end do
-                if (present(f10)) then
+                if (present(terms)) then
+                    call element(f, mesh, op, xi_n(er:er + 1, :), xi_q(er:er + 1, :), &
+                        ec, sys%load(:, :, e), sys%dens(:, e), mat(:, e), parts=parts, &
+                        f10_ops=f10_ops, qxi=qx, qw=qw)
+                    terms%q_xi((er - 1)*(2*p + 3) + 1:er*(2*p + 3), (ec - 1)*(2*p + 3) &
+                        + 1:ec*(2*p + 3)) = transpose(qx)
+                    terms%q_w((er - 1)*(2*p + 3) + 1:er*(2*p + 3), (ec - 1)*(2*p + 3) &
+                        + 1:ec*(2*p + 3)) = transpose(qw)
+                    terms%s(:, e) = parts(:, 1)
+                    terms%c(:, e) = parts(:, 2)
+                    terms%ph(:, e) = parts(:, 3)
+                    terms%m(:, e) = parts(:, 4)
+                    terms%pr(:, e) = parts(:, 5)
+                    if (op%source_dlf10) then
+                        terms%mir(:, e) = f10_ops(:, 1)
+                        terms%ls(:, e) = f10_ops(:, 2)
+                    end if
+                    ! Each column owns its first p node angles, so every
+                    ! unknown is written by one thread.
+                    do a2 = 0, p
+                        do a1 = 0, p - 1
+                            k = sys%loc(1 + a1 + (p + 1)*a2, e)
+                            terms%theta(k) = mesh%theta(ec) + th_a*(1 + node(a1 + 1))
+                            terms%xi(k) = xi_n(er, a1 + 1) + (xi_n(er + 1, a1 + 1) &
+                                - xi_n(er, a1 + 1))*(1 + node(a2 + 1))/2
+                        end do
+                    end do
+                else if (present(f10)) then
                     call element(f, mesh, op, xi_n(er:er + 1, :), xi_q(er:er + 1, :), &
                         ec, sys%load(:, :, e), sys%dens(:, e), mat(:, e), f10(sys%loc(:, e)))
                 else
@@ -327,6 +386,7 @@ contains
                 end if
             end do
             deallocate (xi_n, xi_q)
+            if (present(terms)) deallocate (parts, f10_ops, qx, qw)
         end do
         !$omp end parallel do
         allocate (sys%drive(sys%n, 4), sys%density(sys%n))
@@ -342,6 +402,43 @@ contains
         sys%norm = sum(sys%density)
         status = HP_OK
     end subroutine elements
+
+    !> The row curves from xi = -1 to xi = 1: passing levels (sigma = -1),
+    !> the trapped rows, passing levels (sigma = +1).
+    pure subroutine row_curves(mesh, kind, val)
+        type(hp_mesh_t), intent(in) :: mesh
+        integer, allocatable, intent(out) :: kind(:)
+        real(dp), allocatable, intent(out) :: val(:)
+        integer :: n_lev, i
+        n_lev = size(mesh%lam)
+        val = [mesh%lam(1:n_lev - 1), mesh%zeta, mesh%lam(n_lev - 1:1:-1)]
+        kind = [(-1, i=1, n_lev - 1), (0, i=1, size(mesh%zeta)), (1, i=1, n_lev - 1)]
+    end subroutine row_curves
+
+    !> The unknown of node (i, j), i the node angle of the period and j the
+    !> row node: the trapped nodes on theta_x (i = 0) are one unknown.
+    pure subroutine numbering(mesh, dof, n)
+        type(hp_mesh_t), intent(in) :: mesh
+        integer, allocatable, intent(out) :: dof(:, :)
+        integer, intent(out) :: n
+        integer :: n_th, n_jr, j_lo, j_hi, i, j
+        n_th = (size(mesh%theta) - 1)*mesh%p
+        j_lo = (size(mesh%lam) - 1)*mesh%p
+        j_hi = j_lo + (size(mesh%zeta) - 1)*mesh%p
+        n_jr = j_lo + j_hi
+        allocate (dof(0:n_th - 1, 0:n_jr))
+        n = 0
+        do j = 0, n_jr
+            do i = 0, n_th - 1
+                if (i == 0 .and. j > j_lo .and. j <= j_hi) then
+                    dof(i, j) = dof(0, j_lo)
+                else
+                    n = n + 1
+                    dof(i, j) = n
+                end if
+            end do
+        end do
+    end subroutine numbering
 
     !> Real system of the axisymmetric monoenergetic problem, b.grad theta =
     !! kappa b; drives 1 (radial) and 2 (parallel).
@@ -392,7 +489,8 @@ contains
     !> torque functional) and density weights.
     !> xi_n, xi_q: xi of the element's lower and upper row curve at its nodal
     !> and quadrature angles.
-    subroutine element(f, mesh, op, xi_n, xi_q, ec, load, dens, s, f10)
+    subroutine element(f, mesh, op, xi_n, xi_q, ec, load, dens, s, f10, parts, f10_ops, &
+            qxi, qw)
         class(hp_geometry_t), intent(in) :: f
         type(hp_mesh_t), intent(in) :: mesh
         type(hp_operator_t), intent(in) :: op
@@ -401,7 +499,13 @@ contains
         complex(dp), intent(out) :: load(:, :), s(:)
         real(dp), intent(out) :: dens(:)
         real(dp), intent(in), optional :: f10(:)
-        integer :: p, nq, q1, q2, a1, a2, ia, ic, n_loc, j
+        ! The terms of s apart (bracket, collide, phase, mass, precess) and
+        ! the operators mir and ls that f10 enters the drive with.
+        real(dp), intent(out), optional :: parts(:, :)
+        complex(dp), intent(out), optional :: f10_ops(:, :)
+        ! xi and weight (measure included) of the quadrature point (q1, q2).
+        real(dp), intent(out), optional :: qxi(:, :), qw(:, :)
+        integer :: p, nq, q1, q2, a1, a2, ia, ic, n_loc, j, lo, hi
         real(dp), allocatable :: node(:), wn(:), xq(:), wq(:), phi(:, :), dphi(:, :), &
             b_ab(:), d_ab(:), da(:), db_(:), psi(:, :), psi1(:)
         real(dp) :: th, th_a, xi_lo, xi_hi, xi, xi_b, &
@@ -422,6 +526,8 @@ contains
             call lagrange_deriv_weights(p + 1, xq(q1), node, dphi(:, q1))
         end do
         s = 0; load = 0; dens = 0
+        if (present(parts)) parts = 0
+        if (present(f10_ops)) f10_ops = 0
         th_a = (mesh%theta(ec + 1) - mesh%theta(ec))/2
         ! Streaming as the bracket of the nodal interpolant of the stream
         ! function: the bracket is invariant under the element map and
@@ -446,6 +552,8 @@ contains
                 ww = wq(q1)*wq(q2)*th_a*xi_b
                 call f%point_source(th, xi, op, src, col, dr, de, den, phase, precess, drive, &
                     torque)
+                if (present(qxi)) qxi(q1, q2) = xi
+                if (present(qw)) qw(q1, q2) = ww*den
                 ! -i n q xi k + i (n/v)(omega_E + pre (1 + wsign xi^2)(cos - offset)/b)
                 loc_term = (0, 1)*op%n*(-op%q*phase + (op%omega_e*den + op%pre*precess) &
                     /op%v)
@@ -465,10 +573,23 @@ contains
                         + wq(q1)*wq(q2)*b_ab*(psi_b*da(ic) - psi_a*db_(ic)) &
                         + ww*(col*d_ab*d_ab(ic) + loc_term*b_ab*b_ab(ic))
                 end do
+                if (present(parts)) then
+                    do ic = 1, n_loc
+                        lo = (ic - 1)*n_loc + 1
+                        hi = ic*n_loc
+                        parts(lo:hi, 1) = parts(lo:hi, 1) &
+                            + wq(q1)*wq(q2)*b_ab*(psi_b*da(ic) - psi_a*db_(ic))
+                        parts(lo:hi, 2) = parts(lo:hi, 2) + ww*col*d_ab*d_ab(ic)
+                        parts(lo:hi, 3) = parts(lo:hi, 3) + ww*phase*b_ab*b_ab(ic)
+                        parts(lo:hi, 4) = parts(lo:hi, 4) + ww*den*b_ab*b_ab(ic)
+                        parts(lo:hi, 5) = parts(lo:hi, 5) + ww*precess*b_ab*b_ab(ic)
+                    end do
+                end if
                 load(:, 1) = load(:, 1) + ww*dr*b_ab
                 load(:, 2) = load(:, 2) + ww*de*b_ab
                 load(:, 3) = load(:, 3) + ww*drive*src/op%v*b_ab
-                if (op%source_dpar .or. present(f10)) then
+                if (op%source_dpar .or. present(f10) .or. &
+                    (op%source_dlf10 .and. present(f10_ops))) then
                     call field_value(f, th, bb, bb_t)
                     call perturbed_sources(op, th, bb_t/bb, s_dpar, s_dlf, s_db)
                     if (op%source_dpar) load(:, 3) = load(:, 3) + ww*drive*s_dpar/op%v*b_ab
@@ -481,6 +602,18 @@ contains
                         load(:, 3) = load(:, 3) + ww*den*(op%k*bb**op%k_power/bb)*s_dlf &
                             *(1 - xi*xi)/2*f10_xi*b_ab &
                             + ww*den*(s_db/bb)*op%nu/2*(1 - xi*xi)*f10_xi*d_ab
+                    end if
+                    if (op%source_dlf10 .and. present(f10_ops)) then
+                        ! The same two terms as operators on f_10, the second
+                        ! per unit nu.
+                        do ic = 1, n_loc
+                            lo = (ic - 1)*n_loc + 1
+                            hi = ic*n_loc
+                            f10_ops(lo:hi, 1) = f10_ops(lo:hi, 1) + ww*den &
+                                *(op%k*bb**op%k_power/bb)*s_dlf*(1 - xi*xi)/2*b_ab*d_ab(ic)
+                            f10_ops(lo:hi, 2) = f10_ops(lo:hi, 2) + ww*den*(s_db/bb) &
+                                *(1 - xi*xi)/2*d_ab*d_ab(ic)
+                        end do
                     end if
                 end if
                 load(:, 4) = load(:, 4) + ww*torque*conjg(src)*b_ab
@@ -698,17 +831,17 @@ contains
         real(dp), intent(in), optional :: edges(:)
         real(dp), intent(out), optional :: dep(:)
         type(hp_system_t) :: sys
-        type(ntv_factor_t) :: fac
+        type(hp_ntv_factor_t) :: fac
         complex(dp), allocatable :: mat(:, :), x(:)
 
         call ntv_system(f, mesh, op, sys, mat, status)
         if (status /= HP_OK) return
         if (present(n_dof)) n_dof = sys%n
-        call ntv_factor(sys, mesh%p, mat, fac, status)
+        call hp_ntv_factor(sys, mesh%p, mat, fac, status)
         if (status /= HP_OK) return
         allocate (x(sys%n))
-        call ntv_solve(fac, sys%drive(:, 3), x, .false., status)
-        call ntv_free(fac)
+        call hp_ntv_solve(fac, sys%drive(:, 3), x, .false., status)
+        call hp_ntv_free(fac)
         if (status /= HP_OK) return
         r = real(sum(sys%drive(:, 4)*x), dp)
         if (present(edges) .and. present(dep)) call ntv_deposit(f, mesh, op, sys, x, edges, dep)
@@ -803,7 +936,7 @@ contains
         integer, intent(out), optional :: n_dof
         type(hp_system_t) :: sys, fine
         type(hp_mesh_t) :: mesh_fine
-        type(ntv_factor_t) :: fac
+        type(hp_ntv_factor_t) :: fac
         complex(dp), allocatable :: mat(:, :), matf(:, :), x(:), z(:), zf(:), xf(:), izf(:), &
             res(:)
         real(dp), allocatable :: node(:), node_f(:), w(:), lag(:, :)
@@ -813,12 +946,12 @@ contains
         call ntv_system(f, mesh, op, sys, mat, status)
         if (status /= HP_OK) return
         if (present(n_dof)) n_dof = sys%n
-        call ntv_factor(sys, mesh%p, mat, fac, status)
+        call hp_ntv_factor(sys, mesh%p, mat, fac, status)
         if (status /= HP_OK) return
         allocate (x(sys%n), z(sys%n))
-        call ntv_solve(fac, sys%drive(:, 3), x, .false., status)
-        if (status == HP_OK) call ntv_solve(fac, sys%drive(:, 4), z, .true., status)
-        call ntv_free(fac)
+        call hp_ntv_solve(fac, sys%drive(:, 3), x, .false., status)
+        if (status == HP_OK) call hp_ntv_solve(fac, sys%drive(:, 4), z, .true., status)
+        call hp_ntv_free(fac)
         if (status /= HP_OK) return
         r = real(sum(sys%drive(:, 4)*x), dp)
 
@@ -826,11 +959,11 @@ contains
         mesh_fine%p = mesh%p + 1
         call ntv_system(f, mesh_fine, op, fine, matf, status)
         if (status /= HP_OK) return
-        call ntv_factor(fine, mesh_fine%p, matf, fac, status)
+        call hp_ntv_factor(fine, mesh_fine%p, matf, fac, status)
         if (status /= HP_OK) return
         allocate (zf(fine%n))
-        call ntv_solve(fac, fine%drive(:, 4), zf, .true., status)
-        call ntv_free(fac)
+        call hp_ntv_solve(fac, fine%drive(:, 4), zf, .true., status)
+        call hp_ntv_free(fac)
         if (status /= HP_OK) return
 
         p = mesh%p
@@ -900,35 +1033,419 @@ contains
         end if
     end subroutine ntv_system
 
+    !> The terms of the NTV system of hp_ntv_kernel on mesh, apart (hp_terms_t);
+    !! nu and v of op are not used.
+    subroutine hp_ntv_terms(f, mesh, op, terms, status)
+        class(hp_geometry_t), intent(in) :: f
+        type(hp_mesh_t), intent(in) :: mesh
+        type(hp_operator_t), intent(in) :: op
+        type(hp_terms_t), intent(out) :: terms
+        integer, intent(out) :: status
+        type(hp_operator_t) :: unit
+        type(hp_system_t) :: sys
+        complex(dp), allocatable :: mat(:, :)
+
+        status = HP_BAD_INPUT
+        if (op%n == 0 .or. .not. allocated(op%m)) return
+        if (op%source_dlf10) then
+            ! The f_10 operators need b of a thin field, as in ntv_system.
+            select type (f)
+            class is (hp_field_t)
+            class default
+                return
+            end select
+        end if
+        ! collide and the drive are linear in nu and 1/v.
+        unit = op
+        unit%nu = 1
+        unit%v = 1
+        call elements(f, mesh, unit, sys, mat, status, terms=terms)
+        if (status /= HP_OK) return
+        terms%n = sys%n
+        terms%p = mesh%p
+        terms%norm = sys%norm
+        call move_alloc(sys%loc, terms%loc)
+        call move_alloc(sys%density, terms%density)
+        terms%load1 = real(sys%drive(:, 1), dp)
+        terms%load3 = sys%drive(:, 3)
+        terms%load4 = sys%drive(:, 4)
+    end subroutine hp_ntv_terms
+
+    !> The matrix S + nu C + i n (-q Ph + (omega_e M + pre Pr)/v) of the NTV
+    !! system at collisionality nu = nu_D/v and speed v from the terms of its
+    !! mesh; a is left empty when terms are not those of hp_ntv_terms.
+    subroutine hp_node_matrix(terms, nu, v, omega_e, pre, n, q, a)
+        type(hp_terms_t), intent(in) :: terms
+        real(dp), intent(in) :: nu, v, omega_e, pre, q
+        integer, intent(in) :: n
+        type(csc_z_t), intent(out) :: a
+        type(fortsparse_status_t) :: st
+        integer, allocatable :: rows(:), cols(:)
+        complex(dp), allocatable :: vals(:)
+        integer :: nt
+
+        if (.not. allocated(terms%loc)) return
+        nt = size(terms%s)
+        call pattern(terms%loc, rows, cols)
+        vals = reshape(terms%s + nu*terms%c + (0, 1)*n*(-q*terms%ph &
+            + (omega_e*terms%m + pre*terms%pr)/v), [nt])
+        call csc_from_triplet(terms%n, terms%n, rows, cols, vals, a, st)
+        if (.not. status_ok(st)) a = csc_z_t()
+    end subroutine hp_node_matrix
+
+    !> The mass matrix int measure phi_i phi_j of the mesh of terms; m is
+    !! left empty when terms are not those of hp_ntv_terms.
+    subroutine hp_mass(terms, m)
+        type(hp_terms_t), intent(in) :: terms
+        type(csc_t), intent(out) :: m
+        type(fortsparse_status_t) :: st
+        integer, allocatable :: rows(:), cols(:)
+
+        if (.not. allocated(terms%loc)) return
+        call pattern(terms%loc, rows, cols)
+        call csc_from_triplet(terms%n, terms%n, rows, cols, &
+            reshape(terms%m, [size(terms%m)]), m, st)
+        if (.not. status_ok(st)) m = csc_t()
+    end subroutine hp_mass
+
+    !> Adds the breakpoints of m to mesh.
+    pure subroutine hp_mesh_join(mesh, m)
+        type(hp_mesh_t), intent(inout) :: mesh
+        type(hp_mesh_t), intent(in) :: m
+        mesh%theta = merged(mesh%theta, m%theta)
+        mesh%lam = merged(mesh%lam, m%lam)
+        mesh%zeta = merged(mesh%zeta, m%zeta)
+    end subroutine hp_mesh_join
+
+    !> Sorted union of two increasing breakpoint lists; points closer than
+    !> 1e-12 count as one.
+    pure function merged(u, v) result(w)
+        real(dp), intent(in) :: u(:), v(:)
+        real(dp), allocatable :: w(:)
+        real(dp) :: tmp(size(u) + size(v)), x
+        integer :: i, j, n
+        i = 1
+        j = 1
+        n = 0
+        do while (i <= size(u) .or. j <= size(v))
+            if (j > size(v)) then
+                x = u(i)
+                i = i + 1
+            else if (i > size(u)) then
+                x = v(j)
+                j = j + 1
+            else if (u(i) <= v(j)) then
+                x = u(i)
+                i = i + 1
+            else
+                x = v(j)
+                j = j + 1
+            end if
+            if (n > 0) then
+                if (abs(x - tmp(n)) <= 1e-12_dp) cycle
+            end if
+            n = n + 1
+            tmp(n) = x
+        end do
+        w = tmp(1:n)
+    end function merged
+
+    !> Element elem and reference coordinates (r, s) in [-1, 1] of the points
+    !! (th(t), xi(j, t)) on mesh of geometry f, numbered j + (t - 1) size(xi, 1):
+    !! theta taken into the period of the mesh, xi placed linearly between
+    !! the row curves of f at that angle, as the element map does. The mesh
+    !! interpolant at a point is then sum phi_a(r) phi_b(s) over the nodes of
+    !! its element, exact on the row curves whatever their width, and points
+    !! of one angle share the row curves. The points are physical: for the
+    !! mesh of another energy at finite orbit width they lie elsewhere
+    !! relative to its separatrix.
+    subroutine hp_locate(f, mesh, th, xi, elem, r, s, status)
+        class(hp_geometry_t), intent(in) :: f
+        type(hp_mesh_t), intent(in) :: mesh
+        real(dp), intent(in) :: th(:), xi(:, :)
+        integer, allocatable, intent(out) :: elem(:)
+        real(dp), allocatable, intent(out) :: r(:), s(:)
+        integer, intent(out) :: status
+        integer, allocatable :: kind(:)
+        real(dp), allocatable :: val(:), xc(:)
+        real(dp) :: t, rr, d
+        integer :: n_col, n_row, nx, it, j, ec, er, c, k
+
+        status = HP_BAD_INPUT
+        if (mesh%p < 1 .or. size(xi, 2) /= size(th)) return
+        call row_curves(mesh, kind, val)
+        n_col = size(mesh%theta) - 1
+        n_row = size(val) - 1
+        nx = size(xi, 1)
+        allocate (elem(nx*size(th)), r(nx*size(th)), s(nx*size(th)))
+        !$omp parallel do default(shared) schedule(dynamic) &
+        !$omp private(it, t, ec, rr, xc, c, d, j, er, k)
+        do it = 1, size(th)
+            allocate (xc(n_row + 1))
+            t = in_period(mesh, th(it))
+            call interval(mesh%theta, t, ec, rr)
+            do c = 1, n_row + 1
+                call f%level(kind(c), val(c), t, xc(c), d)
+            end do
+            do j = 1, nx
+                k = j + (it - 1)*nx
+                call interval(xc, xi(j, it), er, s(k))
+                elem(k) = ec + (er - 1)*n_col
+                r(k) = rr
+            end do
+            deallocate (xc)
+        end do
+        !$omp end parallel do
+        status = HP_OK
+    end subroutine hp_locate
+
+    !> theta in the period [theta(1), theta(end)] of the mesh columns.
+    pure real(dp) function in_period(mesh, th) result(t)
+        type(hp_mesh_t), intent(in) :: mesh
+        real(dp), intent(in) :: th
+        t = mesh%theta(1) + modulo(th - mesh%theta(1), 2*pi)
+        t = min(t, mesh%theta(size(mesh%theta)))
+    end function in_period
+
+    !> The interval k of the increasing points x that holds x0 and the
+    !> reference coordinate r in [-1, 1] of x0 in it; -1 in an interval of no
+    !> width (the rows collapsed on the X point).
+    pure subroutine interval(x, x0, k, r)
+        real(dp), intent(in) :: x(:), x0
+        integer, intent(out) :: k
+        real(dp), intent(out) :: r
+        real(dp) :: d
+        k = max(1, min(count(x(2:) <= x0) + 1, size(x) - 1))
+        d = x(k + 1) - x(k)
+        r = -1
+        if (d > 0) r = max(-1.0_dp, min(1.0_dp, 2*(x0 - x(k))/d - 1))
+    end subroutine interval
+
+    !> 2 p + 3 Gauss angles, p the highest degree, on every column of the
+    !! union of the theta breakpoints of the meshes of one surface, taken into
+    !! the period of the first mesh: at finite orbit width the meshes of other
+    !! energies start at their own X point.
+    subroutine hp_lines(meshes, lines)
+        type(hp_mesh_t), intent(in) :: meshes(:)
+        type(hp_lines_t), intent(out) :: lines
+        real(dp), allocatable :: theta(:), xq(:), wq(:), v(:)
+        integer :: k, nq, ec
+
+        lines%theta = [real(dp) ::]
+        lines%w = [real(dp) ::]
+        if (size(meshes) < 1) return
+        theta = meshes(1)%theta
+        do k = 2, size(meshes)
+            v = [(in_period(meshes(1), meshes(k)%theta(ec)), ec=1, size(meshes(k)%theta))]
+            v = -v
+            call sort_desc(v)
+            theta = merged(theta, -v)
+        end do
+        nq = 2*maxval(meshes%p) + 3
+        allocate (xq(nq), wq(nq))
+        call gauss_legendre(nq, xq, wq)
+        lines%theta = [((theta(ec) + (theta(ec + 1) - theta(ec))*(1 + xq(k))/2, k=1, nq), &
+            ec=1, size(theta) - 1)]
+        lines%w = [(((theta(ec + 1) - theta(ec))/2*wq(k), k=1, nq), ec=1, size(theta) - 1)]
+    end subroutine hp_lines
+
+    !> Pitch moments on lines and their loads on mesh, l = 0..l_max:
+    !!   g(l) (lines x unknowns)  G[t, i] = (2 l + 1)/2 int P_l(xi) phi_i dxi,
+    !!   d(l) (unknowns x lines)  D[i, t] = w_t int measure P_l(xi) phi_i dxi
+    !! at theta_t, with xi the pitch of this geometry. The rule is exact for
+    !! the moments, whose integrand is a polynomial of degree p + l between
+    !! the row curves. With measure and measure_mesh (the speed node of
+    !! another energy at finite orbit width), d integrates that geometry's
+    !! measure over the rows of measure_mesh at the same (theta, xi), 2 p + 3
+    !! Gauss points per row, phi_i evaluated there through the element map of
+    !! mesh, and P_l(xi) of l >= 1 less its mean in that measure along the
+    !! line: 1^T D does not depend on mesh and vanishes for l >= 1, so the
+    !! field part conserves the density of the orbit measure on any set of
+    !! meshes and at any width; for thin orbits the mean is zero.
+    subroutine hp_line_ops(f, mesh, op, lines, l_max, g, d, status, measure, measure_mesh)
+        class(hp_geometry_t), intent(in) :: f
+        type(hp_mesh_t), intent(in) :: mesh
+        type(hp_operator_t), intent(in) :: op
+        type(hp_lines_t), intent(in) :: lines
+        integer, intent(in) :: l_max
+        type(csc_t), allocatable, intent(out) :: g(:), d(:)
+        integer, intent(out) :: status
+        class(hp_geometry_t), intent(in), optional :: measure
+        type(hp_mesh_t), intent(in), optional :: measure_mesh
+        type(fortsparse_status_t) :: st
+        type(hp_operator_t) :: o
+        integer, allocatable :: dof(:, :), kind(:), col(:, :), row(:, :), kind_m(:)
+        real(dp), allocatable :: val(:), node(:), wn(:), xq(:), wq(:), phi(:, :), pa(:), &
+            xc(:), gj(:, :), dj(:, :), gv(:, :, :), dv(:, :, :), pl(:), val_m(:), xm(:), &
+            xqm(:), wqm(:), ps(:), pts(:, :), cl(:)
+        real(dp) :: th, r, xi, xi_b, dxi, collide, dr, de, den, phase, precess, drive, &
+            torque, sr
+        complex(dp) :: src
+        integer :: p, n, n_col, n_row, n_th, n_jr, n_t, nq, nqm, n_line, t, ec, er, c, q, a1, &
+            a2, j, k, l, ek, np_m
+        logical :: other
+
+        status = HP_BAD_INPUT
+        p = mesh%p
+        n_t = size(lines%theta)
+        if (p < 1 .or. l_max < 0 .or. n_t < 1 .or. size(lines%w) /= n_t) return
+        other = present(measure)
+        if (other .neqv. present(measure_mesh)) return
+        n_col = size(mesh%theta) - 1
+        ! The measure does not depend on the perturbation.
+        o = op
+        if (.not. allocated(o%m)) then
+            o%m = [0]
+            o%c = [(0.0_dp, 0.0_dp)]
+        end if
+        call row_curves(mesh, kind, val)
+        call numbering(mesh, dof, n)
+        n_row = size(val) - 1
+        n_th = n_col*p
+        n_jr = n_row*p
+        nq = (p + l_max + 2)/2
+        n_line = (p + 1)*(n_jr + 1)
+        allocate (node(p + 1), wn(p + 1), xq(nq), wq(nq), phi(p + 1, nq), &
+            col(n_line, n_t), row(n_line, n_t), gv(n_line, 0:l_max, n_t), &
+            dv(n_line, 0:l_max, n_t))
+        call gauss_lobatto_legendre(p + 1, node, wn)
+        call gauss_legendre(nq, xq, wq)
+        do q = 1, nq
+            call lagrange_weights(p + 1, xq(q), node, phi(:, q))
+        end do
+        nqm = 0
+        if (other) then
+            call row_curves(measure_mesh, kind_m, val_m)
+            nqm = 2*measure_mesh%p + 3
+            allocate (xqm(nqm), wqm(nqm))
+            call gauss_legendre(nqm, xqm, wqm)
+        end if
+        !$omp parallel do default(shared) schedule(dynamic) &
+        !$omp private(t, th, ec, r, pa, xc, xm, gj, dj, pl, ps, c, er, q, a1, a2, j, k, l, xi, &
+        !$omp xi_b, dxi, src, collide, dr, de, den, phase, precess, drive, torque, ek, sr, &
+        !$omp pts, cl, np_m)
+        do t = 1, n_t
+            allocate (pa(p + 1), xc(n_row + 1), gj(0:l_max, 0:n_jr), dj(0:l_max, 0:n_jr), &
+                pl(0:l_max), ps(p + 1))
+            th = in_period(mesh, lines%theta(t))
+            ec = min(count(mesh%theta(2:) <= th) + 1, n_col)
+            r = 2*(th - mesh%theta(ec))/(mesh%theta(ec + 1) - mesh%theta(ec)) - 1
+            call lagrange_weights(p + 1, r, node, pa)
+            do c = 1, n_row + 1
+                call f%level(kind(c), val(c), th, xc(c), dxi)
+            end do
+            gj = 0
+            dj = 0
+            do er = 1, n_row
+                xi_b = (xc(er + 1) - xc(er))/2
+                do q = 1, nq
+                    xi = xc(er) + xi_b*(1 + xq(q))
+                    pl = [(legendre_p(l, 0, xi), l=0, l_max)]
+                    if (.not. other) call f%point_source(th, xi, o, src, collide, dr, de, &
+                        den, phase, precess, drive, torque)
+                    do a2 = 0, p
+                        j = (er - 1)*p + a2
+                        gj(:, j) = gj(:, j) + wq(q)*xi_b*phi(a2 + 1, q)*pl
+                        if (.not. other) dj(:, j) = dj(:, j) + wq(q)*xi_b*phi(a2 + 1, q)*den*pl
+                    end do
+                end do
+            end do
+            if (other) then
+                allocate (xm(size(val_m)), pts(3, (size(val_m) - 1)*nqm), cl(0:l_max))
+                do c = 1, size(val_m)
+                    call measure%level(kind_m(c), val_m(c), th, xm(c), dxi)
+                end do
+                ! Points (xi, weight times measure) on the rows of measure_mesh.
+                np_m = 0
+                do er = 1, size(val_m) - 1
+                    xi_b = (xm(er + 1) - xm(er))/2
+                    if (xi_b <= 0) cycle
+                    do q = 1, nqm
+                        xi = xm(er) + xi_b*(1 + xqm(q))
+                        call measure%point_source(th, xi, o, src, collide, dr, de, den, &
+                            phase, precess, drive, torque)
+                        np_m = np_m + 1
+                        pts(:, np_m) = [xi, wqm(q)*xi_b*den, 0.0_dp]
+                    end do
+                end do
+                ! For l >= 1, P_l less its mean in the measure along the line:
+                ! the measure of the orbits depends on xi, and int m P_l dxi
+                ! would make the field part change the density at finite
+                ! width. Thin orbits have a constant measure and mean zero.
+                cl = 0
+                do q = 1, np_m
+                    cl = cl + pts(2, q)*[(legendre_p(l, 0, pts(1, q)), l=0, l_max)]
+                end do
+                cl(1:) = cl(1:)/cl(0)
+                cl(0) = 0
+                do q = 1, np_m
+                    pl = [(legendre_p(l, 0, pts(1, q)), l=0, l_max)] - cl
+                    call interval(xc, pts(1, q), ek, sr)
+                    call lagrange_weights(p + 1, sr, node, ps)
+                    do a2 = 0, p
+                        j = (ek - 1)*p + a2
+                        dj(:, j) = dj(:, j) + pts(2, q)*ps(a2 + 1)*pl
+                    end do
+                end do
+                deallocate (xm, pts, cl)
+            end if
+            do j = 0, n_jr
+                do a1 = 0, p
+                    k = 1 + a1 + (p + 1)*j
+                    row(k, t) = t
+                    col(k, t) = dof(mod((ec - 1)*p + a1, n_th), j)
+                    gv(k, :, t) = [((2*l + 1)/2.0_dp, l=0, l_max)]*pa(a1 + 1)*gj(:, j)
+                    dv(k, :, t) = lines%w(t)*pa(a1 + 1)*dj(:, j)
+                end do
+            end do
+            deallocate (pa, xc, gj, dj, pl, ps)
+        end do
+        !$omp end parallel do
+        allocate (g(0:l_max), d(0:l_max))
+        do l = 0, l_max
+            call csc_from_triplet(n_t, n, reshape(row, [n_line*n_t]), &
+                reshape(col, [n_line*n_t]), reshape(gv(:, l, :), [n_line*n_t]), g(l), st)
+            if (.not. status_ok(st)) return
+            call csc_from_triplet(n, n_t, reshape(col, [n_line*n_t]), &
+                reshape(row, [n_line*n_t]), reshape(dv(:, l, :), [n_line*n_t]), d(l), st)
+            if (.not. status_ok(st)) return
+        end do
+        status = HP_OK
+    end subroutine hp_line_ops
+
     !> Equilibrated rows and columns keep the static-pivot growth of the
     !> supernodal LU in bounds on graded meshes.
-    subroutine ntv_factor(sys, p, mat, fac, status)
+    subroutine factor_elements(sys, p, mat, fac, status)
         type(hp_system_t), intent(in) :: sys
         integer, intent(in) :: p
         complex(dp), intent(in) :: mat(:, :)
-        type(ntv_factor_t), intent(out) :: fac
+        type(hp_ntv_factor_t), intent(out) :: fac
+        integer, intent(out) :: status
+        type(fortsparse_status_t) :: st
+        type(csc_z_t) :: a
+        integer, allocatable :: rows(:), cols(:)
+
+        status = HP_BAD_INPUT
+        if (size(sys%loc, 1) /= (p + 1)**2) return
+        call pattern(sys%loc, rows, cols)
+        call csc_from_triplet(sys%n, sys%n, rows, cols, reshape(mat, [size(mat)]), a, st)
+        if (.not. status_ok(st)) return
+        call factor_matrix(a, fac, status)
+    end subroutine factor_elements
+
+    !> The same factor of an assembled square matrix (hp_node_matrix).
+    subroutine factor_matrix(a, fac, status)
+        type(csc_z_t), intent(in) :: a
+        type(hp_ntv_factor_t), intent(out) :: fac
         integer, intent(out) :: status
         type(fortsparse_status_t) :: st
         type(csc_z_t) :: scaled
-        integer, allocatable :: rows(:), cols(:)
-        integer :: e, i, j, n_loc, nt
 
         status = HP_BAD_INPUT
-        n_loc = (p + 1)**2
-        nt = size(mat)
-        allocate (rows(nt), cols(nt))
-        do e = 1, size(mat, 2)
-            do j = 1, n_loc
-                do i = 1, n_loc
-                    rows((e - 1)*n_loc**2 + i + n_loc*(j - 1)) = sys%loc(i, e)
-                    cols((e - 1)*n_loc**2 + i + n_loc*(j - 1)) = sys%loc(j, e)
-                end do
-            end do
-        end do
-        call csc_from_triplet(sys%n, sys%n, rows, cols, reshape(mat, [nt]), fac%a, st)
-        if (.not. status_ok(st)) return
+        if (a%nrow < 1 .or. a%nrow /= a%ncol) return
         status = HP_SINGULAR
-        scaled = fac%a
+        fac%a = a
+        scaled = a
         call equilibrate(scaled, fac%rs, fac%cs)
         fac%solver%backend_id = FORTSPARSE_BACKEND_NATIVE
         fac%solver%options%ordering = FORTSPARSE_ORDER_AMD
@@ -936,22 +1453,43 @@ contains
         call sparse_factor(fac%solver, scaled, st)
         if (.not. status_ok(st)) return
         status = HP_OK
-    end subroutine ntv_factor
+    end subroutine factor_matrix
+
+    !> Rows and columns of the entries of element matrices stored column
+    !> major, element after element.
+    pure subroutine pattern(loc, rows, cols)
+        integer, intent(in) :: loc(:, :)
+        integer, allocatable, intent(out) :: rows(:), cols(:)
+        integer :: e, i, j, n_loc
+        n_loc = size(loc, 1)
+        allocate (rows(n_loc**2*size(loc, 2)), cols(n_loc**2*size(loc, 2)))
+        do e = 1, size(loc, 2)
+            do j = 1, n_loc
+                do i = 1, n_loc
+                    rows((e - 1)*n_loc**2 + i + n_loc*(j - 1)) = loc(i, e)
+                    cols((e - 1)*n_loc**2 + i + n_loc*(j - 1)) = loc(j, e)
+                end do
+            end do
+        end do
+    end subroutine pattern
 
     !> A x = b, or A^T x = b with transpose, by the equilibrated factor
-    !> S = R A C and three refinement steps against A.
-    subroutine ntv_solve(fac, b, x, transpose, status)
-        type(ntv_factor_t), intent(inout) :: fac
+    !> S = R A C and refine (default three) refinement steps against A.
+    subroutine hp_ntv_solve(fac, b, x, transpose, status, refine)
+        type(hp_ntv_factor_t), intent(inout) :: fac
         complex(dp), intent(in) :: b(:)
         complex(dp), intent(out) :: x(:)
         logical, intent(in) :: transpose
         integer, intent(out) :: status
+        integer, intent(in), optional :: refine
         type(fortsparse_status_t) :: st
         complex(dp), allocatable :: res(:), dx(:)
-        integer :: it, op
+        integer :: it, op, n_refine
         real(dp), allocatable :: left(:), right(:)
 
         status = HP_SINGULAR
+        n_refine = 3
+        if (present(refine)) n_refine = refine
         if (transpose) then
             ! A^T = C^-1 S^T R^-1: x = R S^-T C b.
             left = fac%cs
@@ -966,7 +1504,7 @@ contains
         res = left*b
         call sparse_solve_op(fac%solver, res, x, op, st)
         x = right*x
-        do it = 1, 3
+        do it = 1, n_refine
             if (.not. status_ok(st)) exit
             if (transpose) then
                 res = left*(b - apply_zt(fac%a, x))
@@ -977,12 +1515,12 @@ contains
             x = x + right*dx
         end do
         if (status_ok(st)) status = HP_OK
-    end subroutine ntv_solve
+    end subroutine hp_ntv_solve
 
-    subroutine ntv_free(fac)
-        type(ntv_factor_t), intent(inout) :: fac
+    subroutine hp_ntv_free(fac)
+        type(hp_ntv_factor_t), intent(inout) :: fac
         call sparse_destroy(fac%solver)
-    end subroutine ntv_free
+    end subroutine hp_ntv_free
 
     !> Row and column scalings rs, cs with rs A cs of unit row and column
     !> maxima, by three sweeps of Ruiz's iteration; a is replaced.
