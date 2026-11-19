@@ -37,7 +37,7 @@ module milca_inertia_newton
     end type
 contains
     subroutine inertia_newton_factor(opt, rowptr, colidx, val, shift, n_pos, n_neg, &
-                                     solver, delta, status, minimum)
+                                     solver, delta, status, minimum, any_inertia)
         !! K in full-storage CSR (symmetric, so also its CSC). On success solver
         !! holds the factor of D (K + delta diag(shift)) D. minimum: smallest
         !! delta to try (a step rejected by the ratio test passes the larger
@@ -49,6 +49,9 @@ contains
         real(dp), intent(out) :: delta
         integer, intent(out) :: status
         real(dp), intent(in), optional :: minimum
+        !> factor once at delta = 0 whatever its inertia (a Newton step near
+        !! the solution, accepted by the caller on the stationarity norm)
+        logical, intent(in), optional :: any_inertia
         real(dp), allocatable :: scaled(:)
         type(fortsparse_status_t) :: sst
         integer(int64) :: signs(3)
@@ -106,6 +109,9 @@ contains
             end if
             if (opt%inertia(1) == n_pos .and. opt%inertia(2) == n_neg .and. &
                 opt%inertia(3) == 0) exit
+            if (present(any_inertia)) then
+                if (any_inertia .and. factored .and. opt%inertia(3) == 0) exit
+            end if
             if (.not. delta > 0 .and. opt%delta_last > 0) then
                 delta = max(opt%delta_min, opt%delta_last/3)
             else if (.not. delta > 0) then

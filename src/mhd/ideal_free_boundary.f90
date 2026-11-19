@@ -5914,10 +5914,13 @@ contains
         real(dp), allocatable :: xsafe(:, :, :), xssafe(:, :, :), phisafe(:, :)
         real(dp), allocatable :: lamsafe(:, :, :)
         real(dp) :: energy, etrial, minjac, gnorm, gtrial_norm, predicted, delta, dmin
-        real(dp) :: disp, rot, cap, sscale
+        real(dp) :: disp, rot, cap, sscale, gnorm0, last_ratio
+        integer :: growths
+        logical :: near
         integer :: it, tries, st, nslide, n_pos, n_neg, i, p
         logical :: accepted, factored
         status = IDEAL_FB_NOT_CONVERGED
+        last_ratio = 0; growths = 0; gnorm0 = huge(1.0_dp)
         nslide = size(fb%slide, 3)
         n_pos = fb%np + fb%nx - fb%unstable
         n_neg = fb%nx + nslide + fb%nf + fb%unstable
@@ -5982,6 +5985,7 @@ contains
             call project_slide(fb, w, gp)
             gnorm = sqrt(sum(w*gp**2))
             if (it == 0) report%merit0 = gnorm**2
+            if (it == 0) gnorm0 = gnorm
             report%merit = gnorm**2
             report%residual = sqrt(report%merit/fb%energy_scale)
             if (talk) print '(a,i3,a,es10.3,a,es22.14,a,es9.2)', 'fb inertia newton', it, &
@@ -6005,8 +6009,15 @@ contains
             accepted = .false.; dmin = 0
             do tries = 1, 30
                 if (factored) call sparse_destroy(solver)
+                ! Near the solution (stationarity below 1e-3 of the start
+                ! and the last step's actual/predicted ratio above 0.5) the
+                ! plain Newton step is taken whatever the inertia and judged
+                ! by the stationarity norm; two increases in a row return to
+                ! the inertia control.
+                near = tries == 1 .and. growths < 2 .and. gnorm < 1.0e-3_dp*gnorm0 &
+                    .and. last_ratio > 0.5_dp
                 call inertia_newton_factor(opt, srows, scols, smat, shift, n_pos, n_neg, &
-                    solver, delta, st, minimum=dmin)
+                    solver, delta, st, minimum=dmin, any_inertia=near)
                 factored = st == INERTIA_NEWTON_OK
                 if (.not. factored) then
                     if (talk) print '(a,3i8,a,2i8)', '   inertia', opt%inertia, &
@@ -6039,12 +6050,20 @@ contains
                     gp = gtrial
                     call project_slide(fb, w, gp)
                     gtrial_norm = sqrt(sum(w*gp**2))
-                    if (fb%unstable == 0) then
+                    if (near) then
+                        accepted = gtrial_norm < gnorm
+                        if (accepted) then
+                            growths = 0
+                        else
+                            growths = growths + 1
+                        end if
+                    else if (fb%unstable == 0) then
                         accepted = inertia_newton_accept(opt, energy, etrial, predicted, &
                             gnorm, gtrial_norm)
                     else
                         accepted = gtrial_norm < gnorm
                     end if
+                    if (abs(predicted) > 0) last_ratio = (energy - etrial)/predicted
                 end if
                 if (talk) print '(a,i3,a,es9.2,a,es9.2,a,es12.4,a,es12.4,a,es9.2,a,2es9.2,a,i0,a,l2)', &
                     '   try', tries, ' delta', delta, ' |s|', min(disp, cap), &
