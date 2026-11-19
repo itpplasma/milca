@@ -103,7 +103,10 @@ tolerances so that the changes measure truncation. With both automatic, the
 mesh ladder runs first at the boundary's modes, then the toroidal ladder and
 the iota-node ladder, and the active ladders alternate until each is met by
 its first refinement. Axisymmetric data
-(`ntor = 0`) keep `map_ntor = 0`.
+(`ntor = 0`) keep `map_ntor = 0`. The energy sees the map only at its
+quadrature points, so the continued start of a level can reach a stationary
+point that folds between them; the volume-integral points detect the fold,
+and that level is solved again from its Winslow seed.
 
 The seed of every toroidal plane is the Winslow map of its cross-section
 (`milca_winslow_seed`, [ideal-seed-3d](ideal-seed-3d.md)): the interior that

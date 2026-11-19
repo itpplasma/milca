@@ -1,0 +1,27 @@
+! STELLOPT bean14_test boundary and profiles: the 24-node level continued from
+! the 16-node solution folds between its quadrature points
+&nested_input
+  nfp = 1, mpol = 3, ntor = 0, phiedge = 13.534,
+  rbc(0,0) = 2.9768,
+  rbc(0,1) = 1.0279,
+  rbc(0,2) = 0.50838,
+  rbc(0,3) = -0.017459,
+  zbs(0,1) = 1.3589,
+  zbs(0,2) = 0.29343,
+  zbs(0,3) = 0.013373,
+  iota(0) = 2.354498895432447,
+  iota(1) = -9.907517672615517,
+  iota(2) = 42.86570171033211,
+  iota(3) = -122.8693254810872,
+  iota(4) = 188.6838680668763,
+  iota(5) = -143.1773314731515,
+  iota(6) = 42.19838185779675,
+  pressure(0) = 276299.3401771816,
+  pressure(1) = -1398637.555311701,
+  pressure(2) = 6435929.178901299,
+  pressure(3) = -19133512.21515564,
+  pressure(4) = 30465220.63279099,
+  pressure(5) = -23996968.24024823,
+  pressure(6) = 7363942.466650127,
+  angle_mpol = 4, tolerance = 1e-8, max_iterations = 400, mesh_tolerance = 1e-2
+/

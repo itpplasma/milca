@@ -34,6 +34,8 @@ program nested_equilibrium
     logical :: automatic_ntor, automatic_mesh, automatic_iota
     logical :: mesh_confirmed, modes_confirmed, iota_confirmed
     logical :: iota_vanishes = .false.
+    ! the solved map of the level folds at the volume-integral points
+    logical :: level_folded = .false.
     real(dp) :: fourier_tolerance, fourier_error, mesh_tolerance, mesh_error
     real(dp) :: iota_tolerance, iota_error
     real(dp) :: observed(4), previous_observed(4)
@@ -150,6 +152,7 @@ program nested_equilibrium
     call set_toroidal_level(ntor_level)
     call mesh_ladder()
     call finish_level()
+    call require_unfolded()
     do
         mesh_confirmed = .true.; modes_confirmed = .true.; iota_confirmed = .true.
         if (automatic_mesh) call raise_mesh(mesh_confirmed)
@@ -352,6 +355,7 @@ contains
             previous_observed = observed
             iota_level = iota_level + 2
             call finish_level()
+            call require_unfolded()
             iota_error = change()
             steps = steps + 1
             print '(a,i3,a,es10.3)', 'iota nodes ', iota_level, ': iota error ', iota_error
@@ -381,6 +385,26 @@ contains
         call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
             reference_gradient=reference)
         call finish_level()
+        ! The energy sees the map only at its quadrature points, and the
+        ! continued start can reach a stationary point that folds between
+        ! them (ideal_map_prolong_correction); the level is solved again from
+        ! its injective Winslow seed.
+        if (level_folded) then
+            print '(a,i4,a,i3,a)', 'boundary nodes ', boundary_nodes, ', toroidal modes ', &
+                ntor_level, ': the continued map folds, solving from the seed'
+            call init_seed(status)
+            if (status /= 0) call fail('the seed of a resolution level is not admitted')
+            reference = free_gradient()
+            seed_x = map%x
+            call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
+                reference_gradient=reference)
+            call finish_level()
+        end if
+        call require_unfolded()
+    end subroutine
+
+    subroutine require_unfolded()
+        if (level_folded) call fail('a volume integral met a folded map')
     end subroutine
 
     subroutine finish_level()
@@ -410,7 +434,9 @@ contains
         real(dp) :: v, a, w, k, r, i0, i1, unused1, unused2
         integer :: local
         call integrals(v, a, w, k, local)
-        if (local /= 0) call fail('a volume integral met a folded map')
+        level_folded = local /= 0
+        values = 0
+        if (level_folded) return
         call axis_radius(r, local)
         if (local /= 0) call fail('the magnetic axis was not found')
         call profile%evaluate(0.0_dp, i0, unused1, unused2)
