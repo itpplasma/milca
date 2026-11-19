@@ -879,6 +879,8 @@ milca_test_labels(ideal_map_field_angle fast CLASSES mhd
     TARGETS test_ideal_map_field_angle)
 milca_test_labels(equilibrium_map_3d_loop fast CLASSES mhd
     TARGETS test_map_3d_loop)
+milca_test_labels(ideal_map_hvp fast CLASSES mhd
+    TARGETS test_ideal_map_hvp)
 milca_test_labels(ideal_seed_3d_winslow fast CLASSES mhd
     TARGETS test_winslow_seed)
 milca_test_labels(ideal_seed_3d_winslow_helias slow CLASSES mhd
