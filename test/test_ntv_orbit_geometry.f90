@@ -31,7 +31,7 @@ program test_ntv_orbit_geometry
     use milca_ntv_orbit_geometry, only: hp_orbit_geometry_t, hp_orbit_geometry, &
         hp_orbit_perturbation
     use milca_dk_hp_energy, only: hp_energy_system_t, hp_energy_setup, hp_energy_coefficients, &
-        hp_energy_collide, hp_energy_apply, hp_energy_solve, hp_energy_free
+        hp_energy_collide, hp_energy_apply, hp_energy_solve, hp_energy_free, hp_node_geometry_t
     use milca_dk_collop, only: collop_species_t, collop_grid_t, collop_make_grid, &
         collop_nuhat, collop_vth, COLLOP_OK, COLLOP_LORENTZ, COLLOP_TEST_PARTICLE, COLLOP_FULL
     implicit none
@@ -75,6 +75,7 @@ program test_ntv_orbit_geometry
     case ('thin'); ok = thin(factor, 1.0_dp)
     case ('thin_negative'); ok = thin(1e-3_dp, -1.0_dp)
     case ('energy_width'); ok = energy_width()
+    case ('energy_mixed'); ok = energy_mixed()
     case ('energy_lorentz'); ok = energy_lorentz()
     case ('energy_conservation'); ok = energy_conservation()
     case ('energy_manufactured'); ok = energy_manufactured()
@@ -169,7 +170,7 @@ contains
     !> geometry and mesh per node, or with thin the thin field with the
     !> matching precession and one mesh. nu_D/v at x = 1 is a tenth of n
     !> times the drift frequency of species 1 there, at every factor.
-    subroutine build(mass, z, factor, thin, model, c, status, l_field, apart)
+    subroutine build(mass, z, factor, thin, model, c, status, l_field, apart, slow)
         real(dp), intent(in) :: mass(:), z(:), factor
         logical, intent(in) :: thin
         integer, intent(in) :: model
@@ -179,7 +180,12 @@ contains
         ! Thin nodes that name distinct geometries: the shared points of the
         ! finite-width coupling instead of the common mass.
         logical, intent(in), optional :: apart
+        ! With finite width: the slowest nodes of each species on the thin
+        ! field, each on its own mesh.
+        integer, intent(in), optional :: slow
         type(orbit_particle_t) :: p
+        type(hp_node_geometry_t), allocatable :: nodes(:, :)
+        integer :: n_slow
         real(dp) :: b, b_s, gg, i, g_s, i_s, iota, psi_prime, v, samples(33), kappa, pre1
         integer, allocatable :: gid(:, :)
         type(hp_field_t), allocatable :: geom(:, :)
@@ -187,6 +193,8 @@ contains
 
         ns = size(mass)
         c%thin = thin
+        n_slow = 0
+        if (present(slow)) n_slow = slow
         call collop_make_grid(4.0_dp, 3, 4, c%grid, status)
         if (status /= COLLOP_OK) error stop 'collop_make_grid failed'
         nx = c%grid%n - 1
@@ -226,7 +234,7 @@ contains
                     op%wsign = 1
                     op%offset = 0
                     op%pre = 0
-                    if (thin) op%pre = (1/iota)*c%sp(a)%m*v**2*(-0.23_dp/(2*sqrt(s_star))) &
+                    if (thin .or. k <= n_slow) op%pre = (1/iota)*c%sp(a)%m*v**2*(-0.23_dp/(2*sqrt(s_star))) &
                         /(2*z(a)*e*b_ref*psi_prime)
                 end associate
                 if (thin) then
@@ -237,14 +245,18 @@ contains
                     end if
                     cycle
                 end if
+                c%mid(k, a) = (a - 1)*nx + k
+                gid(k, a) = c%mid(k, a)
+                if (k <= n_slow) then
+                    call hp_default_mesh(c%f, 4, 16, 6, 1e-3_dp, 0.3_dp, c%meshes(c%mid(k, a)))
+                    cycle
+                end if
                 p%mass = c%sp(a)%m
                 p%charge = z(a)*e
                 p%energy = p%mass*v**2/2
                 p%s_ref = s_star
                 call hp_orbit_geometry(bf, p, s_star, b_ref, c%go(k, a), status)
                 if (status /= 0) error stop 'orbit geometry failed'
-                c%mid(k, a) = (a - 1)*nx + k
-                gid(k, a) = c%mid(k, a)
                 call hp_default_mesh(c%go(k, a), 4, 16, 6, 1e-3_dp, 0.3_dp, c%meshes(c%mid(k, a)))
             end do
         end do
@@ -253,6 +265,19 @@ contains
             geom = c%f
             call hp_energy_setup(geom, c%ops, c%meshes, c%mid, c%grid, c%sp, c%lnl, model, &
                 huge(1_8), c%sys, status, l_field=l_field, gid=gid)
+        else if (n_slow > 0) then
+            allocate (nodes(nx, ns))
+            do a = 1, ns
+                do k = 1, nx
+                    if (k <= n_slow) then
+                        allocate (nodes(k, a)%g, source=c%f)
+                    else
+                        allocate (nodes(k, a)%g, source=c%go(k, a))
+                    end if
+                end do
+            end do
+            call hp_energy_setup(nodes, c%ops, c%meshes, c%mid, c%grid, c%sp, c%lnl, model, &
+                huge(1_8), c%sys, status, l_field=l_field, gid=gid)
         else
             call hp_energy_setup(c%go, c%ops, c%meshes, c%mid, c%grid, c%sp, c%lnl, model, &
                 huge(1_8), c%sys, status, l_field=l_field, gid=gid)
@@ -260,7 +285,8 @@ contains
     end subroutine build
 
     !> K and q of the coupled kernel of build.
-    subroutine coefficients(mass, z, factor, thin, model, kc, qc, node_r, its, l_field, apart)
+    subroutine coefficients(mass, z, factor, thin, model, kc, qc, node_r, its, l_field, apart, &
+            slow)
         real(dp), intent(in) :: mass(:), z(:), factor
         logical, intent(in) :: thin
         integer, intent(in) :: model
@@ -269,11 +295,12 @@ contains
         integer, intent(out) :: its
         integer, intent(in), optional :: l_field
         logical, intent(in), optional :: apart
+        integer, intent(in), optional :: slow
         type(coupled_t) :: c
         integer :: status
         integer(8) :: t0, t1, rate
         call system_clock(t0, rate)
-        call build(mass, z, factor, thin, model, c, status, l_field, apart)
+        call build(mass, z, factor, thin, model, c, status, l_field, apart, slow)
         if (status /= HP_OK) error stop 'hp_energy_setup failed'
         call hp_energy_coefficients(c%sys, 2*pi, kc, qc, node_r, its, status)
         if (status /= HP_OK) error stop 'hp_energy_coefficients failed'
@@ -326,6 +353,24 @@ contains
         ok = below('relative difference at the smaller width', d(2), 1e-5_dp) .and. ok
         ok = below('smaller over larger width, halved width', d(2)/d(1), 0.55_dp) .and. ok
     end function energy_width
+
+    !> The slowest nodes on the thin field inside the finite-width kernel, as
+    !> the device solves nodes whose orbits have no pitch point: at small
+    !> width the kernel equals the finite-width one to the bound of
+    !> energy_width, so both geometries carry the same measure and
+    !> normalisation into the energy coupling.
+    logical function energy_mixed() result(ok)
+        real(dp), parameter :: factor = 2e-3_dp
+        real(dp) :: kf(1, 1, 2), qf(1, 1, 2), km(1, 1, 2), qm(1, 1, 2)
+        real(dp), allocatable :: node_r(:, :, :, :)
+        integer :: its
+        call coefficients([md], [1.0_dp], factor, .false., COLLOP_FULL, kf, qf, node_r, its)
+        call coefficients([md], [1.0_dp], factor, .false., COLLOP_FULL, km, qm, node_r, its, &
+            slow=3)
+        print '(a,4es15.7)', 'finite width       ', kf, qf
+        print '(a,4es15.7)', 'three thin nodes   ', km, qm
+        ok = below('three thin slow nodes against finite width', rel(km, qm, kf, qf), 1e-5_dp)
+    end function energy_mixed
 
     !> Pitch-angle scattering alone on orbit geometries: every node is the
     !> monoenergetic finite-width kernel at its speed and deflection rate.

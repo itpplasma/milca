@@ -66,7 +66,8 @@ module milca_dk_hp_energy
     implicit none
     private
     public :: hp_energy_system_t, hp_energy_node_t, hp_energy_setup, hp_energy_collide, &
-        hp_energy_coefficients, hp_energy_apply, hp_energy_solve, hp_energy_free
+        hp_energy_coefficients, hp_energy_apply, hp_energy_solve, hp_energy_free, &
+        hp_node_geometry_t
     !> The node factors exceed the memory budget.
     integer, parameter, public :: HP_NO_MEMORY = 4
     !> The geometry of node sys%invalid = [k, a] has a measure that changes
@@ -119,6 +120,18 @@ module milca_dk_hp_energy
         complex(dp), allocatable :: v(:)
     end type
 
+    !> The geometry of one node where the nodes of a system differ in type:
+    !> finite-width orbits, and thin orbits for the slow nodes whose orbits
+    !> have no pitch point.
+    type :: hp_node_geometry_t
+        class(hp_geometry_t), allocatable :: g
+    end type
+
+    !> geom: one geometry type for all nodes, or hp_node_geometry_t per node.
+    interface hp_energy_setup
+        module procedure setup_uniform, setup_nodes
+    end interface
+
     type :: hp_energy_system_t
         integer :: ns = 0, nx = 0, n = 0, model = 0, n_dof = 0, n_coarse = 0, n_factors = 0, &
             l_field = 0, n_t = 0, invalid(2) = 0
@@ -156,9 +169,34 @@ contains
     !> nodes as block preconditioner left GMRES unconverged. l_field (default
     !> 3, at least 1 so that density and momentum return) is the highest
     !> Legendre degree of the field part of the full operator.
-    subroutine hp_energy_setup(geom, ops, meshes, mid, grid, species, lnlambda, model, &
+    subroutine setup_uniform(geom, ops, meshes, mid, grid, species, lnlambda, model, &
             memory_budget, sys, status, l_field, gid)
         class(hp_geometry_t), intent(in) :: geom(:, :)
+        type(hp_operator_t), intent(in) :: ops(:, :)
+        type(hp_mesh_t), intent(in) :: meshes(:)
+        integer, intent(in) :: mid(:, :), model
+        type(collop_grid_t), intent(in) :: grid
+        type(collop_species_t), intent(in) :: species(:)
+        real(dp), intent(in) :: lnlambda(:, :)
+        integer(int64), intent(in) :: memory_budget
+        type(hp_energy_system_t), intent(out) :: sys
+        integer, intent(out) :: status
+        integer, intent(in), optional :: l_field, gid(:, :)
+        type(hp_node_geometry_t), allocatable :: nodes(:, :)
+        integer :: a, k
+        allocate (nodes(size(geom, 1), size(geom, 2)))
+        do a = 1, size(geom, 2)
+            do k = 1, size(geom, 1)
+                allocate (nodes(k, a)%g, source=geom(k, a))
+            end do
+        end do
+        call setup_nodes(nodes, ops, meshes, mid, grid, species, lnlambda, model, &
+            memory_budget, sys, status, l_field, gid)
+    end subroutine setup_uniform
+
+    subroutine setup_nodes(geom, ops, meshes, mid, grid, species, lnlambda, model, &
+            memory_budget, sys, status, l_field, gid)
+        type(hp_node_geometry_t), intent(in) :: geom(:, :)
         type(hp_operator_t), intent(in) :: ops(:, :)
         type(hp_mesh_t), intent(in) :: meshes(:)
         integer, intent(in) :: mid(:, :), model
@@ -188,6 +226,11 @@ contains
         if (any(shape(geom) /= [nx, ns]) .or. any(shape(ops) /= [nx, ns]) .or. &
             any(shape(mid) /= [nx, ns])) return
         if (any(mid < 1) .or. any(mid > size(meshes))) return
+        do a = 1, ns
+            do k = 1, nx
+                if (.not. allocated(geom(k, a)%g)) return
+            end do
+        end do
         if (any(ops%source_dpar) .or. any(ops%source_dlf10)) return
         allocate (geo(nx, ns))
         geo = 1
@@ -231,7 +274,7 @@ contains
             do k = 1, nx
                 associate (nd => sys%node(k, a))
                     nd%mesh = mid(k, a)
-                    call hp_ntv_terms(geom(k, a), meshes(nd%mesh), ops(k, a), nd%terms, status)
+                    call hp_ntv_terms(geom(k, a)%g, meshes(nd%mesh), ops(k, a), nd%terms, status)
                     if (status /= HP_OK) return
                     ! A measure that changes sign or is not finite at some
                     ! quadrature point (orbits that leave the file between the
@@ -278,13 +321,13 @@ contains
                 do k = 1, nx
                     if (.not. through(sys, p, k, a)) cycle
                     associate (at => sys%at(p, k, a), tp => sys%node(pk, a)%terms)
-                        call hp_locate(geom(k, a), meshes(mid(k, a)), tp%q_theta, tp%q_xi, &
+                        call hp_locate(geom(k, a)%g, meshes(mid(k, a)), tp%q_theta, tp%q_xi, &
                             at%elem, at%r, at%s, status)
                     end associate
                     if (status /= HP_OK) return
                     if (.not. field_from(sys, p, k, a)) cycle
-                    call hp_line_ops(geom(k, a), meshes(mid(k, a)), ops(k, a), lines, &
-                        sys%l_field, unused, sys%loads(p, k, a)%d, status, measure=geom(pk, a), &
+                    call hp_line_ops(geom(k, a)%g, meshes(mid(k, a)), ops(k, a), lines, &
+                        sys%l_field, unused, sys%loads(p, k, a)%d, status, measure=geom(pk, a)%g, &
                         measure_mesh=meshes(mid(pk, a)))
                     if (status /= HP_OK) return
                 end do
@@ -297,7 +340,7 @@ contains
             sys%n_t = size(lines%theta)
             do a = 1, ns
                 do k = 1, nx
-                    call hp_line_ops(geom(k, a), meshes(mid(k, a)), ops(k, a), lines, &
+                    call hp_line_ops(geom(k, a)%g, meshes(mid(k, a)), ops(k, a), lines, &
                         sys%l_field, sys%node(k, a)%g, sys%node(k, a)%d, status)
                     if (status /= HP_OK) return
                 end do
@@ -308,13 +351,13 @@ contains
         if (status /= HP_OK) return
         do a = 1, ns
             do k = 1, nx
-                call coarse_space(geom(k, a), meshes(mid(k, a)), sys%node(k, a)%terms, &
+                call coarse_space(geom(k, a)%g, meshes(mid(k, a)), sys%node(k, a)%terms, &
                     ops(k, a)%m, sys%node(k, a)%z)
                 sys%node(k, a)%zt = transpose(sys%node(k, a)%z)
             end do
         end do
         call coarse_matrix(sys, status)
-    end subroutine hp_energy_setup
+    end subroutine setup_nodes
 
     !> Whether the terms of a node are finite with a measure of one sign at
     !> every quadrature point (the sign follows the orientation of the file).

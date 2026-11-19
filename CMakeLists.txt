@@ -2005,8 +2005,8 @@ milca_test_labels(ntv_orbit_geometry_thin_negative fast CLASSES apps
     TARGETS test_ntv_orbit_geometry)
 # The energy-coupled kernel on orbit geometries: a geometry and mesh per
 # speed node, seconds to minutes each.
-foreach(check energy_lorentz energy_manufactured energy_width energy_conservation
-        energy_electrons)
+foreach(check energy_lorentz energy_manufactured energy_width energy_mixed
+        energy_conservation energy_electrons)
     add_test(NAME ntv_orbit_geometry_${check} COMMAND test_ntv_orbit_geometry ${check})
     milca_test_labels(ntv_orbit_geometry_${check} slow CLASSES apps
         TARGETS test_ntv_orbit_geometry)
@@ -2017,6 +2017,8 @@ add_test(NAME ntv_device COMMAND test_ntv_device)
 milca_test_labels(ntv_device fast CLASSES apps TARGETS test_ntv_device)
 add_test(NAME ntv_device_orbit_width_coupled COMMAND test_ntv_device orbit_width_coupled)
 add_test(NAME ntv_device_orbit_width_edge_node COMMAND test_ntv_device orbit_width_edge_node)
+add_test(NAME ntv_device_orbit_width_slow_node COMMAND test_ntv_device orbit_width_slow_node)
+milca_test_labels(ntv_device_orbit_width_slow_node slow CLASSES apps TARGETS test_ntv_device)
 milca_test_labels(ntv_device_orbit_width_edge_node slow CLASSES apps TARGETS test_ntv_device)
 milca_test_labels(ntv_device_orbit_width_coupled slow CLASSES apps TARGETS test_ntv_device)
 add_executable(test_ntv_boozer_line test/test_ntv_boozer_line.f90)

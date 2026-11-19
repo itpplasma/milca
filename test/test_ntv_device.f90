@@ -31,6 +31,12 @@ program test_ntv_device
     ! The coupled finite-width kernel takes minutes: a test of its own.
     only = ''
     if (command_argument_count() > 0) call get_command_argument(1, only)
+    if (only == 'orbit_width_slow_node') then
+        call orbit_width_slow_node()
+        if (failures > 0) error stop 'FAIL'
+        print '(a)', 'All tests passed!'
+        stop
+    end if
     if (only == 'orbit_width_edge_node') then
         call orbit_width_edge_node()
         if (failures > 0) error stop 'FAIL'
@@ -834,6 +840,82 @@ contains
         print '(a,i0,a,es10.3,a,es12.4)', 'edge node: status ', wide(1, 1)%status, &
             ' lost weight ', wide(1, 1)%lost_weight, ' K11 ', wide(1, 1)%k11
     end subroutine orbit_width_edge_node
+
+    !> Thin deuterons (temperature scaled by 1e-4) in strong E x B rotation:
+    !> the E x B energy change across the orbit stops the slowest speed node
+    !> before it has a pitch point, independently of the orbit width. The
+    !> coupled finite-width kernel solves that node on thin orbits instead of
+    !> ending the speed grid of every species, and the profile equals the
+    !> thin coupled kernel up to the E x B energy change across the orbits
+    !> of the finite-width nodes (measured 4 %); no node above the slow ones is
+    !> lost, lost_weight is the tail above x_max.
+    subroutine orbit_width_slow_node()
+        character(*), parameter :: eq_name = 'ntv_slow_eq.bc', pert_name = 'ntv_slow_pert.bc'
+        real(dp), parameter :: factor = 1e-4_dp, omega = 4e2_dp
+        type(boozer_file_t), target :: eq, pert
+        type(ntv_species_t) :: sp(1)
+        type(ntv_profile_t) :: prof
+        type(ntv_resolution_t) :: res
+        type(ntv_species_result_t), allocatable :: wide(:, :), thin(:, :)
+        type(orbit_particle_t) :: p
+        type(hp_orbit_geometry_t) :: g
+        real(dp) :: vt
+        integer :: status
+        call write_file(eq_name, .false.)
+        call write_file(pert_name, .true.)
+        call load_boozer_file(eq_name, eq, status)
+        call load_boozer_file(pert_name, pert, status)
+        sp(1) = ntv_species_t(1.0_dp, 3.3435837768e-27_dp)
+        prof%s = [0.45_dp]
+        prof%omega_te = [omega]
+        allocate (prof%density(1, 1), prof%temperature(1, 1), prof%density_s(1, 1), &
+            prof%temperature_s(1, 1), prof%kappa(1, 1))
+        prof%density = 3e19_dp
+        prof%temperature = 2*kev*factor
+        prof%density_s = -1e19_dp
+        prof%temperature_s = -1*kev*factor
+        prof%kappa = 3e-4_dp
+        ! The premise: no pitch point at a tenth of the thermal speed, all
+        ! orbits confined at the thermal speed.
+        vt = sqrt(2*prof%temperature(1, 1)/sp(1)%mass)
+        p%mass = sp(1)%mass
+        p%charge = 1.602176634e-19_dp
+        p%s_ref = 0.45_dp
+        p%omega_e = -omega
+        p%energy = p%mass*(0.1_dp*vt)**2/2
+        call hp_orbit_geometry(eq, p, 0.45_dp, b0, g, status)
+        call hp_orbit_perturbation(g, pert, 3, b0)
+        call check('slow node: stopped at 0.1 v_th', .not. hp_orbit_confined(g, 32, 32))
+        p%energy = p%mass*vt**2/2
+        call hp_orbit_geometry(eq, p, 0.45_dp, b0, g, status)
+        call hp_orbit_perturbation(g, pert, 3, b0)
+        call check('slow node: confined at v_th', hp_orbit_confined(g, 32, 32))
+        res%x_tol = 0
+        res%n_theta = 65
+        res%n_leg = 300
+        res%n_x = 16
+        res%sources = .false.
+        res%orbit_width = .true.
+        res%hp_columns = 16
+        res%hp_rows = 6
+        res%collisions = 3
+        res%nelem = 3
+        res%order = 4
+        res%x_max = 4
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, wide, status)
+        call check('slow node: finite-width profile solved', status == DEVICE_OK)
+        res%orbit_width = .false.
+        res%hp_energy = .true.
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, thin, status)
+        call check('slow node: thin profile solved', status == DEVICE_OK)
+        if (failures > 0) return
+        print '(a,2es14.6,a,2es10.3)', 'slow node: K11 finite, thin ', wide(1, 1)%k11, &
+            thin(1, 1)%k11, ' thin and lost weight ', wide(1, 1)%thin_weight, &
+            wide(1, 1)%lost_weight
+        call check('slow node: thin nodes counted, none lost', wide(1, 1)%thin_weight > 0 .and. &
+            wide(1, 1)%thin_weight < 1e-2_dp .and. wide(1, 1)%lost_weight < 1e-4_dp)
+        call close_to('slow node: K11 against thin', wide(1, 1)%k11, thin(1, 1)%k11, 6e-2_dp)
+    end subroutine orbit_width_slow_node
 
     subroutine write_file(name, perturbation)
         character(*), intent(in) :: name
