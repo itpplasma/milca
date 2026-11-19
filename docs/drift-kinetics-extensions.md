@@ -186,6 +186,13 @@ psi*, evaluated at the orbit point, and drops the radial coupling, of relative s
 nu rho_pol^2 against the resonant broadening; the second stage adds it as a tridiagonal coupling of
 neighbouring psi* surfaces solved by GMRES with the surface factorisations as preconditioner (the
 plan of step 3). POTATO is collisionless, so the first stage meets it in the limit nu -> 0.
+The first stage is implemented for the Lorentz, test-particle and full linearised operators
+(`milca_dk_hp_energy`, `ntv_profile` with `orbit_width` and a collision model): every speed node
+of the Galerkin speed grid has the orbit geometry of its energy and its own mesh, energy
+scattering and the field-particle part couple the nodes at the same (psi*, theta, xi) through the
+quadrature points of the measure node, and the orbit measure enters the speed integral expanded
+in the speed basis, so density is conserved at any width. The quasilinear sources are off with
+finite width, and the speed grid ends below the lowest speed whose orbits leave the file.
 
 Checks of the formulation (in addition to the gate of step 3):
 - rho* -> 0 by scaling the mass at fixed thermal speed reproduces the thin-orbit kernel, with
