@@ -1311,7 +1311,8 @@ foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "circular-tokamak-current|3.04266;0.0755050"
         "circular-tokamak-current-hermite|3.04266;0.0755050"
         "doubled-boundary|failure" "axis-current-free|failure"
-        "wrong-sign-start|3.02142;0.0746517" "vanishing-current|failure"
+        "wrong-sign-start|3.02142;0.0746517" "vanishing-current|failure;iota"
+        "vanishing-current-ladder|failure;iota"
         "bean-continuation-fold|3.546325;9.045291")
     string(REPLACE "|" ";" parts "${case}")
     list(GET parts 0 name)
