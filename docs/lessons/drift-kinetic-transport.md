@@ -183,6 +183,17 @@ limit, three were input data and six were implementation defects.
   Newton steps on generated residuals with exact tangents (#323), as the
   differentiability principle of [DESIGN.md](../../DESIGN.md) requires.
 
+- SFINCS 8df5453 with `includePhi1 = readExternalPhi1 = .true.` (direct solver,
+  11 x 7 x 24 x 16, deuterium at 2 keV): at Phi_1 = 0 the flux-surface averaged
+  B u_par is -0.00683 (constraintScheme 2) or -0.017199 (constraintScheme 1)
+  against -0.017208 without Phi_1, the density sources rise from 1e-12 to
+  1e-7...1e-6, and the change at Phi1Hat = 1e-4 and 2e-4 is not linear
+  (63 and 2.0 T m/s per unit gradient, constraintScheme 1). The cause (input
+  or SFINCS) is not yet isolated, so these runs are no reference.
+- The energy-coupled full operator conserves density per surface point only
+  to first order in the speed-element width; the continuity identity of
+  `test_surface_phi1` measures it (2.1e-3 at 12, 1.0e-3 at 24 elements).
+
 ## Rules from this campaign
 
 1. Every term gets an oracle written from its defining equation and a limit
