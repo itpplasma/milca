@@ -2483,6 +2483,7 @@ contains
         integer :: it, i, p, st, tries, back, nback
         integer, allocatable :: tpos(:, :)
         real(dp), allocatable :: trial_du(:), du_newton(:)
+        real(dp) :: berr0, berr
         type(sparse_solver_t) :: csolver, msolver
         type(ideal_fb_hypotheses_t) :: hyp
         logical :: cready, mready
@@ -2651,6 +2652,10 @@ contains
                         status = IDEAL_FB_SOLVE_FAILED; return
                     end if
                 end if
+                call refine_kkt(solver, srows, scols, smat, [rhs, (0.0_dp, i = 1, nslide)], &
+                    sol, berr0, berr)
+                if (talk) print '(a,es10.2,a,es10.2)', '   KKT backward error ', berr0, &
+                    ' refined ', berr
                 du = sol(:fb%n)
                 if (tries == 1) du_newton = du
                 report%factor_s = report%factor_s + wall() - t0
@@ -2694,9 +2699,16 @@ contains
                     report%line_s = report%line_s + wall() - t0
                     if (st == IDEAL_FB_OK) then
                         tmerit = sum(wts*rhs**2)
+                        if (talk) print '(a,i3,a,es10.2,a,es12.4,a,es10.2)', &
+                            '     trial', back, ' alpha', alpha, ' merit ratio', &
+                            tmerit/merit, ' min jacobian', minjac
                         if (tmerit < (1 - 1.0e-4_dp*alpha)*merit) then
                             accepted = .true.; exit
                         end if
+                    else if (talk) then
+                        print '(a,i3,a,es10.2,a,i0,a,es10.2)', '     trial', back, &
+                            ' alpha', alpha, ' rejected, status ', st, ' min jacobian', &
+                            minjac
                     end if
                     fb%plasma%x = x0; fb%xs = xs0; fb%phi = phi0; fb%lam = lam0
                     if (.not. (nback == 14 .and. back <= 6)) alpha = alpha/2
@@ -3252,6 +3264,42 @@ contains
                 val(tpos(3, k)) = val(tpos(3, k)) + sa*t(2)*t(1)
                 val(tpos(4, k)) = val(tpos(4, k)) + sa*t(2)*t(2)
             end do
+        end do
+    end subroutine
+
+    subroutine refine_kkt(solver, rowptr, colidx, val, b, x, berr0, berr)
+        ! Backward error |K x - b|/(|K| |x| + |b|) (max norms) of a KKT solve
+        ! and up to five steps of iterative refinement with the same factor;
+        ! berr0 before, berr after. K is symmetric, so its CSR is its CSC.
+        type(sparse_solver_t), intent(inout) :: solver
+        integer, intent(in) :: rowptr(:), colidx(:)
+        real(dp), intent(in) :: val(:), b(:)
+        real(dp), intent(inout) :: x(:)
+        real(dp), intent(out) :: berr0, berr
+        real(dp), allocatable :: r(:), dx(:)
+        type(fortsparse_status_t) :: sst
+        real(dp) :: knorm
+        integer :: i, p, k
+        allocate (r(size(b)), dx(size(b)))
+        knorm = 0
+        do i = 1, size(b)
+            knorm = max(knorm, sum(abs(val(rowptr(i):rowptr(i + 1) - 1))))
+        end do
+        do k = 0, 5
+            do i = 1, size(b)
+                r(i) = b(i)
+                do p = rowptr(i), rowptr(i + 1) - 1
+                    r(i) = r(i) - val(p)*x(colidx(p))
+                end do
+            end do
+            berr = maxval(abs(r))/max(knorm*maxval(abs(x)) + maxval(abs(b)), &
+                tiny(1.0_dp))
+            if (k == 0) berr0 = berr
+            if (berr <= 1.0e-14_dp .or. k == 5) exit
+            call sparse_solve(solver, r, dx, sst)
+            if (.not. status_ok(sst)) exit
+            if (.not. all(ieee_is_finite(dx))) exit
+            x = x + dx
         end do
     end subroutine
 

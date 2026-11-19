@@ -411,9 +411,21 @@ contains
                 shell_lines, shell_t, local, spines=shell_spines, &
                 spine_origins=shell_origins)
             if (local /= 0) call fail('the free-boundary mesh failed')
-            call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
-                0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
-                positions=shell_positions, lines=shell_lines, line_t=shell_t)
+            block
+                ! DEBUG: MILCA_FB_SPINES selects the spined shell
+                integer :: length
+                call get_environment_variable('MILCA_FB_SPINES', length=length)
+                if (length > 0) then
+                    call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
+                        0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
+                        positions=shell_positions, lines=shell_lines, line_t=shell_t, &
+                        spines=shell_spines, spine_origins=shell_origins)
+                else
+                    call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
+                        0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
+                        positions=shell_positions, lines=shell_lines, line_t=shell_t)
+                end if
+            end block
         else
             call fb_nested_mesh(mesh, chain, fb_centre, fb_axes, fb_curve, nodes, &
                 degree, local)
@@ -468,6 +480,8 @@ contains
             integer :: length
             call get_environment_variable('MILCA_FB_TANGENTIAL', text, length)
             if (length > 0) read (text, *) fb%tangential_damping
+            call get_environment_variable('MILCA_FB_TRUST', text, length)
+            if (length > 0) fb%trust_region = .true.
         end block
         call fb_solve(tolerance)
     end subroutine
