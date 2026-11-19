@@ -515,7 +515,7 @@ set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
 target_sources(milca_mhd PRIVATE src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90
-    src/generated/milca_fb_spine_leaves.f90)
+    src/generated/milca_fb_spine_leaves.f90 src/mhd/inertia_newton.f90)
 set_source_files_properties(src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90 src/generated/milca_fb_spine_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")

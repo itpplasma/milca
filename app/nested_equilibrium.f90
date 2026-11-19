@@ -482,6 +482,11 @@ contains
             if (length > 0) read (text, *) fb%tangential_damping
             call get_environment_variable('MILCA_FB_TRUST', text, length)
             if (length > 0) fb%trust_region = .true.
+            call get_environment_variable('MILCA_FB_INERTIA', text, length)
+            if (length > 0) then
+                fb%inertia_control = .true.
+                read (text, *) fb%unstable
+            end if
         end block
         call fb_solve(tolerance)
     end subroutine

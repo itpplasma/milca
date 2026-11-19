@@ -63,6 +63,8 @@ module milca_ideal_free_boundary
     use milca_vacuum_shell_leaves, only: vacuum_energy_density, &
         vacuum_energy_gradient, vacuum_energy_hessian
     use milca_fb_spine_leaves
+    use milca_inertia_newton, only: inertia_newton_t, inertia_newton_factor, &
+        inertia_newton_solve, inertia_newton_accept, INERTIA_NEWTON_OK
     use milca_fold_barrier_leaves, only: fold_barrier_density, fold_barrier_gradient, &
         fold_barrier_hessian
     use milca_triangle_basis, only: triangle_basis_jet
@@ -246,6 +248,11 @@ module milca_ideal_free_boundary
         ! by In_-(S_red) of the returned state (ideal_fb_reduced_spectrum).
         ! Default on for FB3D ntor >= 2 (ideal_fb_init).
         logical :: negative_curvature = .false.
+        ! Inertia-controlled Newton on E_red (inertia_solve) instead of the
+        ! residual-merit globalisation; unstable: the number k of negative
+        ! directions of the reduced Hessian the wanted state has.
+        logical :: inertia_control = .false.
+        integer :: unstable = 0
         ! Fold barrier of the escape (ideal_fb_negative_curvature): while it
         ! runs, the reduced energy carries the shell term
         !   B = mu sum det0 phi(J/(fold_threshold det0)),
@@ -2500,6 +2507,15 @@ contains
         status = IDEAL_FB_BAD_INPUT
         if (max_iterations < 0) return
         if (.not. ideal_fb_exterior_ready(fb)) return
+        if (fb%inertia_control) then
+            talk = .false.
+            if (present(verbose)) talk = verbose
+            res_tol = 0
+            if (present(residual_tolerance)) res_tol = residual_tolerance
+            call inertia_solve(fb, tolerance, max_iterations, report, status, talk, &
+                res_tol)
+            return
+        end if
         kz = 0
         nc_next = 0
         nslide = size(fb%slide, 3)
@@ -5958,5 +5974,146 @@ contains
         end do
         if (k /= chain(1)) return
         status = 0
+    end subroutine
+
+    subroutine inertia_solve(fb, tolerance, max_iterations, report, status, talk, &
+                             res_tol)
+        ! Inertia-controlled Newton on the reduced energy E_red(q) (shell map,
+        ! Phi~ and lambda exact at every state, slide gauge bordered). The
+        ! slide-bordered KKT matrix K must have the inertia of a reduced
+        ! Hessian with fb%unstable negative directions:
+        !   positive np + nx - k,  negative nx + nslide + nf + k
+        ! (the shell map and lambda pair as nx (+, -), the slide border as
+        ! nslide (+, -), Phi~ is maximised), else delta |H_ii| is added on the
+        ! plasma and shell rows only (inertia_newton_factor). k = 0: a step
+        ! is accepted by the ratio of the actual to the predicted decrease
+        ! of E_red; k > 0 (a wanted saddle): when the frozen-weight
+        ! stationarity norm decreases. A rejection raises delta.
+        type(ideal_fb_t), intent(inout) :: fb
+        real(dp), intent(in) :: tolerance, res_tol
+        integer, intent(in) :: max_iterations
+        type(ideal_fb_report_t), intent(inout) :: report
+        integer, intent(out) :: status
+        logical, intent(in) :: talk
+        type(inertia_newton_t) :: opt
+        type(sparse_solver_t) :: solver
+        integer, allocatable :: rowptr(:), colidx(:), srows(:), scols(:)
+        real(dp), allocatable :: val(:), smat(:), grad(:), gtrial(:), w(:), diag(:)
+        real(dp), allocatable :: shift(:), sol(:), s(:), x0(:, :, :), xs0(:, :, :)
+        real(dp), allocatable :: phi0(:, :), lam0(:, :, :), hs(:), gp(:)
+        real(dp) :: energy, etrial, minjac, gnorm, gtrial_norm, predicted, delta, dmin
+        real(dp) :: disp, rot, cap, sscale
+        integer :: it, tries, st, nslide, n_pos, n_neg, i, p
+        logical :: accepted, factored
+        status = IDEAL_FB_NOT_CONVERGED
+        nslide = size(fb%slide, 3)
+        n_pos = fb%np + fb%nx - fb%unstable
+        n_neg = fb%nx + nslide + fb%nf + fb%unstable
+        cap = 0.02_dp*maxval(maxval(fb%reference, dim=2) - minval(fb%reference, dim=2))
+        allocate (grad(fb%n), gtrial(fb%n), diag(fb%n), w(fb%n), shift(fb%n + nslide), &
+                  sol(fb%n + nslide))
+        factored = .false.
+        call exact_blocks(fb, st)
+        if (st /= IDEAL_FB_OK) then
+            status = IDEAL_FB_FOLDED; return
+        end if
+        call state_energy(fb, grad, energy, minjac, st)
+        if (st /= IDEAL_FB_OK) then
+            status = IDEAL_FB_FOLDED; return
+        end if
+        do it = 0, max_iterations
+            call ideal_fb_hessian(fb, rowptr, colidx, val)
+            do i = 1, fb%n
+                diag(i) = 0
+                do p = rowptr(i), rowptr(i + 1) - 1
+                    if (colidx(p) == i) diag(i) = abs(val(p))
+                end do
+            end do
+            ! frozen metric of the stationarity norm
+            if (it == 0) call merit_weights(fb, diag, w)
+            gp = grad
+            call project_slide(fb, w, gp)
+            gnorm = sqrt(sum(w*gp**2))
+            if (it == 0) report%merit0 = gnorm**2
+            report%merit = gnorm**2
+            report%residual = sqrt(report%merit/fb%energy_scale)
+            if (talk) print '(a,i3,a,es10.3,a,es22.14,a,es9.2)', 'fb inertia newton', it, &
+                ' res/sigmaV ', report%residual, ' E_red ', energy, ' delta ', &
+                opt%delta_last
+            if (res_tol > 0) then
+                if (report%residual <= res_tol) then
+                    status = IDEAL_FB_OK; exit
+                end if
+            else if (gnorm <= tolerance*sqrt(report%merit0)) then
+                status = IDEAL_FB_OK; exit
+            end if
+            if (it == max_iterations) exit
+            sscale = sum(diag(1:fb%np))/fb%np
+            call ideal_fb_slide_system(fb, rowptr, colidx, val, sscale, srows, scols, smat)
+            shift = 0
+            shift(1:fb%np + fb%nx) = diag(1:fb%np + fb%nx) + 1.0e-12_dp*maxval(diag)
+            x0 = fb%plasma%x; xs0 = fb%xs; phi0 = fb%phi; lam0 = fb%lam
+            accepted = .false.; dmin = 0
+            do tries = 1, 30
+                if (factored) call sparse_destroy(solver)
+                call inertia_newton_factor(opt, srows, scols, smat, shift, n_pos, n_neg, &
+                    solver, delta, st, minimum=dmin)
+                factored = st == INERTIA_NEWTON_OK
+                if (.not. factored) then
+                    if (talk) print '(a,3i8,a,2i8)', '   inertia', opt%inertia, &
+                        ' target', n_pos, n_neg
+                    status = IDEAL_FB_SOLVE_FAILED; exit
+                end if
+                call inertia_newton_solve(opt, solver, [-grad, (0.0_dp, i = 1, nslide)], &
+                    sol, st)
+                if (st /= INERTIA_NEWTON_OK) then
+                    status = IDEAL_FB_SOLVE_FAILED; exit
+                end if
+                s = sol(:fb%n)
+                call map_steps(fb, s, disp, rot)
+                if (disp > cap) s = s*(cap/disp)
+                hs = csr_apply(s)
+                predicted = -(dot_product(grad, s) + 0.5_dp*dot_product(s, hs))
+                call ideal_fb_step(fb, s, 1.0_dp)
+                call exact_blocks(fb, st)
+                if (st == IDEAL_FB_OK) call state_energy(fb, gtrial, etrial, minjac, st)
+                if (st == IDEAL_FB_OK) then
+                    gp = gtrial
+                    call project_slide(fb, w, gp)
+                    gtrial_norm = sqrt(sum(w*gp**2))
+                    if (fb%unstable == 0) then
+                        accepted = inertia_newton_accept(opt, energy, etrial, predicted, &
+                            gnorm, gtrial_norm)
+                    else
+                        accepted = gtrial_norm < gnorm
+                    end if
+                end if
+                if (talk) print '(a,i3,a,es9.2,a,es9.2,a,es12.4,a,es12.4,a,l2)', &
+                    '   try', tries, ' delta', delta, ' |s|', min(disp, cap), &
+                    ' dE', etrial - energy, ' predicted', -predicted, ' accepted', accepted
+                if (accepted) exit
+                fb%plasma%x = x0; fb%xs = xs0; fb%phi = phi0; fb%lam = lam0
+                dmin = max(opt%delta_factor*delta, opt%delta_first)
+            end do
+            if (.not. accepted) exit
+            grad = gtrial; energy = etrial
+            report%iterations = it + 1
+            report%step = min(disp, cap)
+            report%min_jacobian = minjac
+            report%damping = delta
+        end do
+        if (factored) call sparse_destroy(solver)
+    contains
+        function csr_apply(x) result(y)
+            real(dp), intent(in) :: x(:)
+            real(dp) :: y(size(x))
+            integer :: r, q
+            do r = 1, fb%n
+                y(r) = 0
+                do q = rowptr(r), rowptr(r + 1) - 1
+                    y(r) = y(r) + val(q)*x(colidx(q))
+                end do
+            end do
+        end function
     end subroutine
 end module milca_ideal_free_boundary
