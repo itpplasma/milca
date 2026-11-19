@@ -112,6 +112,7 @@ program nested_equilibrium
     real(dp) :: shell_distance
     real(dp), allocatable :: shell_positions(:, :), shell_t(:)
     integer, allocatable :: shell_lines(:, :)
+    real(dp), allocatable :: shell_spines(:, :)
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -407,7 +408,7 @@ contains
         if (shell_layers > 0) then
             call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
                 shell_layers, shell_distance, mesh, chain, shell_positions, &
-                shell_lines, shell_t, local)
+                shell_lines, shell_t, local, spines=shell_spines)
             if (local /= 0) call fail('the free-boundary mesh failed')
             call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
                 0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
@@ -561,6 +562,11 @@ contains
         allocate (v(fb%n), gp(fb%n), gm(fb%n), hv(fb%n))
         call random_number(v); v = v - 0.5_dp
         v(fb%np + fb%nx + 1:fb%np + 2*fb%nx) = 0
+        if (allocated(fb%spine)) then
+            do i = 1, fb%plasma%nodes
+                if (any(abs(fb%spine(:, i)) > 0)) v(2*fb%nmode*(i - 1) + 2:2*fb%nmode*i:2) = 0
+            end do
+        end if
         b = [0, fb%np, fb%np + fb%nx, fb%np + 2*fb%nx, fb%n]
         do i = 1, fb%n
             hv(i) = 0
@@ -894,8 +900,9 @@ contains
         real(dp) :: unused1, unused2, tau
         type(toroidal_profile_t) :: previous
         type(ideal_map_t) :: map0
-        type(ideal_fb_t) :: fb0
-        integer :: j, k, local, n, info, sign_attempt
+        type(ideal_fb_t) :: fb0, fb_good
+        real(dp), allocatable :: c_good(:)
+        integer :: j, k, local, n, info, sign_attempt, halvings
         integer, allocatable :: pivot(:)
         n = iota_level
         s = iota_surfaces(n)
@@ -911,6 +918,8 @@ contains
         call set_iota(c)
         call resolve(local)
         if (local /= 0) call fail('the map folded when frozen with the represented iota')
+        if (fb_solving .and. solve_status /= IDEAL_FB_OK) &
+            call fail('the free-boundary solve did not converge before current matching')
         c0 = c; map0 = map
         if (fb_solving) fb0 = fb
         k = 0
@@ -946,6 +955,8 @@ contains
             ! make iota change sign is halved until iota keeps one sign, which
             ! holds for a short enough step from the admitted c.
             previous = profile
+            c_good = c
+            if (fb_solving) fb_good = fb
             tau = 1
             do
                 call set_iota(c + tau*step(:, 1))
@@ -982,6 +993,23 @@ contains
             solve_tolerance = max(tolerance, min(1e-4_dp, 1e-3_dp*error))
             call resolve(local)
             if (local /= 0) call fail('the map folded when frozen with the updated iota')
+            ! An unconverged free-boundary solve has no current to match: the
+            ! iota step is halved from the last converged state until the
+            ! solve converges.
+            halvings = 0
+            do while (fb_solving .and. solve_status /= IDEAL_FB_OK)
+                halvings = halvings + 1
+                if (halvings > 6) call fail('the free-boundary solve does not converge' &
+                    //' along the current-matching step')
+                tau = tau/2
+                print '(a,es10.3)', 'current iteration: unconverged solve, step scaled by ', &
+                    tau
+                c = c_good + tau*step(:, 1)
+                fb = fb_good
+                call set_iota(c)
+                call resolve(local)
+                if (local /= 0) call fail('the map folded when frozen with the updated iota')
+            end do
         end do
     end subroutine
 
