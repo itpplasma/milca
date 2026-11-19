@@ -109,7 +109,7 @@ module milca_ideal_free_boundary
     public :: ideal_fb_field_basis_t, ideal_fb_drive_traces, ideal_fb_full_turn_traces
     public :: ideal_fb_set_traces, ideal_fb_traces_jvp, ideal_fb_traces_vjp
     public :: ideal_fb_drive_traces_3d, ideal_fb_set_drive_3d
-    public :: ideal_fb_boundary_polygon
+    public :: ideal_fb_boundary_polygon, ideal_fb_worst_shell_cell
     integer, parameter, public :: IDEAL_FB_OK = 0, IDEAL_FB_BAD_INPUT = 1, &
         IDEAL_FB_MAP_FAILED = 2, IDEAL_FB_BEM_FAILED = 3, IDEAL_FB_FOLDED = 4, &
         IDEAL_FB_SOLVE_FAILED = 5, IDEAL_FB_NOT_CONVERGED = 6
@@ -5760,6 +5760,34 @@ contains
         end do
         fb%lap_col = fb%lap_col(:nnz); fb%lap_val = fb%lap_val(:nnz)
         status = 0
+    end subroutine
+
+    subroutine ideal_fb_worst_shell_cell(fb)
+        !! Print the shell cell with the smallest Jacobian ratio J/det over
+        !! its quadrature points: its vertices (role 1 Gamma_p, 2 interior,
+        !! 3 Gamma_c), their positions and reference points.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp) :: w, jac, gv(15), hv(15, 15), worst, ratio
+        integer :: e, g, j, we, k
+        worst = huge(1.0_dp); we = 0
+        do e = 1, fb%ncell
+            do j = 1, fb%plasma%nphi
+                do g = 1, fb%plasma%nq
+                    call shell_point(fb, fb%xs, fb%phi, e, g, j, w, jac, gv, hv, .false.)
+                    ratio = jac/fb%det(g, e)
+                    if (ratio < worst) then
+                        worst = ratio; we = e
+                    end if
+                end do
+            end do
+        end do
+        print '(a,i6,a,es10.2)', 'worst shell cell', we, ': ratio', worst
+        if (we == 0) return
+        do k = 1, 3
+            print '(a,i2,a,i6,a,i2,a,2f10.5,a,2f10.5)', '  vertex', k, ' node', &
+                fb%conn(k, we), ' role', fb%role(fb%conn(k, we)), ' x', &
+                fb%xs(1:2, 1, fb%conn(k, we)), ' reference', fb%reference(:, fb%conn(k, we))
+        end do
     end subroutine
 
     subroutine ideal_fb_boundary_polygon(fb, samples, polygon, status, reference)

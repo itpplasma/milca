@@ -26,7 +26,7 @@ program nested_equilibrium
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
-        ideal_fb_boundary_polygon, last_jacobian
+        ideal_fb_boundary_polygon, last_jacobian, ideal_fb_worst_shell_cell
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
     use milca_ideal_fb_nested, only: fb_nested_offset_distance, fb_nested_layer_mesh, &
@@ -479,6 +479,17 @@ contains
             replacements = replacements + 1
             call ideal_fb_boundary_polygon(fb, 64, shell_section, local, &
                 reference=shell_section_reference)
+            if (free_boundary_verbose) then
+                block
+                    integer :: u, k
+                    open (newunit=u, file='replaced_boundary.txt', status='replace')
+                    do k = 1, size(shell_section, 2)
+                        write (u, '(4es24.16)') shell_section(:, k), &
+                            shell_section_reference(:, k)
+                    end do
+                    close (u)
+                end block
+            end if
             if (local /= 0) call fail('the solved boundary is not a closed chain')
             call fb_nested_offset_distance(shell_section, shell_box, shell_obstacles, &
                 coupling_margin*sqrt(fb_axes(1)*fb_axes(2)), shell_distance, local)
@@ -589,8 +600,10 @@ contains
             ieee_is_finite(lagrangian), all(ieee_is_finite(g(:state%np))), &
             all(ieee_is_finite(g(state%np + 1:state%np + 2*state%nx))), &
             all(ieee_is_finite(g(state%np + 2*state%nx + 1:)))
-        if (local /= IDEAL_FB_OK .or. .not. jacobian > 0) &
+        if (local /= IDEAL_FB_OK .or. .not. jacobian > 0) then
+            call ideal_fb_worst_shell_cell(state)
             call fail(what//' has a folded cell')
+        end if
         if (.not. ieee_is_finite(lagrangian) .or. .not. all(ieee_is_finite(g))) &
             call fail(what//' does not evaluate to a finite residual')
     end subroutine

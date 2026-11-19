@@ -553,7 +553,7 @@ contains
         real(dp), allocatable :: points(:, :), xc(:, :)
         real(dp) :: nu(2), delta, xp(2), tangent(2), alpha, t, area
         real(dp), allocatable :: outline(:, :), hull(:, :), dray(:, :), local_d(:)
-        real(dp), allocatable :: outref(:, :)
+        real(dp), allocatable :: outref(:, :), rp(:)
         real(dp) :: origin(2), lo, hi
         integer :: np, nring, nr, i, r, k, e, l, nloc, ncell, ntri, a, b, next
         integer :: local(2, 10), corner(2, 3), j
@@ -598,8 +598,17 @@ contains
             call fb_nested_section(boundary, centre, axes, outline)
         end if
         call convex_hull(outline, hull)
-        origin = sum(outline, dim=2)/size(outline, 2)
-        allocate (xc(2, nring), dray(2, nring), local_d(nring))
+        ! area centroid of the outline (the vertex mean is pulled towards
+        ! densely sampled parts)
+        origin = 0; area = 0
+        do k = 1, size(outline, 2)
+            j = mod(k, size(outline, 2)) + 1
+            lo = cross2(outline(:, k), outline(:, j))
+            area = area + lo/2
+            origin = origin + lo*(outline(:, k) + outline(:, j))/6
+        end do
+        origin = origin/area
+        allocate (xc(2, nring), dray(2, nring), local_d(nring), rp(nring))
         do i = 1, nring
             alpha = atan2((disc%points(2, ring(i)) - centre(2))/axes(2), &
                 (disc%points(1, ring(i)) - centre(1))/axes(1))
@@ -607,6 +616,7 @@ contains
             if (present(section) .and. present(section_reference)) &
                 xp = outline_at(alpha)
             dray(:, i) = (xp - origin)/norm2(xp - origin)
+            rp(i) = norm2(xp - origin)
             ! local gap of the hull point on this ray
             local_d(i) = distance
             if (present(box) .and. present(obstacles)) then
@@ -626,6 +636,45 @@ contains
         do i = 1, nring
             xc(:, i) = origin + ray_to(dray(:, i), local_d(i))*dray(:, i)
         end do
+        ! Gamma_c must be a simple counter-clockwise curve and every chain
+        ! node must lie inside it on its own ray, or the layers fold.
+        status = 3
+        area = 0
+        do i = 1, nring
+            j = mod(i, nring) + 1
+            area = area + cross2(xc(:, i), xc(:, j))
+        end do
+        if (.not. area > 0) then
+            print '(a)', 'fb_nested_layer_mesh: Gamma_c is not counter-clockwise'
+            return
+        end if
+        do i = 1, nring
+            j = mod(i, nring) + 1
+            do k = i + 2, nring
+                l = mod(k, nring) + 1
+                if (l == i) cycle
+                if (segments_cross(xc(:, i), xc(:, j), xc(:, k), xc(:, l))) then
+                    print '(a,2i5)', 'fb_nested_layer_mesh: Gamma_c intersects itself at', &
+                        i, k
+                    return
+                end if
+            end do
+        end do
+        do i = 1, nring
+            if (.not. norm2(xc(:, i) - origin) > rp(i)) then
+                print '(a,i5,4f10.5)', 'fb_nested_layer_mesh: Gamma_c not outside the' &
+                    //' boundary at node', i, origin + rp(i)*dray(:, i), xc(:, i)
+                return
+            end if
+        end do
+        do i = 1, nring
+            j = mod(i, nring) + 1
+            if (.not. cross2(dray(:, i), dray(:, j)) > 0) then
+                print '(a,i5)', 'fb_nested_layer_mesh: rays out of order at node', i
+                return
+            end if
+        end do
+        status = IDEAL_FB_BAD_INPUT
         ! Lattice (chain node, layer node) -> mesh node; layer 0 is Gamma_p.
         allocate (lattice(nring, 0:nr), points(2, np + nring*nr))
         points(:, :np) = disc%points
@@ -752,6 +801,13 @@ contains
             y = points(:, lattice(modulo(i + c(1), nring) + 1, r + c(2)))
         end function
     end subroutine
+
+    pure logical function segments_cross(p1, p2, q1, q2) result(cross)
+        ! proper intersection of the segments p1-p2 and q1-q2
+        real(dp), intent(in) :: p1(2), p2(2), q1(2), q2(2)
+        cross = cross2(p2 - p1, q1 - p1)*cross2(p2 - p1, q2 - p1) < 0 .and. &
+            cross2(q2 - q1, p1 - q1)*cross2(q2 - q1, p2 - q1) < 0
+    end function
 
     pure real(dp) function cross2(a, b)
         real(dp), intent(in) :: a(2), b(2)
