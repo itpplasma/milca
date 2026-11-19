@@ -36,6 +36,8 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `mgrid_file`, `extcur(k)` | MAKEGRID mgrid file of the coil groups and the current of group k (VMEC's EXTCUR) | none, 0 |
 | `mgrid_degree` | interpolation degree of the mgrid in (R, Z), 1, 3 or 5 | 5 |
 | `coupling_margin` | clearance of the coupling surface around the guess, in units of the minor radius | 0.5 |
+| `vacuum` | `'boundary'`: boundary integrals on the plasma boundary; `'shell'`: FEM shell to the coupling surface | `'boundary'` |
+| `vacuum_panels` | P2 panels (3D: subdivisions in the poloidal parameter) per plasma-boundary edge | 3 |
 
 A `hermite` profile is C1 and cubic on each knot interval; the iota integral
 from the axis is exact on it. Any other profile form (VMEC's splines, sums of
@@ -138,6 +140,14 @@ interpolated in (R, Z) by the tensor Lagrange polynomial of degree
 `mgrid_degree` (error O(h^(degree + 1))), and across its planes by the exact
 discrete Fourier series. The toroidal flux is positive: a deck with a negative
 toroidal field reverses the signs of all `extcur` and of the current.
+
+With `vacuum = 'boundary'` the vacuum is the boundary integral on the plasma
+boundary of
+[free-boundary-nested-map-3d.md section 11](free-boundary-nested-map-3d.md#11-vacuum-on-γ_p-by-boundary-integrals):
+the unknowns are the plasma map only, and the plasma current is carried by a
+filament through the centre of the reference disc. The coupling surface is
+then used only to place the reference mesh. With `vacuum = 'shell'` the
+vacuum is the FEM shell between the plasma and Gamma_c.
 
 The coupling surface Gamma_c is an axisymmetric curve that keeps
 `coupling_margin` times the minor radius from every cross-section of the guess

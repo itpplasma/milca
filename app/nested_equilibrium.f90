@@ -25,7 +25,8 @@ program nested_equilibrium
     use milca_equilibrium_chart, only: cylindrical_chart_t
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
-        ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED
+        ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
+        ideal_fb_use_gamma_p, basis_vacuum_field_t
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
     use milca_ideal_fb_nested, only: fb_nested_geometry, fb_nested_mesh, &
@@ -98,6 +99,12 @@ program nested_equilibrium
     real(dp), allocatable :: filament_drive(:, :), filament_load(:, :)
     real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
     real(dp), allocatable :: fb_curve(:)
+    ! vacuum: 'boundary' (boundary integrals on Gamma_p, ideal_fb_use_gamma_p)
+    ! or 'shell' (the FEM shell to Gamma_c); vacuum_panels: P2 panels (3D: t
+    ! subdivisions) per Gamma_p chain edge.
+    character(16) :: vacuum
+    integer :: vacuum_panels
+    type(basis_vacuum_field_t) :: vacuum_field
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -105,7 +112,7 @@ program nested_equilibrium
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
         iota_nodes, iota_tolerance, free_boundary, mgrid_file, extcur, mgrid_degree, &
-        coupling_margin
+        coupling_margin, vacuum, vacuum_panels
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -118,6 +125,7 @@ program nested_equilibrium
     iota_nodes = -1; iota_tolerance = 1e-4_dp
     free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
     coupling_margin = 0.5_dp
+    vacuum = 'boundary'; vacuum_panels = 3
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -145,6 +153,9 @@ program nested_equilibrium
         error stop 'nested_equilibrium: iota_nodes from 2 to 32, or -1'
     if (free_boundary .and. len_trim(mgrid_file) == 0) &
         error stop 'nested_equilibrium: free_boundary needs mgrid_file'
+    if (vacuum /= 'boundary' .and. vacuum /= 'shell') &
+        error stop 'nested_equilibrium: vacuum is boundary or shell'
+    if (vacuum_panels < 1) error stop 'nested_equilibrium: vacuum_panels must be positive'
     if (free_boundary .and. .not. coupling_margin > 0) &
         error stop 'nested_equilibrium: coupling_margin must be positive'
     call run%open_resolved(unit)
@@ -395,6 +406,15 @@ contains
         ! (a toroidal current it encloses) shows as an n = 0 closure
         coil_closure = sum(abs(extcur(:circuits%ncircuit))*circuits%closure)
         call install_traces(next)
+        if (vacuum == 'boundary') then
+            if (.not. allocated(vacuum_field%basis)) &
+                allocate (vacuum_field%basis, source=coil_basis)
+            vacuum_field%weights = extcur(:circuits%ncircuit)
+            vacuum_field%nfp = nfp; vacuum_field%ntor = ntor_level
+            call ideal_fb_use_gamma_p(next, vacuum_field, local, &
+                panels_per_edge=vacuum_panels)
+            if (local /= IDEAL_FB_OK) call fail('the Gamma_p vacuum set-up failed')
+        end if
         print '(a,es12.4,a,es10.2,a,i0,a,i0)', 'F_vac (T m)', next%f_vac, &
             ', coil closure', coil_closure, ', unknowns ', next%n, ', modes ', &
             ntor_level

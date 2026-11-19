@@ -64,7 +64,7 @@ module milca_ideal_free_boundary
         vacuum_energy_gradient, vacuum_energy_hessian
     use milca_fold_barrier_leaves, only: fold_barrier_density, fold_barrier_gradient, &
         fold_barrier_hessian
-    use milca_triangle_basis, only: triangle_basis_jet
+    use milca_triangle_basis, only: triangle_basis_jet, TRIANGLE_MAX_NODES
     use milca_field_shell, only: field_shell_eval, field_shell_locate
     use milca_sort_keys, only: sort_key_order
     use milca_gs_direct, only: gs_direct_available, gs_direct_mpi_ready
@@ -86,6 +86,11 @@ module milca_ideal_free_boundary
         FORTSPARSE_SYM_INDEFINITE, sparse_inertia, FORTSPARSE_INERTIA_RELIABLE
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t, gamma_c_3d_energy, &
         assignment(=)
+    use milca_ideal_fb_gamma_p, only: gamma_p_t, gamma_p_field_t, gamma_p_build, &
+        gamma_p_vacuum, gamma_p_hessian, GAMMA_P_OK, GAMMA_P_AXISYMMETRIC, &
+        GAMMA_P_CIRCULANT
+    use fortfem_parametric_bem_high_order, only: bem_pair_options_t
+    use milca_map_3d_equilibrium, only: map_3d_coordinates
     implicit none
     private
     public :: ideal_fb_t, ideal_fb_report_t, ideal_fb_init, ideal_fb_set_drive
@@ -107,10 +112,16 @@ module milca_ideal_free_boundary
     public :: ideal_fb_field_basis_t, ideal_fb_drive_traces, ideal_fb_full_turn_traces
     public :: ideal_fb_set_traces, ideal_fb_traces_jvp, ideal_fb_traces_vjp
     public :: ideal_fb_drive_traces_3d, ideal_fb_set_drive_3d
+    public :: ideal_fb_use_gamma_p, basis_vacuum_field_t, ideal_fb_vacuum_energy
     integer, parameter, public :: IDEAL_FB_OK = 0, IDEAL_FB_BAD_INPUT = 1, &
         IDEAL_FB_MAP_FAILED = 2, IDEAL_FB_BEM_FAILED = 3, IDEAL_FB_FOLDED = 4, &
         IDEAL_FB_SOLVE_FAILED = 5, IDEAL_FB_NOT_CONVERGED = 6
     real(dp), parameter :: pi = acos(-1.0_dp)
+    ! Last Gamma_p exterior (geometry and factored S) with its chain and
+    ! settings: the current-matching gradients and the Hessian revisit the
+    ! state of the last gradient, and the BEM assembly dominates their cost.
+    type(gamma_p_t), save :: gamma_p_cache
+    real(dp), allocatable, save :: gamma_p_cache_key(:)
 
     ! External field of real Fourier harmonic k (n = k*nfp) at (R, Z):
     ! B = bcos cos(n phi) + bsin sin(n phi), components (B_R, B_phi, B_Z).
@@ -152,6 +163,18 @@ module milca_ideal_free_boundary
             integer, intent(out) :: status
         end subroutine
     end interface
+
+    ! B_e = sum_k weights(k) b_k of a field basis for the Gamma_p vacuum
+    ! (Cartesian points through sample_points, the n = 0 harmonic through
+    ! sample at k = 0).
+    type, extends(gamma_p_field_t) :: basis_vacuum_field_t
+        class(ideal_fb_field_basis_t), allocatable :: basis
+        real(dp), allocatable :: weights(:)
+        integer :: nfp = 1, ntor = 0
+    contains
+        procedure :: points => basis_vacuum_points
+        procedure :: axisymmetric => basis_vacuum_axisymmetric
+    end type
 
     ! One ideal_fb_sampler as a single-field basis (ideal_fb_set_drive).
     type, extends(ideal_fb_field_basis_t) :: sampler_basis_t
@@ -264,6 +287,17 @@ module milca_ideal_free_boundary
         ! Newton-homotopy offset: when allocated, the gradient returned is
         ! g(U) - shift (shift = (1 - t) g(U0) solves g = (1 - t) g(U0)).
         real(dp), allocatable :: shift(:)
+        ! Vacuum by boundary integrals on Gamma_p (ideal_fb_use_gamma_p,
+        ! milca_ideal_fb_gamma_p): the unknowns are the plasma map only (the
+        ! shell, Phi~ and the multipliers leave), L = W_p - E_v(Gamma_p).
+        ! gamma_p_nodes: plasma nodes of the Gamma_p chain in order;
+        ! filament: closed polygon of the circulation at the reference centre.
+        logical :: bem = .false.
+        integer :: bem_panels = 3, bem_nphi = 0
+        integer, allocatable :: gamma_p_nodes(:)
+        real(dp), allocatable :: filament(:, :)
+        class(gamma_p_field_t), allocatable :: vacuum_field
+        type(bem_pair_options_t) :: bem_options
     end type
 
     type :: ideal_fb_report_t
@@ -355,7 +389,7 @@ contains
     pure logical function ideal_fb_exterior_ready(fb) result(ready)
         ! An exterior is attached: the per-n map (cylindrical chart) or R2.
         type(ideal_fb_t), intent(in) :: fb
-        ready = allocated(fb%exterior_3d) .or. allocated(fb%s_trace)
+        ready = allocated(fb%exterior_3d) .or. allocated(fb%s_trace) .or. fb%bem
     end function
 
     pure integer function harmonic(m)
@@ -1790,6 +1824,10 @@ contains
         integer :: st, s, m, c, p, a, k
         status = IDEAL_FB_BAD_INPUT
         if (.not. ideal_fb_exterior_ready(fb)) return
+        if (fb%bem) then
+            call bem_gradient(fb, grad, status, lagrangian, min_jacobian)
+            return
+        end if
         allocate (gfull(fb%plasma%ndof), gx(3, fb%nmode, fb%ns), gf(fb%nmode, fb%ns), &
             res(3, fb%nmode, fb%ns), cx(3, fb%nmode, fb%ns))
         status = IDEAL_FB_OK
@@ -1878,6 +1916,10 @@ contains
         real(dp), allocatable :: cv(:)
         real(dp) :: ev, mins, cm
         integer :: e, a, m, c, l, nl, cnt, i, k, p, s, t1, t2, nsb, cap, m2
+        if (fb%bem) then
+            call bem_hessian(fb, rowptr, colidx, val)
+            return
+        end if
         nl = 4*fb%nmode*fb%nloc
         call plasma_hessian(fb, hp)
         allocate (blocks(nl, nl, fb%ncell), gx(3, fb%nmode, fb%ns), gf(fb%nmode, fb%ns))
@@ -2159,6 +2201,7 @@ contains
                 end do
             end do
         end do
+        if (fb%bem) return
         do s = 1, fb%ns
             do m = 1, fb%nmode
                 do c = 1, 3
@@ -2871,6 +2914,7 @@ contains
         real(dp) :: mean(2), rms
         integer :: s, nb
         mean = 0; nb = 0; rms = 0
+        if (fb%bem) return
         do s = 1, fb%ns
             if (fb%role(s) /= 1) cycle
             mean = mean + fb%xs(1:2, 1, s) - fb%reference(:, s); nb = nb + 1
@@ -2888,6 +2932,7 @@ contains
         real(dp) :: mean(2), rms
         integer :: s, nb
         mean = 0; nb = 0; rms = 0
+        if (fb%bem) return
         do s = 1, fb%ns
             if (fb%role(s) /= 1) cycle
             mean = mean + [du(ix(fb, 1, 1, s)), du(ix(fb, 2, 1, s))]; nb = nb + 1
@@ -2923,6 +2968,8 @@ contains
         real(dp), allocatable :: v(:)
         type(fortsparse_status_t) :: sst
         integer :: i, p, nnz, row0, col0
+        ready = .false.
+        if (fb%bem) return
         row0 = fb%np; col0 = fb%np + fb%nx
         if (present(primal)) then
             if (primal) then
@@ -3187,6 +3234,7 @@ contains
         integer :: s, m
         disp = maxval(abs(du(1:fb%np)))
         rot = 0
+        if (fb%bem) return
         do s = 1, fb%ns
             do m = 1, fb%nmode
                 disp = max(disp, abs(du(ix(fb, 1, m, s))), abs(du(ix(fb, 2, m, s))))
@@ -3203,6 +3251,7 @@ contains
         integer :: s, m, c
         floor = 1.0e-12_dp*maxval(diag)
         w = 1/max(diag, floor)
+        if (fb%bem) return
         do s = 1, fb%ns
             do m = 1, fb%nmode
                 do c = 1, 3
@@ -3216,6 +3265,8 @@ contains
         type(ideal_fb_t), intent(in) :: fb
         real(dp), intent(out) :: value
         real(dp), allocatable :: res(:, :, :)
+        value = 0
+        if (fb%bem) return
         allocate (res(3, fb%nmode, fb%ns))
         call constraint_residual(fb, res)
         value = maxval(abs(res))
@@ -3229,6 +3280,8 @@ contains
         integer, intent(out) :: status
         real(dp), allocatable :: du(:)
         integer :: off
+        status = IDEAL_FB_OK
+        if (fb%bem) return
         off = fb%np + 2*fb%nx
         call block_solve(fb, off, off, fb%nf, du, status)
         if (status == IDEAL_FB_OK) fb%phi = fb%phi + reshape(du, shape(fb%phi))
@@ -3241,6 +3294,8 @@ contains
         type(ideal_fb_t), intent(inout) :: fb
         integer, intent(out) :: status
         real(dp), allocatable :: du(:)
+        status = IDEAL_FB_OK
+        if (fb%bem) return
         call block_solve(fb, fb%np, fb%np + fb%nx, fb%nx, du, status)
         if (status == IDEAL_FB_OK) fb%lam = fb%lam + reshape(du, shape(fb%lam))
     end subroutine
@@ -3251,6 +3306,8 @@ contains
         type(ideal_fb_t), intent(inout) :: fb
         integer, intent(out) :: status
         real(dp), allocatable :: du(:)
+        status = IDEAL_FB_OK
+        if (fb%bem) return
         call block_solve(fb, fb%np + fb%nx, fb%np, fb%nx, du, status)
         if (status == IDEAL_FB_OK) fb%xs = fb%xs + reshape(du, shape(fb%xs))
     end subroutine
@@ -5559,5 +5616,342 @@ contains
         real(dp), intent(out) :: xi(2), phi_hat
         call field_shell_locate(fb%plasma%chart, fb%nfp, fb%conn, fb%xs, x, seed, &
             e, xi, phi_hat, status)
+    end subroutine
+
+    subroutine basis_vacuum_points(self, x, b, status)
+        class(basis_vacuum_field_t), intent(in) :: self
+        real(dp), intent(in) :: x(:, :)
+        real(dp), intent(out) :: b(:, :)
+        integer, intent(out) :: status
+        real(dp), allocatable :: bf(:, :, :)
+        integer :: q
+        allocate (bf(3, size(self%weights), size(x, 2)))
+        call self%basis%sample_points(x, self%nfp, self%ntor, bf, status)
+        if (status /= 0) return
+        do q = 1, size(x, 2)
+            b(:, q) = matmul(bf(:, :, q), self%weights)
+        end do
+    end subroutine
+
+    subroutine basis_vacuum_axisymmetric(self, rz, b, status)
+        class(basis_vacuum_field_t), intent(in) :: self
+        real(dp), intent(in) :: rz(:, :)
+        real(dp), intent(out) :: b(:, :)
+        integer, intent(out) :: status
+        real(dp), allocatable :: bcos(:, :, :, :), bsin(:, :, :, :)
+        integer :: q
+        allocate (bcos(3, 0:0, size(self%weights), size(rz, 2)), &
+                  bsin(3, 0:0, size(self%weights), size(rz, 2)))
+        call self%basis%sample(rz, self%nfp, 0, bcos, bsin, status)
+        if (status /= 0) return
+        do q = 1, size(rz, 2)
+            b(:, q) = matmul(bcos(:, 0, :, q), self%weights)
+        end do
+    end subroutine
+
+    subroutine ideal_fb_use_gamma_p(fb, field, status, panels_per_edge, nphi, options)
+        ! Switch the vacuum to boundary integrals on Gamma_p: L = W_p - E_v
+        ! with E_v of milca_ideal_fb_gamma_p on the plasma chain, the
+        ! circulation carried by a polygon through the reference centre (the
+        ! image of theta_centre over the toroidal angle, nfp symmetric). The
+        ! shell, Phi~ and the multipliers leave the unknowns. panels_per_edge:
+        ! P2 panels (axisymmetric) or t subdivisions (3D) per chain edge;
+        ! nphi: strips of the 3D exterior per turn.
+        type(ideal_fb_t), intent(inout) :: fb
+        class(gamma_p_field_t), intent(in) :: field
+        integer, intent(out) :: status
+        integer, intent(in), optional :: panels_per_edge, nphi
+        type(bem_pair_options_t), intent(in), optional :: options
+        real(dp) :: q(3), x(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3), ev
+        real(dp), allocatable :: gv(:, :, :)
+        type(gamma_p_t) :: gp
+        integer :: k, nseg, st
+        status = IDEAL_FB_BAD_INPUT
+        call plasma_chain(fb%plasma, fb%order, fb%gamma_p_nodes, st)
+        if (st /= 0) return
+        if (present(panels_per_edge)) fb%bem_panels = panels_per_edge
+        fb%bem_nphi = max(4*fb%nfp, fb%nfp*(4*fb%ntor + 2))
+        if (present(nphi)) fb%bem_nphi = nphi
+        if (present(options)) fb%bem_options = options
+        if (allocated(fb%vacuum_field)) deallocate (fb%vacuum_field)
+        allocate (fb%vacuum_field, source=field)
+        nseg = fb%nfp*((256 + fb%nfp - 1)/fb%nfp)
+        if (allocated(fb%filament)) deallocate (fb%filament)
+        allocate (fb%filament(3, nseg))
+        do k = 1, nseg
+            q = [fb%theta_centre, 2*pi*(k - 0.5_dp)/nseg]
+            call fb%plasma%chart%jet(q, x, d1, d2, d3)
+            fb%filament(:, k) = x
+        end do
+        fb%bem = .true.
+        fb%nx = 0; fb%nf = 0; fb%n = fb%np
+        allocate (gv(2, fb%nmode, size(fb%gamma_p_nodes)))
+        call bem_vacuum(fb, gp, ev, gv, st)
+        status = IDEAL_FB_BEM_FAILED
+        if (st /= GAMMA_P_OK) return
+        status = IDEAL_FB_OK
+    end subroutine
+
+    subroutine plasma_chain(map, order, nodes, status)
+        ! Gamma_p of the plasma map as a closed chain: boundary cell edges
+        ! (every node on the boundary) linked end to end, order nodes per
+        ! edge, the last node of an edge being the first of the next.
+        type(ideal_map_t), intent(in) :: map
+        integer, intent(in) :: order
+        integer, allocatable, intent(out) :: nodes(:)
+        integer, intent(out) :: status
+        integer :: lattice(0:3, 0:3), corner(2, 3), e, i, j, l, k, a, ne, nedge
+        integer, allocatable :: edges(:, :)
+        logical, allocatable :: used(:)
+        real(dp) :: values(TRIANGLE_MAX_NODES), gradient(2, TRIANGLE_MAX_NODES)
+        status = 1
+        lattice = 0
+        do i = 0, order
+            do j = 0, order - i
+                call triangle_basis_jet([real(i, dp), real(j, dp)]/order, &
+                    values(:map%nloc), gradient(:, :map%nloc))
+                k = maxloc(values(:map%nloc), dim=1)
+                if (abs(values(k) - 1) > 1.0e-10_dp) return
+                lattice(i, j) = k
+            end do
+        end do
+        corner = reshape([0, 0, order, 0, 0, order], [2, 3])
+        allocate (edges(0:order, 3*map%cells))
+        ne = 0
+        do e = 1, map%cells
+            do a = 1, 3
+                k = mod(a, 3) + 1
+                ne = ne + 1
+                do l = 0, order
+                    i = corner(1, a) + l*(corner(1, k) - corner(1, a))/order
+                    j = corner(2, a) + l*(corner(2, k) - corner(2, a))/order
+                    edges(l, ne) = map%conn(lattice(i, j), e)
+                end do
+                if (.not. all(map%boundary(edges(:, ne)))) ne = ne - 1
+            end do
+        end do
+        if (ne < 3) return
+        allocate (used(ne), nodes(ne*order))
+        used = .false.; used(1) = .true.
+        nodes(1:order) = edges(0:order - 1, 1)
+        k = edges(order, 1)
+        do nedge = 2, ne
+            j = 0
+            do i = 1, ne
+                if (used(i)) cycle
+                if (edges(0, i) == k) then
+                    j = i; exit
+                end if
+                if (edges(order, i) == k) then
+                    edges(:, i) = edges(order:0:-1, i); j = i; exit
+                end if
+            end do
+            if (j == 0) return
+            used(j) = .true.
+            nodes((nedge - 1)*order + 1:nedge*order) = edges(0:order - 1, j)
+            k = edges(order, j)
+        end do
+        if (k /= nodes(1)) return
+        status = 0
+    end subroutine
+
+    subroutine bem_vacuum(fb, gp, energy, gradient, status)
+        ! E_v (J per field period, without the plasma-volume term) and its
+        ! Hadamard gradient on the chain coefficients at the current map.
+        type(ideal_fb_t), intent(in) :: fb
+        type(gamma_p_t), intent(out) :: gp
+        real(dp), intent(out) :: energy, gradient(:, :, :)
+        integer, intent(out) :: status
+        real(dp), allocatable :: chain(:, :, :)
+        integer :: kind
+        real(dp), allocatable :: key(:)
+        chain = fb%plasma%x(1:2, :, fb%gamma_p_nodes)
+        kind = GAMMA_P_CIRCULANT
+        select type (chart => fb%plasma%chart)
+        type is (cylindrical_chart_t)
+            if (fb%nmode == 1) kind = GAMMA_P_AXISYMMETRIC
+        end select
+        key = [reshape(chain, [size(chain)]), real([kind, fb%nfp, fb%order, &
+            fb%bem_panels, fb%bem_nphi, size(fb%filament)], dp), &
+            reshape(fb%filament, [size(fb%filament)])]
+        energy = 0; gradient = 0
+        status = GAMMA_P_OK
+        if (allocated(gamma_p_cache_key)) then
+            if (size(key) == size(gamma_p_cache_key)) then
+                if (all(key == gamma_p_cache_key)) gp = gamma_p_cache
+            end if
+        end if
+        if (.not. allocated(gp%factor)) then
+            call gamma_p_build(gp, fb%plasma%chart, fb%nfp, fb%order, chain, kind, &
+                status, panels_per_edge=fb%bem_panels, nphi=fb%bem_nphi, &
+                options=fb%bem_options, filament=fb%filament)
+            if (status /= GAMMA_P_OK) return
+            gamma_p_cache = gp; gamma_p_cache_key = key
+        end if
+        ! The plasma-volume term is integrated on the map (ideal_fb_vacuum_energy).
+        gp%nline = 0
+        call gamma_p_vacuum(gp, fb%vacuum_field, fb%circulation, fb%mu0, energy, &
+                            gradient, status)
+    end subroutine
+
+    subroutine bem_gradient(fb, grad, status, lagrangian, min_jacobian)
+        ! dL/dU = dW_p/dU - P^T dE_v/dX on the plasma unknowns, P the
+        ! restriction to the chain.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(out) :: grad(:)
+        integer, intent(out) :: status
+        real(dp), intent(out), optional :: lagrangian, min_jacobian
+        type(gamma_p_t) :: gp
+        real(dp), allocatable :: gfull(:), gv(:, :, :)
+        real(dp) :: wp, ev, minp, volume
+        integer :: st, a, m, c, j
+        allocate (gfull(fb%plasma%ndof), gv(2, fb%nmode, size(fb%gamma_p_nodes)))
+        status = IDEAL_FB_OK
+        call ideal_map_energy(fb%plasma, fb%plasma%x, wp, st, gfull, minp)
+        if (st /= IDEAL_MAP_OK) status = IDEAL_FB_FOLDED
+        do a = 1, fb%plasma%nodes
+            do m = 1, fb%nmode
+                do c = 1, 2
+                    grad(pidx(fb, c, m, a)) = gfull(ideal_map_dof(fb%plasma, c, m, a))
+                end do
+            end do
+        end do
+        call bem_vacuum(fb, gp, ev, gv, st)
+        if (st /= GAMMA_P_OK) then
+            status = IDEAL_FB_BEM_FAILED
+            return
+        end if
+        do j = 1, size(fb%gamma_p_nodes)
+            do m = 1, fb%nmode
+                do c = 1, 2
+                    a = pidx(fb, c, m, fb%gamma_p_nodes(j))
+                    grad(a) = grad(a) - gv(c, m, j)
+                end do
+            end do
+        end do
+        if (allocated(fb%shift)) grad = grad - fb%shift
+        if (present(lagrangian)) then
+            call ideal_fb_vacuum_energy(fb, volume, st)
+            if (st /= IDEAL_FB_OK) status = IDEAL_FB_FOLDED
+            lagrangian = wp - ev - volume
+        end if
+        if (present(min_jacobian)) min_jacobian = minp
+    end subroutine
+
+    subroutine bem_hessian(fb, rowptr, colidx, val)
+        ! H = H_p - P^T H_v P with the dense vacuum block H_v from one
+        ! Hessian product per chain coefficient (gamma_p_hessian, the factor
+        ! of S reused), symmetrised. Without a vacuum (failed exterior) the
+        ! plasma block alone.
+        type(ideal_fb_t), intent(in) :: fb
+        integer, allocatable, intent(out) :: rowptr(:), colidx(:)
+        real(dp), allocatable, intent(out) :: val(:)
+        type(csr_matrix_t) :: hp
+        type(gamma_p_t) :: gp
+        real(dp), allocatable :: gv(:, :, :), hv(:, :), direction(:, :, :), column(:, :, :)
+        real(dp), allocatable :: cv(:)
+        integer, allocatable :: ci(:), cj(:), index(:)
+        real(dp) :: ev
+        integer :: nv, i, j, p, cnt, st, k
+        call plasma_hessian(fb, hp)
+        k = size(fb%gamma_p_nodes)
+        nv = 2*fb%nmode*k
+        allocate (gv(2, fb%nmode, k), direction(2, fb%nmode, k), column(2, fb%nmode, k), &
+                  hv(nv, nv), index(nv))
+        call bem_vacuum(fb, gp, ev, gv, st)
+        hv = 0
+        if (st == GAMMA_P_OK) then
+            do j = 1, nv
+                direction = 0
+                direction(1 + mod(j - 1, 2), 1 + mod((j - 1)/2, fb%nmode), &
+                          1 + (j - 1)/(2*fb%nmode)) = 1
+                call gamma_p_hessian(gp, fb%vacuum_field, direction, column, st)
+                if (st /= GAMMA_P_OK) then
+                    hv = 0
+                    exit
+                end if
+                hv(:, j) = reshape(column, [nv])
+            end do
+        end if
+        hv = 0.5_dp*(hv + transpose(hv))
+        do j = 1, nv
+            index(j) = pidx(fb, 1 + mod(j - 1, 2), 1 + mod((j - 1)/2, fb%nmode), &
+                            fb%gamma_p_nodes(1 + (j - 1)/(2*fb%nmode)))
+        end do
+        allocate (ci(size(hp%val) + nv*nv), cj(size(hp%val) + nv*nv), &
+                  cv(size(hp%val) + nv*nv))
+        cnt = 0
+        do i = 1, fb%np
+            do p = hp%rowptr(i), hp%rowptr(i + 1) - 1
+                cnt = cnt + 1
+                ci(cnt) = i; cj(cnt) = hp%colidx(p); cv(cnt) = hp%val(p)
+            end do
+        end do
+        do j = 1, nv
+            do i = 1, nv
+                cnt = cnt + 1
+                ci(cnt) = index(i); cj(cnt) = index(j); cv(cnt) = -hv(i, j)
+            end do
+        end do
+        call coo_to_csr(fb%np, ci(:cnt), cj(:cnt), cv(:cnt), rowptr, colidx, val)
+    end subroutine
+
+    subroutine ideal_fb_vacuum_energy(fb, energy, status)
+        ! Plasma-volume part of E_v, -1/(2 mu0) int_p |B_e|^2 dV per field
+        ! period, on the map: Gauss-Legendre on the collapsed reference
+        ! triangle and the trapezoidal rule in phi-hat. The axisymmetric
+        ! exterior keeps the n = 0 field, as its BEM does.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(out) :: energy
+        integer, intent(out) :: status
+        integer, parameter :: ng = 6
+        real(dp) :: xg(ng), wg(ng), xi(2), q(3), d(3, 3), ref(2), dg(2, 2)
+        real(dp) :: x(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3), jac(3, 3), dv
+        real(dp), allocatable :: points(:, :), weights(:), b(:, :)
+        integer :: e, i, j, k, nphi, n, st
+        logical :: axisymmetric
+        status = IDEAL_FB_BAD_INPUT; energy = 0
+        if (.not. fb%bem) return
+        axisymmetric = .false.
+        select type (chart => fb%plasma%chart)
+        type is (cylindrical_chart_t)
+            axisymmetric = fb%nmode == 1
+        end select
+        call gauss_legendre(ng, xg, wg)
+        xg = (xg + 1)/2; wg = wg/2
+        nphi = merge(1, max(8, 4*fb%ntor + 4), axisymmetric)
+        allocate (points(3, fb%plasma%cells*ng*ng*nphi), &
+                  weights(fb%plasma%cells*ng*ng*nphi))
+        n = 0
+        do e = 1, fb%plasma%cells
+            do k = 0, nphi - 1
+                do j = 1, ng
+                    do i = 1, ng
+                        xi = [xg(i)*(1 - xg(j)), xg(j)]
+                        call map_3d_coordinates(fb%plasma, e, xi, &
+                            2*pi*k/(fb%nfp*nphi), q, d, ref, dg)
+                        call fb%plasma%chart%jet(q, x, d1, d2, d3)
+                        jac = matmul(d1, d)
+                        dv = abs(jac(1, 1)*(jac(2, 2)*jac(3, 3) - jac(2, 3)*jac(3, 2)) &
+                            - jac(1, 2)*(jac(2, 1)*jac(3, 3) - jac(2, 3)*jac(3, 1)) &
+                            + jac(1, 3)*(jac(2, 1)*jac(3, 2) - jac(2, 2)*jac(3, 1)))
+                        n = n + 1
+                        points(:, n) = x
+                        weights(n) = wg(i)*wg(j)*(1 - xg(j))*dv*2*pi/(fb%nfp*nphi)
+                        if (axisymmetric) points(:, n) = [q(1), 0.0_dp, q(2)]
+                    end do
+                end do
+            end do
+        end do
+        allocate (b(3, n))
+        if (axisymmetric) then
+            call fb%vacuum_field%axisymmetric(points([1, 3], :), b, st)
+        else
+            call fb%vacuum_field%points(points, b, st)
+        end if
+        status = IDEAL_FB_FOLDED
+        if (st /= 0) return
+        energy = -0.5_dp*sum(weights*sum(b**2, dim=1))/fb%mu0
+        status = IDEAL_FB_OK
     end subroutine
 end module milca_ideal_free_boundary

@@ -663,11 +663,12 @@ contains
         gp%phi = gp%load
         call dpotrs('L', gp%ntrace, 1, gp%factor, gp%ntrace, gp%phi, gp%ntrace, info)
         if (info /= 0) return
-        ! Volume term along R lines from r_ref at fixed (Z, phi).
+        ! Volume term along R lines from r_ref at fixed (Z, phi); nline = 0
+        ! leaves it to the caller (a volume quadrature of the plasma map).
         status = GAMMA_P_FIELD_FAILED
         allocate (xg(gp%nline), wg(gp%nline), line(3, gp%nline*gp%nq), &
                   bl(3, gp%nline*gp%nq))
-        call gauss_legendre(gp%nline, xg, wg)
+        if (gp%nline > 0) call gauss_legendre(gp%nline, xg, wg)
         xg = 0.5_dp*(xg + 1); wg = 0.5_dp*wg
         do iq = 1, gp%nq
             r = sqrt(gp%x(1, iq)**2 + gp%x(2, iq)**2)
@@ -677,7 +678,8 @@ contains
                                                   gp%x(3, iq)]
             end do
         end do
-        call external_field(gp, field, line, bl, st)
+        st = 0
+        if (gp%nline > 0) call external_field(gp, field, line, bl, st)
         if (st /= 0) return
         volume = 0
         if (allocated(gp%field)) deallocate (gp%field)
@@ -691,7 +693,7 @@ contains
                 rr = gp%r_ref + xg(l)*(r - gp%r_ref)
                 fsum = fsum + wg(l)*rr*sum(bl(:, k)**2)
             end do
-            f = fsum*(r - gp%r_ref)/r
+            f = fsum*(r - gp%r_ref)/max(r, tiny(1.0_dp))
             n = cross(gp%a(:, iq), gp%b(:, iq))
             volume = volume + gp%w(iq)*f*dot_product(er, n)
             pu = dot_product(gp%phi(gp%dof(:, iq)), gp%basis_u(:, iq))
