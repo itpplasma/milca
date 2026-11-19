@@ -1,14 +1,28 @@
 # Graph of plasma models
 
 The models of MILCA and their reductions: an arrow runs from a parent model to a
-model derived from it. The status of each node is that of its documentation page;
-the derivations behind the arrows are planned in the [theory map](theory-map.md).
+model derived from it. The ladder runs from speculative unified theories at the
+top to the trivial models at the bottom, and every rung is checked against its
+parent in their common range of validity. The status of each node is that of its
+documentation page; the derivations behind the arrows are planned in the
+[theory map](theory-map.md), the implementation of every rung in the
+[model ladder plan](model-ladder-plan.md).
 
 ```mermaid
 flowchart TB
     classDef run fill:#ffffff,stroke:#0072B2,stroke-width:3px
     classDef part fill:#ffffff,stroke:#0072B2,stroke-width:2px,stroke-dasharray:6 3
     classDef plan fill:#ffffff,stroke:#D55E00,stroke-width:2px,stroke-dasharray:3 3
+    classDef spec fill:#ffffff,stroke:#999999,stroke-width:2px,stroke-dasharray:2 4
+
+    TOE["unified theories (speculative): strings and M-theory,<br/>loop quantum gravity, asymptotic safety, causal sets"]:::spec
+    GUT["grand unification and beyond the Standard Model<br/>(speculative): SU(5), SO(10), supersymmetry, axions"]:::spec
+    QGR["semiclassical gravity: quantum fields in curved<br/>spacetime, Hawking radiation, Schwinger pairs"]:::plan
+    SM["Standard Model: electroweak theory and QCD"]:::plan
+    EW["electroweak: weak rates, neutrino transport"]:::plan
+    QCD["QCD: lattice, chiral effective field theory"]:::plan
+    QGP["quark-gluon plasma: hard thermal loops,<br/>QCD kinetics, viscous hydrodynamics"]:::plan
+    TFT["thermal field theory: finite-temperature QED,<br/>screening, damping, equation of state"]:::plan
 
     NB["relativistic Maxwell-Lorentz<br/>many-particle system"]:::part
     CL["classical pairs, Coulomb encounters,<br/>one-component plasma, Debye sphere"]:::run
@@ -42,7 +56,30 @@ flowchart TB
     GVP["Vlasov-Poisson gravity, fuzzy dark matter,<br/>self-interacting dark matter"]:::plan
     MOND["modified gravity: QUMOND, AQUAL<br/>(alternative to dark matter)"]:::plan
     GFL["self-gravitating fluids with cooling"]:::plan
+    RPT["reduced profile transport: 1.5D,<br/>critical gradient, stiff models"]:::plan
+    SUR["surrogates: neural networks and tables<br/>trained on the rungs above"]:::plan
+    AN["analytic equilibria and limits: Solov'ev, Shafranov shift,<br/>Troyon, Greenwald, Mercier, Suydam"]:::plan
+    CIR["circuit and filament models:<br/>plasma current, vertical stability"]:::plan
+    ZD["0-D balance: power and particles, confinement<br/>scaling, Lawson, POPCON, systems model"]:::plan
+    TEQ["thermodynamic equilibrium: Maxwellian,<br/>Saha, Boltzmann, Planck"]:::plan
+    FORM["formulary: Debye length, gyroradius,<br/>collision times, plasma parameter"]:::plan
+    DIM["dimensional analysis: dimensionless numbers,<br/>similarity, order of magnitude"]:::plan
+    TRIV["triviality: vacuum, uniform plasma at rest,<br/>quasineutrality, ideal gas p = n T"]:::plan
 
+    TOE -.-> GUT
+    TOE -.-> QGR
+    GUT -.-> SM
+    QGR --> GR
+    QGR --> QED
+    SM --> EW
+    SM --> QCD
+    EW --> QED
+    EW -.-> NUC
+    QCD --> NUC
+    QCD --> QGP
+    TFT --> QGP
+    QED --> TFT
+    TFT --> QKIN
     QED --> NB
     QED --> QM
     QED --> QKIN
@@ -85,10 +122,31 @@ flowchart TB
     MF --> RX
     NEO --> TR
     MHD --> TR
+    TR --> RPT
+    GK -.-> SUR
+    NEO -.-> SUR
+    TR -.-> SUR
+    SUR -.-> RPT
+    EQ2 --> AN
+    LIN --> AN
+    EQ2 --> CIR
+    RPT --> ZD
+    CIR --> ZD
+    AN --> ZD
+    FK --> TEQ
+    QF --> TEQ
+    TEQ --> FORM
+    COLL --> FORM
+    ZD --> DIM
+    FORM --> DIM
+    DIM --> TRIV
+    TEQ --> TRIV
 ```
 
-Solid blue: running with documented evidence; dashed blue: partly running;
-dotted orange: designed. A dotted arrow supplies rates, sources or an
+Solid blue: running with documented evidence. Dashed blue: partly running.
+Dotted orange: designed. Dotted grey: speculative theory without experimental
+confirmation, implemented only through tractable limits for comparison and
+teaching. A dotted arrow supplies rates, sources or an
 alternative field equation to a model instead of deriving it.
 
 | Model | Status | Page |
@@ -115,3 +173,7 @@ alternative field equation to a model instead of deriving it.
 | QED in a box, QED kinetics, radiation collisions | designed | [QED and radiation](qed-radiation.md) |
 | nuclear reactions | partly running (pp) | [nuclear reactions](nuclear-reactions.md), [pp fusion](pp-fusion.md) |
 | general relativity, post-Newtonian, self-gravitating many-body, dark matter, modified gravity | designed | [gravity](gravity.md) |
+| unified theories, grand unification, beyond the Standard Model | speculative | [model ladder plan](model-ladder-plan.md#speculative-top) |
+| semiclassical gravity, Standard Model, electroweak, QCD, quark-gluon plasma, thermal field theory | designed | [model ladder plan](model-ladder-plan.md#fundamental-top) |
+| reduced profile transport, surrogates, analytic limits, circuit models, 0-D balance | designed | [model ladder plan](model-ladder-plan.md#reduced-bottom) |
+| thermodynamic equilibrium, formulary, dimensional analysis, triviality | designed | [model ladder plan](model-ladder-plan.md#trivial-bottom) |
