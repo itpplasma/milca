@@ -23,7 +23,7 @@ program test_toroidal_profile_hermite
     worst = compare()
     print '(a,es10.3)', 'after an iota shift: ', worst
     if (worst > 1e-14_dp) error stop 'shifted Hermite iota differs'
-    hermite%knots(3) = hermite%knots(2)
+    hermite%iota_knots(3) = hermite%iota_knots(2)
     if (hermite%valid()) error stop 'repeated knot accepted'
     print '(a)', 'PASS Hermite toroidal profiles'
 contains

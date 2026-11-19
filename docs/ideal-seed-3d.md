@@ -117,9 +117,15 @@ leaves include primal/JVP/VJP; the initializer parallelizes independent nodal
 coefficient assembly. FP64 is the current reference path. The seed is a
 candidate: sampled admission is not a whole-cell enclosure, and no continuous
 state/derivative bound or successful equilibrium solve follows from it.
-Iota must have one nonzero sign on the sampled profile-admission grid. This
-is a diagnostic restriction of the current map gauge, not a certified
-polynomial positivity test. Arbitrary nonconvex boundaries may fail harmonic
+Iota must have one nonzero sign on the sampled profile-admission grid, either
+sign. The restriction is needed, not only diagnostic: on the circular tokamak
+(R0 = 3 m, a = 1 m, p = 0) with iota = -0.2 + 0.6 s, admitted for the test, wb
+converged to PARVMEC's 0.0740899 (ns 101) within 1e-6, but the axis moved from
+3.0426 to 3.0481 and 3.0537 m at 16, 24 and 32 boundary nodes against
+PARVMEC's 3.0448 m, and the 32-node solve did not converge, while iota =
+0.2 + 0.6 s gives 3.02938, 3.02937 and 3.02939 m. The iota = 0 surface is
+resonant with every n = 0 perturbation; a formulation for profiles through
+zero is open. The test is sampled, not a certified positivity test. Arbitrary nonconvex boundaries may fail harmonic
 extension; there is no claim that every Fourier boundary is admitted.
 
 Build `test_ideal_seed_3d` and run CTest `ideal_seed_3d_boundary_profiles` for
