@@ -36,6 +36,16 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `mgrid_file`, `extcur(k)` | MAKEGRID mgrid file of the coil groups and the current of group k (VMEC's EXTCUR) | none, 0 |
 | `mgrid_degree` | interpolation degree of the mgrid in (R, Z), 1, 3 or 5 | 5 |
 | `coupling_margin` | clearance of the coupling surface around the guess, in units of the minor radius | 0.5 |
+| `gamma` | adiabatic index; 0 holds the pressure profile fixed, gamma > 0 holds the mass profile fixed and `pressure` is then VMEC's mass profile (see below) | 0 |
+| `adiabatic_degree` | Legendre degree of the projected V'(s) with `gamma > 0` | 8 |
+
+With `gamma > 0` the pressure follows the volume of each flux surface,
+p(s) = K(s)/V'(s)^gamma with V' = dV/ds, and the mass K is fixed by VMEC's
+normalisation K(s) = mu0 P(s) (2 pi |phiedge| R00)^gamma, P the `pressure`
+profile and R00 = `rbc(0,0)`, so that P is the pressure of a state with
+V' = 2 pi |phiedge| R00
+([ideal-map-adiabatic](ideal-map-adiabatic.md)). `pressure_axis` and
+`betatotal` are then those of the solved state.
 
 A `hermite` profile is C1 and cubic on each knot interval; the iota integral
 from the axis is exact on it. Any other profile form (VMEC's splines, sums of
