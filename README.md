@@ -8,13 +8,12 @@ prototyping platform: existing and new models and numerical methods are
 implemented side by side, compared, checked with symbolic derivations, error
 bounds and benchmarks, and made fast, with little human development time.
 
-MILCA is not intended to replace established codes. It is meant as an
-independent cross-check for the field: it solves the problems of other codes,
-from their inputs where it can, with its own formulations, and reports where
-the results agree and where they differ, so that each code, MILCA included,
-can find and fix its discrepancies. Current work covers drift-kinetic and
-neoclassical transport and axisymmetric and three-dimensional MHD equilibria.
-Classical-particle and quantum-mechanical problems with known solutions serve
+MILCA also serves as an independent cross-check for the field: it solves the
+problems of other codes, from their inputs where it can, with its own
+formulations, and reports where the results agree and where they differ, so
+that each code, MILCA included, can find and fix its discrepancies. Current
+work covers drift-kinetic and neoclassical transport and axisymmetric and
+three-dimensional MHD equilibria. Classical-particle and quantum-mechanical problems with known solutions serve
 as additional verification cases.
 
 <a href="https://fortran-lang.org/"><img src="https://raw.githubusercontent.com/fortran-lang/assets/cc6fafc67918ea2daef46b965dcec67ed19ef585/powered_by_fortran/wide/powered_by_Fortran_wide.svg" alt="Powered by Fortran" width="240"></a>
