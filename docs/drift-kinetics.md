@@ -453,7 +453,13 @@ Verification (`test_surface_phi1`):
   \(6.4\times10^{-5}\) with pitch-angle scattering (forces 1, 2),
   \(4.9\times10^{-3}\) and \(3.3\times10^{-3}\) with the full operator.
   \(\langle Bu_\parallel\rangle\) = 1.6358, 2.8757, 3.190 T m/s against SFINCS
-  1.6376, 2.8762, 3.202 T m/s.
+  1.6376, 2.8762, 3.202 T m/s. Term by term, against SFINCS builds with the
+  parallel-field term or both added terms removed (`populateMatrix.F90` and
+  `evaluateResidual.F90` edited locally, not distributed): the E x B source
+  alone gives 2.1828, 5.2100, 8.012, 13.080 T m/s against 2.1827, 5.2101,
+  8.028, 13.081, and with the Boltzmann source 2.2863, 5.4819, 8.249, 13.496
+  against 2.2862, 5.4820, 8.265, 13.497 (pitch-angle forces 1, 2, full
+  operator forces 1, 2).
 - `continuity`: particle conservation fixes the local flow up to a constant,
   \(B^2(\iota\partial_\theta+\partial_\zeta)(u_\parallel/B) + G S = \mathrm{const}\),
   with \(S = (T/ZeB)\,d_\perp B\,(2f_1+5f_2)\) for the magnetic drift and
