@@ -514,9 +514,10 @@ set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
 target_sources(milca_mhd PRIVATE src/generated/milca_vacuum_shell_leaves.f90
-    src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90)
+    src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90
+    src/generated/milca_fb_gamma_p_leaves.f90 src/mhd/ideal_fb_gamma_p.f90)
 set_source_files_properties(src/generated/milca_vacuum_shell_leaves.f90
-    src/generated/milca_fold_barrier_leaves.f90
+    src/generated/milca_fold_barrier_leaves.f90 src/generated/milca_fb_gamma_p_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 target_sources(milca_equilibrium PRIVATE
     src/generated/milca_nested_oracle_leaves.f90 src/equilibrium/nested_oracles.f90)
@@ -1547,7 +1548,7 @@ if(MILCA_FORTSYM_BUILD)
         WILL_FAIL TRUE WORKING_DIRECTORY ${gs_check_dir}/wrong_weight)
     foreach(generator vrmhd_leaves gs_error grad_shafranov ideal_map ideal_gll ideal_xi
             ideal_response_error equilibrium_core curve_chart ideal_seed_3d map_3d_readback
-            ideal_field_angle nonnested islands metriplectic vacuum_shell fold_barrier
+            ideal_field_angle nonnested islands metriplectic vacuum_shell fold_barrier fb_gamma_p
             landreman nested_oracles winslow_seed
             response_strip_jets
             response_fluid
@@ -1562,6 +1563,14 @@ if(MILCA_FORTSYM_BUILD)
         add_executable(gen_${generator} gen/gen_${generator}.f90)
         target_link_libraries(gen_${generator} PRIVATE milca_gen_support)
     endforeach()
+    add_test(NAME fb_gamma_p_leaf_regeneration COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:gen_fb_gamma_p>
+        -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_fb_gamma_p_leaves.f90
+        -DWORK=${CMAKE_BINARY_DIR}/fb-gamma-p-regeneration
+        -DLEAF=milca_fb_gamma_p_leaves.f90
+        -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
+    milca_test_labels(fb_gamma_p_leaf_regeneration fast CLASSES mhd
+        TARGETS gen_fb_gamma_p)
     add_test(NAME dk_pitch_leaf_regeneration COMMAND ${CMAKE_COMMAND}
         -DGENERATOR=$<TARGET_FILE:gen_dk_pitch>
         -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_dk_pitch_leaves.f90
@@ -3442,6 +3451,16 @@ add_test(NAME ideal_fb_traces3d_curve_hessian COMMAND test_ideal_fb_traces3d cur
 add_test(NAME ideal_fb_exterior3d_periodic COMMAND test_ideal_fb_traces3d exterior)
 set_tests_properties(ideal_fb_exterior3d_periodic PROPERTIES
     TIMEOUT 1200 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_ideal_fb_gamma_p test/test_ideal_fb_gamma_p.f90)
+target_link_libraries(test_ideal_fb_gamma_p PRIVATE milca)
+foreach(check edge-basis oracle-axisymmetric oracle-circulant gradient-axisymmetric
+        gradient-circulant hessian-axisymmetric hessian-circulant)
+    add_test(NAME ideal_fb_gamma_p_${check} COMMAND test_ideal_fb_gamma_p ${check})
+    set_tests_properties(ideal_fb_gamma_p_${check} PROPERTIES TIMEOUT 600
+        PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+    milca_test_labels(ideal_fb_gamma_p_${check} fast CLASSES mhd
+        TARGETS test_ideal_fb_gamma_p)
+endforeach()
 # Synthetic nfp = 3 free-boundary case against VMEC++ (benchmarks/fb3d-synthetic).
 add_executable(fb3d_synthetic app/fb3d_synthetic.f90)
 target_link_libraries(fb3d_synthetic PRIVATE milca)

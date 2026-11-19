@@ -506,3 +506,95 @@ Open, from the benchmark decks on sCluster:
   sections folds before the first step. NCSX (`mgrid_ncsx_c09r00_small`): the
   grid edge or a coil touches the guess. Both need a Γ_c that follows the
   sections, that is the 3D chart with the R2 exterior of section 9.
+
+## 11. Vacuum on Γ_p by boundary integrals
+
+The FEM shell between Γ_p and Γ_c folds when coils come close to the plasma
+(section 10). `milca_ideal_fb_gamma_p` (`src/mhd/ideal_fb_gamma_p.f90`)
+replaces it by a boundary integral on the moving plasma boundary Γ_p, with
+no vacuum mesh. It is not yet coupled to the plasma map.
+
+Model. n points out of the plasma, B_e is the coil field at fixed currents
+(F/R e_φ included), c = μ0 I_p is carried by a fixed closed filament inside
+the plasma with field B_f and vector potential A_f per unit circulation, and
+B_x = B_e + c B_f. The vacuum field is B = B_x + ∇Φ with Φ single valued and
+decaying and B·n = 0 on Γ_p. S is the Galerkin exterior Dirichlet-to-Neumann
+map (S Φ = −∂_nΦ weakly), N_i the P2 trace basis and
+h_i = ∫ B_x·n N_i dA. Up to a constant,
+
+    μ0 E_v = 1/2 ∫_ext |B|^2 dV
+           = −1/2 ∫_p |B_e|^2 dV + c X + c^2 G/2 − 1/2 h^T S^-1 h,     (11.1)
+    X = −∫ n·(A_f × B_e) dA,  G = −∫ n·(A_f × B_f) dA.
+
+Derivation, with ∂_nΦ = −B_x·n:
+
+1. ∫_ext |B_x + ∇Φ|^2 = ∫_ext |B_x|^2 + 2∫_ext B_x·∇Φ + ∫_ext |∇Φ|^2.
+2. ∫_ext B_x·∇Φ = −∫ Φ B_x·n dA = −h^T Φ (div B_x = 0, Φ decays).
+3. ∫_ext |∇Φ|^2 = Φ^T S Φ with S Φ = h, so steps 1 to 3 give
+   ∫_ext |B_x|^2 − h^T S^-1 h.
+4. ∫_ext |B_e|^2 = const − ∫_p |B_e|^2 (B_e is smooth in the plasma).
+5. ∫_ext B·curl A_f = −∫ n·(A_f × B) dA + ∫_ext A_f·curl B. For B = B_e the
+   last term is A_f·J_coils, constant while the coils stay outside, which
+   gives X. For B = B_f it vanishes, which gives G (FortFEM
+   `exterior_harmonic_fields`).
+6. ∫_p |B_e|^2 dV = ∫ F·n dA with F = (1/R) ∫_{R_ref}^R |B_e|^2 R′ dR′ e_R
+   (Gauss rule on each R line), so E_v depends on Γ_p only.
+
+The shape gradient is the Hadamard form dE_v = −1/(2μ0) ∫ |B|^2 V_n dA with
+the discrete B on Γ_p (FortSym leaves `gen/gen_fb_gamma_p.f90`, which prove
+B·n = 0 and B·∂_u x = B_x·∂_u x + ∂_uΦ). It is the derivative of the
+continuous energy, not of (11.1) as discretised, so it is consistent with the
+discrete E_v to the order of the BEM only. The Hessian product
+`gamma_p_hessian` linearises that gradient. The trace follows its material
+derivative Φ̇ = Φ′ + V·∇Φ. The shape derivative Φ′ solves the exterior
+Neumann problem ∂_nΦ′ = div_Γ(V_n B), which follows from ∂_n U = 0 for
+U = ψ_x + Φ, ΔU = 0 and δn = −∇_Γ V_n. Weakly S Φ′ = ∫ V_n B·∇_Γ N_i dA,
+one solve with the factor of S per direction. The transport
+V·∇Φ = V·∇_ΓΦ − V_n B_x·n is projected on the trace space. ∇B_x enters by
+central differences of the field.
+
+Exteriors. On an axisymmetric Γ_p (cylindrical chart, one Fourier mode) the
+n = 0 toroidal-mode BEM of FortFEM acts on P2 panels through the chain. On a
+3D Γ_p the parametric P2 BEM is assembled block-circulant over the field
+periods, and only the zero sector harmonic acts on the periodic Φ.
+
+Results (`test_ideal_fb_gamma_p`, torus R = 1 + 0.3 cos t, Z = 0.39 sin t,
+12 P3 chain nodes; 3D: nfp 3 and a 4 cm helical mode). Oracle: B_e = ∇u of
+an interior ring source, so the exact response is Φ = −u and B = 0.
+
+| exterior | trace dofs | E_bem rel. error | rms B/rms ∇u | Φ + u (rel.) |
+|---|---|---|---|---|
+| per n | 8 / 16 / 32 | 1.7e-4 / 9.1e-6 / 3.8e-7 | 6.1e-2 / 1.5e-2 / 3.5e-3 | 2.7e-3 / 4.2e-4 / 6.2e-5 |
+| circulant | 64 / 256 | 2.6e-4 / 2.7e-5 | 7.2e-2 / 1.7e-2 | 3.3e-3 / 4.9e-4 |
+
+Observed orders per halving: 4.6, 2.1 and 2.8 per n, 3.3 (quadrature
+limited at fixed pair rules 6 and 10), 2.1 and 2.7 circulant. Coil field
+(two loops, F/R, B_z) with c = 0.25 T m, against central differences of the
+discrete E_v (step 1e-4 m), max over sampled components relative to max |g|:
+
+| exterior | trace dofs | Hadamard gradient | Hessian product |
+|---|---|---|---|
+| per n | 8 / 16 / 32 | 1.4e-3 / 8.4e-5 / 3.1e-6 | 4.3e-3 / 2.7e-3 / 2.4e-4 |
+| circulant | 64 / 256 | 1.6e-3 / 2.6e-4 | 1.4e-2 / 3.6e-3 |
+
+Decision. The gradient and the Hessian product converge to the discrete
+derivatives with the BEM, so Newton takes the Hadamard gradient as the
+residual and the Hessian product as its Jacobian, with residual-merit
+globalisation, instead of differentiating the discrete operators exactly
+(FortFEM has geometry JVPs for P0 torus panels only). A Gauss-Newton vacuum
+block is not needed.
+
+Open:
+
+- Coupling to the plasma map: L = W_p − E_v with the plasma map as the only
+  unknowns, the chain being its Γ_p nodes, and the dense vacuum block added
+  to the sparse plasma Hessian.
+- Cost. One per-n exterior with 32 trace dofs builds in about 0.1 s. One
+  circulant build with 256 trace dofs per period takes 15 s on 4 threads at
+  fixed pair rules 6 and 10, and minutes with adaptive pair rules at 1e-4.
+  At 1e-6, 210 of the 6912 sector pairs of 144 panels do not converge by
+  degree 48. Γ_p moves, so
+  this cost recurs every Newton step, and 3D cases cannot reach VMEC++ speed
+  with this pair quadrature.
+- The volume term samples B_e along R lines from R_ref, which must not cross
+  a coil.
