@@ -1968,7 +1968,7 @@ add_custom_target(milca_build_info
         -P ${CMAKE_SOURCE_DIR}/cmake/milca_build_info.cmake
     BYPRODUCTS ${milca_build_info_inc} VERBATIM)
 add_library(milca_io src/apps/result_io.f90 src/apps/periodic_pair_config.f90
-    src/apps/animation_export.f90)
+    src/apps/animation_export.f90 src/apps/mgrid_file.f90)
 add_dependencies(milca_io milca_build_info)
 # NTV field lines from Boozer files: composes the equilibrium reader with the
 # continuum kernel, so it lives in the application layer.
@@ -3408,7 +3408,27 @@ add_test(NAME ideal_fb_exterior_frozen_derivatives
 set_tests_properties(ideal_fb_exterior_frozen_derivatives PROPERTIES
     TIMEOUT 300 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 # Circuit currents as parameters of the nested-map free-boundary residual.
-target_sources(milca_mhd PRIVATE src/mhd/ideal_fb_circuits.f90)
+target_sources(milca_mhd PRIVATE src/mhd/ideal_fb_circuits.f90 src/mhd/ideal_fb_mgrid.f90
+    src/mhd/ideal_fb_nested.f90)
+# mgrid coil-group fields as a free-boundary field basis (synthetic files).
+add_executable(test_mgrid_field test/test_mgrid_field.f90)
+target_link_libraries(test_mgrid_field PRIVATE milca milca_io)
+add_test(NAME ideal_fb_mgrid_field COMMAND test_mgrid_field
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+milca_test_labels(ideal_fb_mgrid_field fast CLASSES mhd TARGETS test_mgrid_field)
+# nested_equilibrium in free boundary on the synthetic coil field of
+# test_mgrid_field: converged, and independent of the coupling surface.
+add_test(NAME equilibrium_nested_free-boundary-tokamak COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:nested_equilibrium>
+    -DCHECK=$<TARGET_FILE:test_nested_equilibrium_app>
+    -DMGRID=$<TARGET_FILE:test_mgrid_field>
+    -DCONFIG=${CMAKE_SOURCE_DIR}/examples/nested-equilibrium/free-boundary-tokamak.nml
+    -DWORK=${CMAKE_BINARY_DIR}/nested-equilibrium-free-boundary-tokamak
+    -P ${CMAKE_SOURCE_DIR}/test/check_nested_free_boundary.cmake)
+set_tests_properties(equilibrium_nested_free-boundary-tokamak PROPERTIES
+    TIMEOUT 600 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+milca_test_labels(equilibrium_nested_free-boundary-tokamak fast CLASSES mhd
+    TARGETS nested_equilibrium test_nested_equilibrium_app test_mgrid_field)
 add_executable(test_ideal_fb_circuits test/test_ideal_fb_circuits.f90)
 target_link_libraries(test_ideal_fb_circuits PRIVATE milca)
 add_test(NAME ideal_fb_circuits_derivatives COMMAND test_ideal_fb_circuits derivatives)

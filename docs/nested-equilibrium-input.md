@@ -1,8 +1,10 @@
-# Fixed-boundary nested equilibrium from a boundary and profiles
+# Nested equilibrium from a boundary and profiles
 
 `nested_equilibrium --config FILE` solves the fixed-boundary nested 3D map
 equilibrium (the D8 boundary/profile lane, [ideal-seed-3d](ideal-seed-3d.md))
-for a boundary, a toroidal flux and prescribed profiles, and writes the solved
+for a boundary, a toroidal flux and prescribed profiles, or with
+`free_boundary` the free-boundary equilibrium in the field of coil groups
+([free boundary](#free-boundary)), and writes the solved
 state's global quantities to `output/nested_equilibrium.nc`. It is the native
 entry for cross-code comparison with VMEC-class codes. `milca_import` writes
 this namelist from GVEC, DESC, SPECTRE and VMEC inputs
@@ -30,6 +32,10 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `prescribe_current` | match the enclosed toroidal current `current(k)` (A, coefficients of s^k) instead of keeping `iota` | false |
 | `max_current_iterations`, `current_tolerance` | Newton steps on iota and the largest iota increment of the last step; with automatic resolution at most a tenth of the active `fourier_tolerance`, `mesh_tolerance` and `iota_tolerance` | 30, 1e-5 |
 | `iota_nodes`, `iota_tolerance` | Chebyshev-Gauss surfaces of the matched iota polynomial, 2 to 32, or -1 to raise them from 6 under error control | -1, 1e-4 |
+| `free_boundary` | the boundary is the initial guess of a free-boundary solve | false |
+| `mgrid_file`, `extcur(k)` | MAKEGRID mgrid file of the coil groups and the current of group k (VMEC's EXTCUR) | none, 0 |
+| `mgrid_degree` | interpolation degree of the mgrid in (R, Z), 1, 3 or 5 | 5 |
+| `coupling_margin` | clearance of the coupling surface around the guess, in units of the minor radius | 0.5 |
 
 A `hermite` profile is C1 and cubic on each knot interval; the iota integral
 from the axis is exact on it. Any other profile form (VMEC's splines, sums of
@@ -120,6 +126,40 @@ boundary given in an arbitrary poloidal angle (every VMEC input) needs
 `angle_mpol >= 0`: with the boundary angle pinned, the field lines on the wall
 are tied to that angle and the solve converges to a different, constrained
 state (on the circular test case the axis is then 8-20 mm off).
+
+## Free boundary
+
+With `free_boundary` the plasma map of the
+[3D free boundary](free-boundary-nested-map-3d.md#10-free-boundary-decks-of-the-nested-equilibrium-app)
+is solved on the cylindrical chart with the per-n exterior. The vacuum field
+is sum_k `extcur(k)` b_k with b_k group k of the mgrid file at unit current
+(`mgrid_mode` 'S'; a raw grid 'R' is divided by `raw_coil_cur`). The grid is
+interpolated in (R, Z) by the tensor Lagrange polynomial of degree
+`mgrid_degree` (error O(h^(degree + 1))), and across its planes by the exact
+discrete Fourier series. The toroidal flux is positive: a deck with a negative
+toroidal field reverses the signs of all `extcur` and of the current.
+
+The coupling surface Gamma_c is an axisymmetric curve that keeps
+`coupling_margin` times the minor radius from every cross-section of the guess
+and stays inside the grid and off the coils that lie inside it (grid nodes
+where the curl of the field is not small). Where they are closer, the
+clearance shrinks to 70 % of the room. The reference disc of the frozen field
+is the ellipse inscribed in the mean bounding box of the sections.
+
+A prescribed current fixes the circulation c = mu0 I(1) of the vacuum field.
+Before the first free-boundary solve the interior of the guess is brought to
+fixed-boundary equilibrium with the current matched there, so that the
+plasma's edge current equals c from the start; the free-boundary current is
+then matched as in (1) and (2), with dx/dc from the slide-gauged KKT matrix of
+the free boundary (`ideal_fb_sensitivity`). With prescribed iota, c is set to
+mu0 times the solved edge current by secant steps. Further mesh and toroidal
+levels start from the solved map interpolated to the new mesh. `angle_mpol`
+is not used: the boundary nodes move freely.
+
+The free-boundary output adds `coupling_margin` (the smallest clearance used),
+`coil_closure` (a bound of the n = 0 closure of the coil traces, zero when no
+coil lies inside Gamma_c), `circulation` and `vacuum_f` (R B_phi of the coil
+field); `force_residual` is the free-boundary residual sqrt(merit/(sigma V)).
 
 ## Output
 

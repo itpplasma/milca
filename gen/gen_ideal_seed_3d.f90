@@ -32,6 +32,23 @@ program gen_ideal_seed_3d
     a = sym('r'); b = sym('z')
     call w%emit('seed_disk_coordinates', ['r', 'z'], ['u', 'v', 's'], &
         [a - 2, b, (a - 2)**2 + b**2], ad=.true.)
+    ! An elliptic reference disc of centre (rc, zc) and half-widths
+    ! (rho_r, rho_z): the unit-disk coordinates and the pull-back of the
+    ! frozen forms to (r, z), the gradient of chi by the chain rule and the
+    ! flux density by the Jacobian.
+    rc = sym('rc'); zc = sym('zc'); c = sym('rho_r'); value = sym('rho_z')
+    gu = sym('gu'); gv = sym('gv'); b3 = sym('b3')
+    u = (a - rc)/c; v = (b - zc)/value
+    call w%emit('seed_disc_coordinates', &
+        [character(5) :: 'r', 'z', 'rc', 'zc', 'rho_r', 'rho_z'], &
+        ['u', 'v', 's'], [u, v, u**2 + v**2], ad=.true.)
+    call prove(diff(u, a) - 1/c, 'disc chain rule r')
+    call prove(diff(v, b) - 1/value, 'disc chain rule z')
+    call prove(diff(u, a)*diff(v, b) - diff(u, b)*diff(v, a) - 1/(c*value), &
+        'disc Jacobian')
+    call w%emit('seed_disc_pullback', [character(5) :: 'gu', 'gv', 'b3', 'rho_r', &
+        'rho_z'], ['gr', 'gz', 'br'], [gu/c, gv/value, b3/(c*value)], ad=.true.)
+    u = sym('u'); v = sym('v')
     a = sym('t')
     call w%emit('seed_disk_boundary', ['t ', 'pi'], ['r', 'z'], &
         [2 + cos(2*pi*a), sin(2*pi*a)], ad=.true.)

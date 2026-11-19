@@ -97,7 +97,7 @@ module milca_ideal_free_boundary
     public :: ideal_fb_mode_stability, ideal_fb_mode_energies, ideal_fb_stability_t
     public :: ideal_fb_mode_inertia, ideal_fb_mode_lanczos
     public :: ideal_fb_init_fixed, ideal_fb_fixed_mode
-    public :: ideal_fb_newton_step
+    public :: ideal_fb_newton_step, ideal_fb_sensitivity
     public :: ideal_fb_slide_system, ideal_fb_hypotheses_t, ideal_fb_hypotheses
     public :: ideal_fb_hypotheses_print
     public :: ideal_fb_curvature_t, ideal_fb_negative_curvature
@@ -3349,6 +3349,42 @@ contains
                 du(iphi(fb, m, s2)) = 0
             end do
         end subroutine
+    end subroutine
+
+    subroutine ideal_fb_sensitivity(fb, rhs, solution, status)
+        ! Solutions of the slide-gauged KKT system at the current state,
+        ! [H, s G^T; s G, 0] [du; mu] = [rhs; 0], one factorisation for all
+        ! columns: the response du = -H^-1 dg/dp of the equilibrium to a
+        ! parameter p with rhs = -dg/dp (implicit-function theorem).
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(in) :: rhs(:, :)
+        real(dp), intent(out) :: solution(:, :)
+        integer, intent(out) :: status
+        integer, allocatable :: rowptr(:), colidx(:), rows(:), cols(:)
+        real(dp), allocatable :: val(:), matrix(:), sol(:)
+        type(sparse_solver_t) :: solver
+        type(fortsparse_status_t) :: sst
+        integer :: k, j, nslide
+        status = IDEAL_FB_BAD_INPUT
+        if (.not. ideal_fb_exterior_ready(fb)) return
+        if (size(rhs, 1) /= fb%n .or. any(shape(solution) /= shape(rhs))) return
+        status = IDEAL_FB_SOLVE_FAILED
+        nslide = size(fb%slide, 3)
+        allocate (sol(fb%n + nslide))
+        call ideal_fb_hessian(fb, rowptr, colidx, val)
+        call ideal_fb_slide_system(fb, rowptr, colidx, val, plasma_diagonal_mean(fb, &
+            rowptr, colidx, val), rows, cols, matrix)
+        if (.not. configure(solver)) return
+        call factor_kkt_raw(solver, fb%n + nslide, fb%n + nslide, size(matrix), &
+                           rows, cols, matrix, sst)
+        if (.not. status_ok(sst)) return
+        do k = 1, size(rhs, 2)
+            call sparse_solve(solver, [rhs(:, k), (0.0_dp, j = 1, nslide)], sol, sst)
+            if (.not. status_ok(sst)) exit
+            solution(:, k) = sol(:fb%n)
+        end do
+        call sparse_destroy(solver)
+        if (status_ok(sst)) status = IDEAL_FB_OK
     end subroutine
 
     real(dp) function plasma_diagonal_mean(fb, rowptr, colidx, val) result(mean)
