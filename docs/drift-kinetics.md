@@ -470,6 +470,41 @@ Sources: [SFINCS](https://github.com/landreman/sfincs/tree/8df5453472e982df0f6ae
 [NEO-2 pull request 240](https://github.com/itpplasma/NEO-2/pull/240)
 (misaligned-potential drive in NEO-2-QL, our code).
 
+### Helical-core surfaces from Boozer files (#222)
+
+`dk_surface_profile INPUT [LOCAL_PREFIX]` (module `milca_dk_surface_device`)
+runs `surface_transport` on the surfaces of a `.bc` file, six- or ten-column
+(up-down asymmetric, sine harmonics), with any number of field periods,
+including one period with a helical axis. Per surface it samples \(|B|\) on
+\(n_\theta\times n_\zeta\) Boozer points of one period, sets \(q=1/\iota\),
+\(I/G\) and \(\kappa=\iota B_0/(G+\iota I)\) with \(B_0\) the grid mean of \(|B|\),
+converts \(d/ds\) to \(d/d\psi\) with \(\psi'=\Phi_\mathrm{tor}'/2\pi\), and
+returns the transport matrix, \(\langle Bu_\parallel\rangle\) per species, the
+bootstrap current \(\langle j_\parallel B\rangle\), the local bootstrap current
+on the grid, and for prescribed harmonics of \(\Phi_1\) its averaged and local
+current. \(\Omega_{tE}=d\Phi_0/d\psi_\mathrm{pol}\) enters as
+\(d\Phi_0/d\psi=\iota\Omega_{tE}\) in the forces and as the incompressible
+\(E\times B\) rate.
+
+Verification (`test_dk_surface_device`, synthetic one-period file with
+\(\iota=1.2\) and an up-down asymmetric \((1,1)\) harmonic of amplitude
+\(\delta\)): the sampled geometry equals the closed form to \(2\times10^{-16}\).
+The coefficients are even in \(\delta\) (\(\delta\to-\delta\) is the shift
+\(\varphi_B\to\varphi_B+\pi\)), so their change from the axisymmetric surface
+goes like \(\delta^2\). The ratio of the changes at \(\delta\) and \(\delta/2\)
+is 3.982 (matrix) and 3.960 (bootstrap current) at \(\delta=0.01\), and 3.999
+and 3.998 at \(\delta=0.0025\).
+
+Observation, not yet checked independently: with equal species gradients the
+\(\Phi_1\)-driven current vanishes to rounding for \(n\neq0\) harmonics.
+Continuity fixes each species' flow by the density moment of its
+\(E\times B\) source, which does not depend on charge or mass.
+
+Open from #222: comparison with SFINCS on the same file (needs the
+`readExternalPhi1` question above settled only for \(\Phi_1\)), a helical-core
+equilibrium from VMEC++ or MILCA's own solver, and refusal of surfaces whose
+orbit width exceeds the distance to the helical axis.
+
 ### K1 at low collisionality: pitch fitted to every local maximum
 
 Status: design, two variants to be built and compared (2026-11-09).
