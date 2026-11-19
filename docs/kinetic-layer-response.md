@@ -187,3 +187,21 @@ Checks before landing, in this order:
    1e-14 (`gs_response_3d_kinetic_closure`).
 3. Ideal limit (shielding grows with |Delta|) and the comparison with
    MEPHIT's kinetic hybrid on a device case; the ITER demonstration case.
+
+## Layers matched to a toroidal outer solution (KIM-1L)
+
+`milca_kinetic_layer_match` (`klm_solve`) closes N layers with an outer
+region given by its tearing matrix E (dimensionless) and coil drive C
+[G cm], psi = r B^r at the rational surfaces,
+
+    sum_k (r_j Delta_j delta_jk - E_jk) psi_k = C_j,
+    T_j = -pi R0 r_j n Re(sigma_j) |psi_j/r_j|^2/(m_j c),
+
+with Delta_j and sigma_j = I_par/B^r of `kl_delta` at r_j. E and C come from
+a toroidal ideal outer solution (GPEC/DCON or the per-n response of
+`gs_response_3d`). Checks (`test_kinetic_layer_match`): a vacuum cylinder
+(E = -2|m|) returns the single-surface torque of `klt_torque`, with a
+difference falling as R0^-2 because `klt_torque` approximates the binormal
+wavenumber by m s/r_s; |Delta| -> infinity removes flux and torque;
+Delta = 0 passes psi = -E^{-1} C, and a purely reactive layer carries no
+torque.

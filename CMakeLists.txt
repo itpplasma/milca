@@ -277,7 +277,7 @@ target_sources(milca_classical PRIVATE src/classical/ocp.f90 src/classical/pair_
 target_sources(milca_continuum PRIVATE src/continuum/vlasov_response.f90
     src/continuum/ou_susceptibility.f90 src/continuum/kinetic_layer_cylinder.f90
     src/continuum/kinetic_layer_window.f90 src/continuum/kinetic_layer_delta.f90
-    src/continuum/kinetic_layer_torque.f90
+    src/continuum/kinetic_layer_torque.f90 src/continuum/kinetic_layer_match.f90
     src/generated/milca_toroidal_momentum_leaves.f90 src/continuum/toroidal_momentum.f90
     src/generated/milca_poisson_leaves.f90 src/continuum/poisson_laboratory.f90
     src/generated/milca_fp_leaves.f90 src/continuum/fp_laboratory.f90
@@ -1853,6 +1853,9 @@ add_test(NAME kinetic_layer_delta COMMAND test_kinetic_layer_delta)
 add_executable(test_kinetic_layer_torque test/test_kinetic_layer_torque.f90)
 target_link_libraries(test_kinetic_layer_torque PRIVATE milca)
 add_test(NAME kinetic_layer_torque COMMAND test_kinetic_layer_torque)
+add_executable(test_kinetic_layer_match test/test_kinetic_layer_match.f90)
+target_link_libraries(test_kinetic_layer_match PRIVATE milca)
+add_test(NAME kinetic_layer_match COMMAND test_kinetic_layer_match)
 add_executable(test_toroidal_momentum test/test_toroidal_momentum.f90)
 target_link_libraries(test_toroidal_momentum PRIVATE milca_continuum)
 set_source_files_properties(src/generated/milca_toroidal_momentum_leaves.f90

@@ -350,6 +350,7 @@ milca_test_labels(kinetic_layer_cylinder fast CLASSES continuum TARGETS test_kin
 milca_test_labels(kinetic_layer_window fast CLASSES continuum TARGETS test_kinetic_layer_window)
 milca_test_labels(kinetic_layer_delta fast CLASSES continuum TARGETS test_kinetic_layer_delta)
 milca_test_labels(kinetic_layer_torque fast CLASSES continuum TARGETS test_kinetic_layer_torque)
+milca_test_labels(kinetic_layer_match fast CLASSES continuum TARGETS test_kinetic_layer_match)
 milca_test_labels(ou_susceptibility fast CLASSES continuum TARGETS test_ou_susceptibility)
 milca_test_labels(fusion_reactivity fast CLASSES quantum TARGETS test_fusion_reactivity)
 milca_test_labels(fusion_beam_target fast CLASSES quantum TARGETS test_fusion_beam_target)
