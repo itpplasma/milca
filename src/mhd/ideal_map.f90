@@ -3379,7 +3379,6 @@ contains
             case (LDLT)
                 s%options%symmetry = FORTSPARSE_SYM_INDEFINITE
                 s%options%lu_method = FORTSPARSE_LU_SCALAR
-                s%options%ldlt_supernodal = .true.
             case default
                 s%options%symmetry = FORTSPARSE_SYM_GENERAL
                 s%options%lu_method = FORTSPARSE_LU_SUPERNODAL
