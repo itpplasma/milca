@@ -114,6 +114,9 @@ module milca_ideal_free_boundary
         IDEAL_FB_MAP_FAILED = 2, IDEAL_FB_BEM_FAILED = 3, IDEAL_FB_FOLDED = 4, &
         IDEAL_FB_SOLVE_FAILED = 5, IDEAL_FB_NOT_CONVERGED = 6
     real(dp), parameter :: pi = acos(-1.0_dp)
+    ! Largest roundoff asymmetry of the last assembled Hessian before
+    ! symmetrize_csr: relative to its largest entry and to the row scales.
+    real(dp), save :: assembly_asymmetry(2) = 0
 
     ! External field of real Fourier harmonic k (n = k*nfp) at (R, Z):
     ! B = bcos cos(n phi) + bsin sin(n phi), components (B_R, B_phi, B_Z).
@@ -2061,6 +2064,7 @@ contains
             end do
         end do
         call coo_to_csr(fb%n, ci(:cnt), cj(:cnt), cv(:cnt), rowptr, colidx, val)
+        call symmetrize_csr(rowptr, colidx, val)
     contains
         integer function shell_global(q)
             integer, intent(in) :: q
@@ -2228,6 +2232,36 @@ contains
                     hv(m, r) = hv(m, r) + dot_product(gd(:, i), d2(:, k, m))
                     hv(r, m) = hv(m, r)
                 end do
+            end do
+        end do
+    end subroutine
+
+    subroutine symmetrize_csr(rowptr, colidx, val)
+        ! (i, j) and (j, i) sum the same element contributions in different
+        ! orders, so they differ by roundoff; in rows with a small scale
+        ! that is a large relative asymmetry for the LDL^T factor. Both get
+        ! the same mean, so the assembled Hessian is symmetric bitwise.
+        integer, intent(in) :: rowptr(:), colidx(:)
+        real(dp), intent(inout) :: val(:)
+        real(dp) :: mean, rowmax(size(rowptr) - 1), gmax
+        integer :: r, q, c, q2
+        do r = 1, size(rowptr) - 1
+            rowmax(r) = max(maxval(abs(val(rowptr(r):rowptr(r + 1) - 1))), tiny(1.0_dp))
+        end do
+        gmax = maxval(rowmax)
+        assembly_asymmetry = 0
+        do r = 1, size(rowptr) - 1
+            do q = rowptr(r), rowptr(r + 1) - 1
+                c = colidx(q)
+                if (c <= r) cycle
+                q2 = locate(colidx(rowptr(c):rowptr(c + 1) - 1), r)
+                if (q2 == 0) cycle
+                q2 = rowptr(c) + q2 - 1
+                assembly_asymmetry = max(assembly_asymmetry, &
+                    [abs(val(q) - val(q2))/gmax, &
+                    abs(val(q) - val(q2))/sqrt(rowmax(r)*rowmax(c))])
+                mean = 0.5_dp*(val(q) + val(q2))
+                val(q) = mean; val(q2) = mean
             end do
         end do
     end subroutine
@@ -6050,6 +6084,8 @@ contains
             if (it == max_iterations) exit
             sscale = sum(diag(1:fb%np))/fb%np
             call ideal_fb_slide_system(fb, rowptr, colidx, val, sscale, srows, scols, smat)
+            if (talk) print '(a,2es10.2)', '   assembly asymmetry (global, row-scaled) ', &
+                assembly_asymmetry
             shift = 0
             shift(1:fb%np + fb%nx) = diag(1:fb%np + fb%nx) + 1.0e-12_dp*maxval(diag)
             x0 = fb%plasma%x; xs0 = fb%xs; phi0 = fb%phi; lam0 = fb%lam
@@ -6104,6 +6140,45 @@ contains
         end do
         if (factored) call sparse_destroy(solver)
     contains
+        subroutine asymmetry_report()
+            ! DEBUG: largest |K_ij - K_ji|/max|K| per block pair (plasma,
+            ! shell, multipliers, Phi~, slide border) and its worst entry.
+            real(dp) :: worst(5, 5), kmax, d
+            integer :: r, q, c, q2, br, bc, wr, wc
+            kmax = maxval(abs(smat)); worst = 0; wr = 0; wc = 0
+            do r = 1, size(srows) - 1
+                do q = srows(r), srows(r + 1) - 1
+                    c = scols(q)
+                    if (c <= r) cycle
+                    q2 = findloc(scols(srows(c):srows(c + 1) - 1), r, dim=1)
+                    if (q2 == 0) then
+                        d = abs(smat(q))
+                    else
+                        d = abs(smat(q) - smat(srows(c) + q2 - 1))
+                    end if
+                    br = block_of(r); bc = block_of(c)
+                    if (d/kmax > maxval(worst)) then
+                        wr = r; wc = c
+                    end if
+                    worst(br, bc) = max(worst(br, bc), d/kmax)
+                end do
+            end do
+            print '(a,5es9.1)', '   asymmetry plasma row ', worst(1, :)
+            print '(a,5es9.1)', '   asymmetry shell row  ', worst(2, :)
+            print '(a,5es9.1)', '   asymmetry mult row   ', worst(3, :)
+            print '(a,5es9.1)', '   asymmetry phi row    ', worst(4, :)
+            print '(a,2i8,es12.4)', '   worst entry ', wr, wc, kmax
+        end subroutine
+
+        integer function block_of(i)
+            integer, intent(in) :: i
+            block_of = 1
+            if (i > fb%np) block_of = 2
+            if (i > fb%np + fb%nx) block_of = 3
+            if (i > fb%np + 2*fb%nx) block_of = 4
+            if (i > fb%n) block_of = 5
+        end function
+
         function csr_apply(x) result(y)
             real(dp), intent(in) :: x(:)
             real(dp) :: y(size(x))
