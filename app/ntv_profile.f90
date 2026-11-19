@@ -63,7 +63,7 @@ program ntv_profile
     end if
     do i = 1, ns
         do a = 1, nsp
-            write (*, '(f12.8,i3,5es18.9,2i8,5es18.9,i3,es12.3,i4,i9,2es18.9)', &
+            write (*, '(f12.8,i3,5es18.9,2i8,5es18.9,i3,es12.3,i4,i9,3es18.9)', &
                 advance='no') prof%s(i), a, &
                 result(i, a)%k11, &
                 result(i, a)%k12, result(i, a)%dpsi_dr, result(i, a)%gamma_psi, &
@@ -71,7 +71,7 @@ program ntv_profile
                 result(i, a)%k21, result(i, a)%k22, result(i, a)%heat_flux, &
                 result(i, a)%offset_rotation, result(i, a)%lost_weight, result(i, a)%status, &
                 result(i, a)%mesh_error, result(i, a)%unsettled, result(i, a)%mesh_unknowns, &
-                result(i, a)%vprime, result(i, a)%torque_real
+                result(i, a)%vprime, result(i, a)%torque_real, result(i, a)%thin_weight
             if (allocated(res%deposit_edges) .and. allocated(result(i, a)%deposit)) &
                 write (*, '(*(es18.9))', advance='no') result(i, a)%deposit
             write (*, '(a)') ''

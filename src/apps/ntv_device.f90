@@ -54,7 +54,8 @@ module milca_ntv_device
     use milca_dk_hp, only: hp_operator_t, hp_mesh_t, hp_default_mesh, hp_ntv_kernel, HP_OK, &
         HP_SINGULAR, HP_NO_CONVERGENCE, hp_ntv_estimate, hp_refine, hp_geometry_t, hp_mesh_join
     use milca_dk_hp_energy, only: hp_energy_system_t, hp_energy_setup, &
-        hp_energy_coefficients, hp_energy_free, HP_NO_MEMORY, HP_INVALID_NODE
+        hp_energy_coefficients, hp_energy_free, hp_node_geometry_t, HP_NO_MEMORY, &
+        HP_INVALID_NODE
     use milca_ntv_hp_line, only: hp_line_field_t, hp_line_field
     use milca_ntv_orbit_geometry, only: hp_orbit_geometry_t, hp_orbit_geometry, &
         hp_orbit_perturbation, hp_orbit_confined
@@ -160,10 +161,13 @@ module milca_ntv_device
     !> and check energies of the mesh adaptation, and unsettled counts those
     !> whose refinement stopped at its size or round limit before the
     !> tolerance was met; mesh_unknowns is the largest mesh solved, adapted or
-    !> on a fixed band mesh.
+    !> on a fixed band mesh. In the coupled finite-width kernel, thin_weight is
+    !> the share of the K_11 weight below the speed up to which the slow nodes
+    !> without a pitch point are solved on thin orbits.
     type :: ntv_species_result_t
         real(dp) :: k11 = 0, k12 = 0, k21 = 0, k22 = 0, dpsi_dr = 0, gamma_psi = 0, &
-            heat_flux = 0, torque = 0, offset_rotation = 0, lost_weight = 0, mesh_error = 0
+            heat_flux = 0, torque = 0, offset_rotation = 0, lost_weight = 0, mesh_error = 0, &
+            thin_weight = 0
         integer :: factorisations = 0, iterations = 0, status = DEVICE_OK, unsettled = 0, &
             mesh_unknowns = 0
         ! Finite orbit width with deposit bins: deposit(b) is the part of the
@@ -475,6 +479,11 @@ contains
         !> node's quadrature points leave) and lost_weight is the share of
         !> the K_11 weight y^6 exp(-y^2) above it. The surface fails with
         !> DEVICE_ORBIT_LOST when that end falls below the thermal speed.
+        !> Slow nodes have no pitch point when the E x B energy change across
+        !> the orbit exceeds their kinetic energy: the nodes of a species below
+        !> its slowest node with a valid orbit geometry are solved on thin
+        !> orbits with the E x B Doppler shift, in the same coupled system,
+        !> instead of ending the grid of every species.
         subroutine coupled_surface(is, st)
             integer, intent(in) :: is
             integer, intent(out) :: st
@@ -485,10 +494,13 @@ contains
             type(hp_operator_t), allocatable :: ops(:, :)
             type(hp_mesh_t), allocatable :: meshes(:)
             type(hp_energy_system_t) :: sys
+            type(hp_node_geometry_t), allocatable :: nodes(:, :)
             real(dp), allocatable :: node_r(:, :, :, :)
             integer, allocatable :: mid(:, :)
-            real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2), x_cut, y_lost, y_ok
-            integer :: aa, kx, nx, ks, its, attempt, a_lost
+            logical, allocatable :: lost(:, :), thin(:, :)
+            real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2), x_cut, y_lost, y_ok, &
+                x_thin(nsp)
+            integer :: aa, kx, nx, ks, its, attempt, a_lost, k_ok
             ! Speed grids tried while orbits of the top nodes leave the model.
             integer, parameter :: max_attempts = 6
             st = DEVICE_SOLVE
@@ -502,17 +514,23 @@ contains
                     /collop_nuhat(csp(aa), csp(aa), 1.0_dp)
             end do
             x_cut = res%x_max
+            ! The speed up to which the nodes of a species are thin because the
+            ! finite-width terms of its slowest valid node failed in setup.
+            x_thin = 0
             do attempt = 1, max_attempts
                 call collop_make_grid(x_cut, res%nelem, res%order, grid, ks)
                 if (ks /= COLLOP_OK) return
                 nx = grid%n - 1
-                if (allocated(ops)) deallocate (ops, mid, meshes)
+                if (allocated(ops)) deallocate (ops, mid, meshes, lost, thin)
                 if (allocated(go)) deallocate (go)
                 if (allocated(gl)) deallocate (gl)
-                allocate (ops(nx, nsp), mid(nx, nsp))
+                if (allocated(nodes)) deallocate (nodes)
+                allocate (ops(nx, nsp), mid(nx, nsp), lost(nx, nsp), thin(nx, nsp))
+                lost = .false.
+                thin = .false.
                 y_lost = huge(1.0_dp)
                 if (res%orbit_width) then
-                    allocate (go(nx, nsp), meshes(nx*nsp))
+                    allocate (go(nx, nsp), gl(nx, nsp), meshes(nx*nsp))
                 else
                     allocate (gl(nx, nsp), meshes(1))
                 end if
@@ -520,13 +538,12 @@ contains
                     do kx = 1, nx
                         if (res%orbit_width) then
                             mid(kx, aa) = (aa - 1)*nx + kx
+                            thin(kx, aa) = grid%x(kx + 1) <= x_thin(aa)
+                            if (thin(kx, aa)) cycle
                             call orbit_setup(is, aa, grid%x(kx + 1)**2, go(kx, aa), &
                                 ops(kx, aa), ks)
-                            if (ks == DEVICE_ORBIT_LOST) then
-                                if (grid%x(kx + 1) < y_lost) a_lost = aa
-                                y_lost = min(y_lost, grid%x(kx + 1))
-                                cycle
-                            end if
+                            lost(kx, aa) = ks == DEVICE_ORBIT_LOST
+                            if (lost(kx, aa)) cycle
                             if (ks /= HP_OK) return
                             call start_mesh(go(kx, aa), meshes(mid(kx, aa)))
                         else
@@ -539,9 +556,45 @@ contains
                         end if
                     end do
                 end do
+                if (res%orbit_width) then
+                    do aa = 1, nsp
+                        ! Lost nodes below the slowest valid one are slow, those
+                        ! above it leave the file and end the grid.
+                        k_ok = findloc(.not. (lost(:, aa) .or. thin(:, aa)), .true., dim=1)
+                        if (k_ok == 0) k_ok = 1
+                        do kx = 1, nx
+                            if (.not. lost(kx, aa)) cycle
+                            if (kx < k_ok) then
+                                thin(kx, aa) = .true.
+                            else if (grid%x(kx + 1) < y_lost) then
+                                a_lost = aa
+                                y_lost = grid%x(kx + 1)
+                            end if
+                        end do
+                        do kx = 1, nx
+                            if (.not. thin(kx, aa)) cycle
+                            call thin_setup(is, aa, grid%x(kx + 1)**2, gl(kx, aa), &
+                                ops(kx, aa), ks)
+                            if (ks /= HP_OK) return
+                            ops(kx, aa)%source_dpar = .false.
+                            ops(kx, aa)%source_dlf10 = .false.
+                            call start_mesh(gl(kx, aa), meshes(mid(kx, aa)))
+                        end do
+                    end do
+                end if
                 if (y_lost == huge(1.0_dp)) then
                     if (res%orbit_width) then
-                        call hp_energy_setup(go, ops, meshes, mid, grid, csp, lnl, &
+                        allocate (nodes(nx, nsp))
+                        do aa = 1, nsp
+                            do kx = 1, nx
+                                if (thin(kx, aa)) then
+                                    allocate (nodes(kx, aa)%g, source=gl(kx, aa))
+                                else
+                                    allocate (nodes(kx, aa)%g, source=go(kx, aa))
+                                end if
+                            end do
+                        end do
+                        call hp_energy_setup(nodes, ops, meshes, mid, grid, csp, lnl, &
                             res%collisions, int(res%hp_energy_memory*2.0_dp**30, int64), sys, &
                             ks, gid=mid)
                     else
@@ -550,10 +603,17 @@ contains
                             res%collisions, int(res%hp_energy_memory*2.0_dp**30, int64), sys, ks)
                     end if
                     if (ks /= HP_INVALID_NODE .or. .not. res%orbit_width) exit
+                    kx = sys%invalid(1)
+                    aa = sys%invalid(2)
+                    if (all(thin(1:kx - 1, aa))) then
+                        ! The slowest finite-width node: thin as the nodes below.
+                        x_thin(aa) = grid%x(kx + 1)
+                        cycle
+                    end if
                     ! Orbits that leave the file between the samples of
                     ! hp_orbit_confined: the speed grid ends below that node.
-                    y_lost = grid%x(sys%invalid(1) + 1)
-                    a_lost = sys%invalid(2)
+                    y_lost = grid%x(kx + 1)
+                    a_lost = aa
                     y_ok = maxval(grid%x, mask=grid%x < y_lost)
                     x_cut = (y_ok + y_lost)/2
                 else
@@ -584,6 +644,13 @@ contains
             result(is, :)%iterations = its
             result(is, :)%mesh_unknowns = maxval(sys%node%n)
             result(is, :)%lost_weight = tail_weight(x_cut)
+            if (res%orbit_width) then
+                do aa = 1, nsp
+                    kx = findloc(thin(:, aa), .false., dim=1)
+                    if (kx > 1) result(is, aa)%thin_weight = &
+                        1 - tail_weight((grid%x(kx) + grid%x(kx + 1))/2)
+                end do
+            end if
             st = DEVICE_OK
         end subroutine coupled_surface
 

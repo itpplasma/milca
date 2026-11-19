@@ -192,7 +192,11 @@ of the Galerkin speed grid has the orbit geometry of its energy and its own mesh
 scattering and the field-particle part couple the nodes at the same (psi*, theta, xi) through the
 quadrature points of the measure node, and the orbit measure enters the speed integral expanded
 in the speed basis, so density is conserved at any width. The quasilinear sources are off with
-finite width, and the speed grid ends below the lowest speed whose orbits leave the file.
+finite width, and the speed grid ends below the lowest speed whose orbits leave the file. Slow
+nodes whose orbits have no pitch point, because the E x B energy change across the orbit exceeds
+their kinetic energy, are solved on thin orbits with the E x B Doppler shift in the same coupled
+system (thin_weight is their share of the K_11 weight), so they no longer end the grid of every
+species.
 
 Checks of the formulation (in addition to the gate of step 3):
 - rho* -> 0 by scaling the mass at fixed thermal speed reproduces the thin-orbit kernel, with
