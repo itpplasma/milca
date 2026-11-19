@@ -9,6 +9,7 @@ overview and [scope and design principles](scope.md) for the long-term aims.
 
 - [Scope and design principles](scope.md)
 - [Graph of plasma models](model-graph.md): every model, its reductions and status
+- [Model ladder plan](model-ladder-plan.md): implementation and checks of every rung, from speculative unified theories to trivial models
 - [DESIGN.md](../DESIGN.md): canonical architecture
 - [ROADMAP.md](../ROADMAP.md): active priorities and verification rules
 - [Software engineering policy](software-engineering.md),
