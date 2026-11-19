@@ -59,6 +59,10 @@ program gen_ideal_map
    identity = engine%zero_test(b(1)*diff(density, b(1)) + b(2)*diff(density, b(2)) &
       + b(3)*diff(density, b(3)) - 2*(density + p*jac))
    if (identity%verdict /= VERDICT_TRUE) error stop 'ideal energy b homogeneity unproved'
+   ! Affine in p with slope -J: the volume leaf of adiabatic pressure is this
+   ! density at b = 0, p = -1.
+   identity = engine%zero_test(diff(density, p) + jac)
+   if (identity%verdict /= VERDICT_TRUE) error stop 'ideal energy pressure slope unproved'
    do i = 1, 9
       gradient(i) = diff(density, d(1 + mod(i - 1, 3), 1 + (i - 1)/3))
    end do

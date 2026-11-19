@@ -668,6 +668,11 @@ target_link_libraries(test_ideal_map_field_angle PRIVATE milca)
 add_test(NAME ideal_map_field_angle COMMAND test_ideal_map_field_angle)
 set_tests_properties(ideal_map_field_angle PROPERTIES PROCESSORS 4 TIMEOUT 120
     ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_ideal_map_adiabatic test/test_ideal_map_adiabatic.f90)
+target_link_libraries(test_ideal_map_adiabatic PRIVATE milca)
+add_test(NAME ideal_map_adiabatic COMMAND test_ideal_map_adiabatic)
+set_tests_properties(ideal_map_adiabatic PROPERTIES PROCESSORS 4 TIMEOUT 120
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 add_executable(test_map_3d_loop test/test_map_3d_loop.f90)
 target_link_libraries(test_map_3d_loop PRIVATE milca)
 add_test(NAME equilibrium_map_3d_loop COMMAND test_map_3d_loop)
