@@ -974,8 +974,18 @@ contains
         real(dp) :: dj(3, 10), dq(3, 6), e(12), two_pi
         real(dp) :: source_flux(3), drive, jdrive(3), ddrive(3)
         real(dp) :: pb(3, 3), pq(3, 3), jw, xp(2), cjt(3), fqt(3)
-        real(dp), allocatable :: bop(:, :), dop(:, :), w1(:, :), jc(:, :), qc(:, :)
-        integer :: q, j, k, bk, n1, n0, n2, nb, ra, rp, rf, rv, cb, cp, cf
+        ! The meridional basis does not depend on phi: the phi samples are
+        ! summed into 3x3 kernels per block pair and contracted once per
+        ! quadrature point. A p/Phi gradient column is d = (d_R, d_phi, d_Z)
+        ! of the V0 basis; its phi component carries dtr, the others tr.
+        real(dp), allocatable :: sab(:, :, :, :), kap(:, :, :, :), kaf(:, :, :, :), &
+            kpb(:, :, :, :), kfb(:, :, :, :), kpp(:, :, :, :), kfp(:, :, :, :), &
+            kff(:, :, :, :), sav(:, :), sfv(:, :), rbv(:, :), rpv(:, :), rfv(:, :), &
+            scratch(:, :)
+        real(dp) :: tb(3, 3), tp(3, 3), tf(3, 3), qb(3, 3), qp(3, 3), tv(3), &
+            ptb(3, 3), ptp(3, 3), ptf(3, 3), pqb(3, 3), pqp(3, 3), ptv(3), &
+            wv(3, lay%nb), dbasis(3, field%fs%nl0), a, c, rvv
+        integer :: q, j, k, bk, bl2, i2, j2, n1, n0, n2, nb, ra, rp, rf, rv, cb, cp, cf
         status = 1
         rl = 0
         n1 = field%fs%sp(1)%nloc; n0 = field%fs%nl0; n2 = field%fs%sp(2)%nloc
@@ -986,8 +996,12 @@ contains
         if (want) then
             jb = 0; jd = 0
         end if
-        allocate (bop(3, cb), dop(3, n0*nb), w1(3, n1*nb), &
-            jc(3, cb + 2*n0*nb + 1), qc(3, cb + 2*n0*nb + 1))
+        if (want) then
+            allocate (sab(3, 3, nb, nb), kap(3, 3, nb, nb), kaf(3, 3, nb, nb), &
+                kpb(3, 3, nb, nb), kfb(3, 3, nb, nb), kpp(3, 3, nb, nb), &
+                kfp(3, 3, nb, nb), kff(3, 3, nb, nb), sav(3, nb), sfv(3, nb), &
+                rbv(3, nb), rpv(3, nb), rfv(3, nb), scratch(3, max(n0, n1, n2)))
+        end if
         two_pi = 2*acos(-1.0_dp)
         do bk = 1, nb
             bl(:, bk) = b((bk - 1)*lay%nb2 + field%fs%sp(2)%dof(:, t)) &
@@ -1008,6 +1022,10 @@ contains
             pv = matmul(val, pl); pg = matmul(grad, pl)
             fv = matmul(val, fl); fg = matmul(grad, fl)
             w = wq/nphi
+            if (want) then
+                sab = 0; kap = 0; kaf = 0; kpb = 0; kfb = 0; kpp = 0; kfp = 0
+                kff = 0; sav = 0; sfv = 0; rbv = 0; rpv = 0; rfv = 0; rvv = 0
+            end if
             do j = 1, nphi
                 phi = two_pi*(j - 1)/(nphi*lay%period)
                 call trig(lay%modes, phi, tr, dtr, lay%period)
@@ -1080,40 +1098,102 @@ contains
                         e(3), e(4), e(5), e(6), 0.0_dp, 0.0_dp, dq(1, k), &
                         dq(2, k), dq(3, k))
                 end do
-                ! Trial and test operators: B per V2 basis, the 3D gradient
-                ! of a V0 basis, and the V1 test field, each times its trig.
-                do bk = 1, nb
-                    bop(:, (bk - 1)*n2 + 1:bk*n2) = tr(bk)*v2
-                    w1(:, (bk - 1)*n1 + 1:bk*n1) = tr(bk)*v1
-                    dop(1, (bk - 1)*n0 + 1:bk*n0) = tr(bk)*grad(1, :)
-                    dop(2, (bk - 1)*n0 + 1:bk*n0) = dtr(bk)*val/rr
-                    dop(3, (bk - 1)*n0 + 1:bk*n0) = tr(bk)*grad(2, :)
+                ! Frame-weighted tangents: B columns carry pb, p/Phi
+                ! gradient columns pq; test rows carry jw pq^T.
+                tb = matmul(dj(:, 1:3), pb); tp = matmul(dj(:, 4:6), pq)
+                tf = matmul(dj(:, 7:9), pq); tv = dj(:, 10)/(two_pi*xp(1))
+                qb = matmul(dq(:, 1:3), pb); qp = matmul(dq(:, 4:6), pq)
+                ptb = matmul(transpose(pq), tb); ptp = matmul(transpose(pq), tp)
+                ptf = matmul(transpose(pq), tf); pqb = matmul(transpose(pq), qb)
+                pqp = matmul(transpose(pq), qp); ptv = matmul(transpose(pq), tv)
+                a = w*jw
+                wv(1, :) = tr; wv(2, :) = dtr; wv(3, :) = tr
+                do bl2 = 1, nb
+                    do bk = 1, nb
+                        c = -a*tr(bk)*tr(bl2)
+                        sab(:, :, bk, bl2) = sab(:, :, bk, bl2) + c*ptb
+                        do j2 = 1, 3
+                            c = -a*tr(bk)*wv(j2, bl2)
+                            kap(:, j2, bk, bl2) = kap(:, j2, bk, bl2) + c*ptp(:, j2)
+                            kaf(:, j2, bk, bl2) = kaf(:, j2, bk, bl2) + c*ptf(:, j2)
+                            do i2 = 1, 3
+                                c = a*wv(i2, bk)
+                                kpb(i2, j2, bk, bl2) = kpb(i2, j2, bk, bl2) &
+                                    + c*tr(bl2)*pqb(i2, j2)
+                                kfb(i2, j2, bk, bl2) = kfb(i2, j2, bk, bl2) &
+                                    + c*tr(bl2)*ptb(i2, j2)
+                                c = c*wv(j2, bl2)
+                                kpp(i2, j2, bk, bl2) = kpp(i2, j2, bk, bl2) + c*pqp(i2, j2)
+                                kfp(i2, j2, bk, bl2) = kfp(i2, j2, bk, bl2) + c*ptp(i2, j2)
+                                kff(i2, j2, bk, bl2) = kff(i2, j2, bk, bl2) + c*ptf(i2, j2)
+                            end do
+                        end do
+                    end do
+                    sav(:, bl2) = sav(:, bl2) - a*tr(bl2)*ptv
+                    sfv(:, bl2) = sfv(:, bl2) + a*wv(:, bl2)*ptv
+                    rbv(:, bl2) = rbv(:, bl2) + a*tr(bl2)/xp(1)*tb(2, :)
+                    rpv(:, bl2) = rpv(:, bl2) + a*wv(:, bl2)/xp(1)*tp(2, :)
+                    rfv(:, bl2) = rfv(:, bl2) + a*wv(:, bl2)/xp(1)*tf(2, :)
                 end do
-                bop = matmul(pb, bop)
-                jc(:, :cb) = matmul(dj(:, 1:3), bop)
-                jc(:, cb + 1:cb + n0*nb) = matmul(dj(:, 4:6), matmul(pq, dop))
-                jc(:, cb + n0*nb + 1:cb + 2*n0*nb) = matmul(dj(:, 7:9), matmul(pq, dop))
-                jc(:, cb + 2*n0*nb + 1) = dj(:, 10)/(two_pi*xp(1))
-                qc = 0
-                qc(:, :cb) = matmul(dq(:, 1:3), bop)
-                qc(:, cb + 1:cb + n0*nb) = matmul(dq(:, 4:6), matmul(pq, dop))
-                w1 = jw*matmul(pq, w1)
-                dop = jw*matmul(pq, dop)
-                call add_block(ra + 1, ra + n1*nb, -w*transpose(w1), jc)
-                call add_block(rp + 1, rp + n0*nb, w*transpose(dop), qc)
-                call add_block(rf + 1, rf + n0*nb, w*transpose(dop), jc)
-                jb(rv, :) = jb(rv, :) + w*jw*jc(2, :cb)/xp(1)
-                jd(rv, :) = jd(rv, :) + w*jw*jc(2, cb + 1:)/xp(1)
+                rvv = rvv + a*tv(2)/xp(1)
             end do
+            if (want) call contract()
         end do
         status = 0
     contains
-        subroutine add_block(r0, r1, test, cols)
-            integer, intent(in) :: r0, r1
-            real(dp), intent(in) :: test(:, :), cols(:, :)
-            jb(r0:r1, :) = jb(r0:r1, :) + matmul(test, cols(:, :cb))
-            jd(r0:r1, :) = jd(r0:r1, :) + matmul(test, cols(:, cb + 1:))
+        subroutine contract()
+            ! jb/jd += (row basis)^T kernel (column basis) for every block pair.
+            integer :: r0, c0, ca, cv
+            dbasis(1, :) = grad(1, :); dbasis(2, :) = val/rr; dbasis(3, :) = grad(2, :)
+            cv = 2*n0*nb + 1
+            do bl2 = 1, nb
+                c0 = (bl2 - 1)*n2; ca = (bl2 - 1)*n0
+                do bk = 1, nb
+                    r0 = ra + (bk - 1)*n1
+                    call put(jb, r0, c0, v1, sab(:, :, bk, bl2), v2)
+                    call put(jd, r0, cp + ca, v1, kap(:, :, bk, bl2), dbasis)
+                    call put(jd, r0, cf + ca, v1, kaf(:, :, bk, bl2), dbasis)
+                    r0 = rp + (bk - 1)*n0
+                    call put(jb, r0, c0, dbasis, kpb(:, :, bk, bl2), v2)
+                    call put(jd, r0, cp + ca, dbasis, kpp(:, :, bk, bl2), dbasis)
+                    r0 = rf + (bk - 1)*n0
+                    call put(jb, r0, c0, dbasis, kfb(:, :, bk, bl2), v2)
+                    call put(jd, r0, cp + ca, dbasis, kfp(:, :, bk, bl2), dbasis)
+                    call put(jd, r0, cf + ca, dbasis, kff(:, :, bk, bl2), dbasis)
+                end do
+                r0 = ra + (bl2 - 1)*n1
+                jd(r0 + 1:r0 + n1, cv) = jd(r0 + 1:r0 + n1, cv) + matmul(sav(:, bl2), v1)
+                r0 = rf + (bl2 - 1)*n0
+                jd(r0 + 1:r0 + n0, cv) = jd(r0 + 1:r0 + n0, cv) &
+                    + matmul(sfv(:, bl2), dbasis)
+                jb(rv, c0 + 1:c0 + n2) = jb(rv, c0 + 1:c0 + n2) + matmul(rbv(:, bl2), v2)
+                jd(rv, cp + ca + 1:cp + ca + n0) = jd(rv, cp + ca + 1:cp + ca + n0) &
+                    + matmul(rpv(:, bl2), dbasis)
+                jd(rv, cf + ca + 1:cf + ca + n0) = jd(rv, cf + ca + 1:cf + ca + n0) &
+                    + matmul(rfv(:, bl2), dbasis)
+            end do
+            jd(rv, cv) = jd(rv, cv) + rvv
         end subroutine
+
+        subroutine put(m, r0, c0, left, kernel, right)
+            ! Explicit loops: the operands are a few entries wide.
+            real(dp), intent(inout) :: m(:, :)
+            integer, intent(in) :: r0, c0
+            real(dp), intent(in) :: left(:, :), kernel(3, 3), right(:, :)
+            integer :: i, jj, nc
+            nc = size(right, 2)
+            do jj = 1, nc
+                scratch(:, jj) = kernel(:, 1)*right(1, jj) + kernel(:, 2)*right(2, jj) &
+                    + kernel(:, 3)*right(3, jj)
+            end do
+            do jj = 1, nc
+                do i = 1, size(left, 2)
+                    m(r0 + i, c0 + jj) = m(r0 + i, c0 + jj) + left(1, i)*scratch(1, jj) &
+                        + left(2, i)*scratch(2, jj) + left(3, i)*scratch(3, jj)
+                end do
+            end do
+        end subroutine
+
     end subroutine
 
     subroutine local_maps(field, lay, t, grow, srow, gcol)
