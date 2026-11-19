@@ -10,7 +10,8 @@
 !! and the precession prefactor
 !!   pre = q m v^2 dB/ds(cos)/(2 Z e B_ref psi'),
 !! (offset 0) solves the same problem to first order in the orbit width, so
-!! the NTV kernels of the two geometries agree when the orbit is thin.
+!! the NTV kernels of the two geometries agree when the orbit is thin, for
+!! either sign of the charge.
 program test_ntv_orbit_geometry
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, load_boozer_file, BOOZER_OK
@@ -104,6 +105,23 @@ program test_ntv_orbit_geometry
     print '(a,2es20.11,a,es9.2)', 'R drive along orbit, drive at s* ', r_f, r_g, ' rel ', &
         abs(r_f/r_g - 1)
     if (abs(r_f/r_g - 1) > 1e-4_dp) error stop 1
+
+    ! Charge -e: the thin precession changes sign with Z, and the orbit
+    ! geometry must place the leg of v_par > 0 on the other side of s*.
+    p%charge = -e
+    call hp_orbit_geometry(bf, p, s_star, b_ref, g, status)
+    if (status /= 0) error stop 'orbit geometry for charge -e failed'
+    op_f%pre = -op_f%pre
+    op_g%m = [3]
+    op_g%c = [(1e-3_dp, 0.0_dp)]
+    call hp_ntv_kernel(f, mesh_f, op_f, r_f, status)
+    if (status /= HP_OK) error stop 'thin kernel for charge -e failed'
+    call hp_default_mesh(g, 4, 16, 6, 1e-3_dp, 0.3_dp, mesh_g)
+    call hp_ntv_kernel(g, mesh_g, op_g, r_g, status)
+    if (status /= HP_OK) error stop 'orbit kernel for charge -e failed'
+    print '(a,2es20.11,a,es9.2)', 'charge -e: R thin field, orbit geometry ', r_f, r_g, &
+        ' rel ', abs(r_g/r_f - 1)
+    if (abs(r_g/r_f - 1) > 1e-3_dp) error stop 1
 
 contains
 

@@ -179,7 +179,9 @@ contains
         status = ORBIT_BAD_INPUT
         if (p%mass <= 0 .or. p%charge == 0) return
         call boozer_harmonics(bf%axi%m, theta, cm, sm)
-        dir = sigma*sign(1.0_dp, leg_sign())
+        ! rho = m v_par/(Z e B): for negative charge the leg of v_par > 0 lies
+        ! on the other side of s*.
+        dir = sigma*sign(1.0_dp, leg_sign()*p%charge)
         lo = s_star
         f_lo = residual(lo)
         ! At a turning point f_lo vanishes; rounding must not make it a miss.
