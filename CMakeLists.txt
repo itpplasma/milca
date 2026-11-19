@@ -1275,7 +1275,8 @@ target_link_libraries(test_nested_equilibrium_app PRIVATE milca_io)
 foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "circular-tokamak-hermite|3.0366;0.0750949;59.2176264"
         "circular-tokamak-current|3.04266;0.0755050"
-        "circular-tokamak-current-hermite|3.04266;0.0755050")
+        "circular-tokamak-current-hermite|3.04266;0.0755050"
+        "doubled-boundary|failure")
     string(REPLACE "|" ";" parts "${case}")
     list(GET parts 0 name)
     list(SUBLIST parts 1 -1 expected)
@@ -1301,7 +1302,7 @@ add_test(NAME equilibrium_nested_qi-nfp2-current-free COMMAND ${CMAKE_COMMAND}
     "-DEXPECTED=0.9846071 2.276210e-3 0.2904458 -0.4417404"
     -P ${CMAKE_SOURCE_DIR}/test/check_nested_equilibrium.cmake)
 set_tests_properties(equilibrium_nested_qi-nfp2-current-free PROPERTIES
-    LABELS "equilibrium;slow" TIMEOUT 1800 PROCESSORS 8
+    TIMEOUT 1800 PROCESSORS 8
     ENVIRONMENT "OMP_NUM_THREADS=8;OPENBLAS_NUM_THREADS=1")
 add_executable(pp_fusion_eft_export app/pp_fusion_eft_export.f90)
 add_dependencies(pp_fusion_eft_export milca_build_info)
