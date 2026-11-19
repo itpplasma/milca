@@ -123,7 +123,12 @@ Memory grows like map_ntor^2, about 14 GB at 32 and 58 GB at 64 modes on this
 mesh. The energy sees the map only at its
 quadrature points, so the continued start of a level can reach a stationary
 point that folds between them; the volume-integral points detect the fold,
-and that level is solved again from its Winslow seed.
+and that level is solved again from its Winslow seed. A level whose map still
+folds does not resolve the map: a fold on a plane of the energy's toroidal
+quadrature lies between in-plane points and raises the mesh, a fold only
+between those planes raises the toroidal modes (the interior of a boundary
+with a large axis excursion needs more harmonics than the boundary). With
+that resolution fixed or at its limit the run ends with a `failure`.
 
 The seed of every toroidal plane is the Winslow map of its cross-section
 (`milca_winslow_seed`, [ideal-seed-3d](ideal-seed-3d.md)): the interior that

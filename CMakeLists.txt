@@ -1305,7 +1305,8 @@ target_link_libraries(test_nested_equilibrium_app PRIVATE milca_io)
 # PARVMEC (ns 101, mpol 8) on the same inputs: raxis, wb and, for iota, the
 # exact volume 2 pi^2 R a^2; GVEC gives raxis 3.03683 m for the iota case.
 # wrong-sign-start: the same deck started from iota = +0.3; bean-continuation-fold:
-# the same deck solved at 24 boundary nodes from its seed.
+# the same deck solved at 24 boundary nodes from its seed; fold-between-planes:
+# the same deck solved directly with map_ntor = 5.
 foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "circular-tokamak-hermite|3.0366;0.0750949;59.2176264"
         "circular-tokamak-current|3.04266;0.0755050"
@@ -1313,7 +1314,8 @@ foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
         "doubled-boundary|failure" "axis-current-free|failure"
         "wrong-sign-start|3.02142;0.0746517" "vanishing-current|failure;iota"
         "vanishing-current-ladder|failure;iota"
-        "bean-continuation-fold|3.546325;9.045291")
+        "bean-continuation-fold|3.546325;9.045291"
+        "fold-between-planes|4.982840;1676.8216")
     string(REPLACE "|" ";" parts "${case}")
     list(GET parts 0 name)
     list(SUBLIST parts 1 -1 expected)
