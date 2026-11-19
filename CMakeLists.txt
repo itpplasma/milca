@@ -677,6 +677,9 @@ target_link_libraries(test_winslow_seed PRIVATE milca)
 add_test(NAME ideal_seed_3d_winslow COMMAND test_winslow_seed)
 set_tests_properties(ideal_seed_3d_winslow PROPERTIES PROCESSORS 4 TIMEOUT 120
     ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_test(NAME ideal_seed_3d_winslow_helias COMMAND test_winslow_seed helias)
+set_tests_properties(ideal_seed_3d_winslow_helias PROPERTIES PROCESSORS 4 TIMEOUT 1800
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 add_executable(test_toroidal_profile_hermite test/test_toroidal_profile_hermite.f90)
 target_link_libraries(test_toroidal_profile_hermite PRIVATE milca)
 add_test(NAME ideal_seed_3d_hermite_profile COMMAND test_toroidal_profile_hermite)
