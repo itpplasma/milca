@@ -67,6 +67,7 @@ module milca_ideal_map
     private
     public :: ideal_map_t, ideal_frozen_t
     public :: ideal_map_init, ideal_map_freeze, ideal_map_energy, ideal_map_hessian
+    public :: ideal_map_triangle_rule
     public :: ideal_map_solve, ideal_map_point, ideal_map_dof, ideal_map_mode_norms
     public :: ideal_map_reduce, ideal_map_expand, ideal_map_rdof, ideal_map_axis_dof
     public :: ideal_map_prolong, ideal_map_residual, ideal_map_position_gauge
@@ -500,7 +501,6 @@ contains
         integer, intent(in), optional :: nphi, quadrature_order
         real(dp), intent(in), optional :: mu0
         integer, intent(in), optional :: axis_degree
-        type(gauss_quadrature_triangle_t) :: rule
         real(dp) :: h(2, 2, TRIANGLE_MAX_NODES)
         real(dp), allocatable :: qxi(:), qeta(:), qw(:)
         integer :: g, j, m, k, a, c, e, l, order, degree
@@ -531,15 +531,8 @@ contains
         ! Degree 7 up to P3; the integrand of degree k maps needs 2k + 1 above.
         order = max(7, 2*degree + 1)
         if (present(quadrature_order)) order = quadrature_order
-        ! Symmetric Gauss rules up to degree 7; collapsed (Duffy) Gauss-Legendre
-        ! rules of the requested polynomial degree above that.
-        if (order <= 7) then
-            call rule%init(order)
-            qxi = rule%xi; qeta = rule%eta; qw = rule%weights
-        else
-            call triangle_duffy_quadrature(order, qxi, qeta, qw, g)
-            if (g /= 0) return
-        end if
+        call ideal_map_triangle_rule(order, qxi, qeta, qw, g)
+        if (g /= 0) return
         map%nq = size(qw)
         allocate (map%weight(map%nq), map%shape(map%nloc, map%nq), &
             map%dshape(2, map%nloc, map%nq))
@@ -646,6 +639,57 @@ contains
             map%det(map%nq, map%cells))
         map%b = 0; map%p = 0; map%det = 0
         status = IDEAL_MAP_OK
+    end subroutine
+
+    subroutine ideal_map_triangle_rule(order, xi, eta, weights, status)
+        ! Quadrature of the map's energy on the reference triangle (area 1/2):
+        ! symmetric Gauss rules up to degree 7, collapsed (Duffy)
+        ! Gauss-Legendre rules above. The energy density grows like 1/J, so a
+        ! negative weight (the centroid of the symmetric degree-3 and degree-7
+        ! rules) rewards a vanishing Jacobian there and leaves the energy
+        ! unbounded below; those degrees take the symmetric degree-8 rule with
+        ! positive weights instead.
+        integer, intent(in) :: order
+        real(dp), allocatable, intent(out) :: xi(:), eta(:), weights(:)
+        integer, intent(out) :: status
+        type(gauss_quadrature_triangle_t) :: rule
+        status = 0
+        if (order <= 7) then
+            call rule%init(order)
+            xi = rule%xi; eta = rule%eta; weights = rule%weights
+            if (.not. all(weights > 0)) call positive_degree8(xi, eta, weights)
+        else
+            call triangle_duffy_quadrature(order, xi, eta, weights, status)
+        end if
+    end subroutine
+
+    pure subroutine positive_degree8(xi, eta, weights)
+        ! Symmetric 16-point rule exact to degree 8 with positive weights on
+        ! the reference triangle of area 1/2 (Dunavant, Int. J. Numer. Meth.
+        ! Eng. 21, 1129 (1985)): the centroid, three orbits (a, a, 1 - 2a) and
+        ! one orbit of (a, b, 1 - a - b).
+        real(dp), allocatable, intent(out) :: xi(:), eta(:), weights(:)
+        real(dp), parameter :: w0 = 0.144315607677787_dp
+        real(dp), parameter :: a(3) = [0.459292588292723_dp, 0.170569307751760_dp, &
+            0.050547228317031_dp]
+        real(dp), parameter :: w(3) = [0.095091634267285_dp, 0.103217370534718_dp, &
+            0.032458497623198_dp]
+        real(dp), parameter :: a6 = 0.008394777409958_dp, b6 = 0.263112829634638_dp, &
+            w6 = 0.027230314174435_dp
+        real(dp) :: c6
+        integer :: k
+        allocate (xi(16), eta(16), weights(16))
+        xi(1) = 1.0_dp/3; eta(1) = 1.0_dp/3; weights(1) = w0
+        do k = 1, 3
+            xi(3*k - 1:3*k + 1) = [a(k), a(k), 1 - 2*a(k)]
+            eta(3*k - 1:3*k + 1) = [a(k), 1 - 2*a(k), a(k)]
+            weights(3*k - 1:3*k + 1) = w(k)
+        end do
+        c6 = 1 - a6 - b6
+        xi(11:16) = [a6, b6, c6, a6, b6, c6]
+        eta(11:16) = [b6, c6, a6, c6, a6, b6]
+        weights(11:16) = w6
+        weights = weights/2
     end subroutine
 
     subroutine ideal_map_freeze(map, field, status)

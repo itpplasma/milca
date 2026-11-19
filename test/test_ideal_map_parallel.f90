@@ -27,7 +27,7 @@ program test_ideal_map_parallel
     use milca_ideal_map, only: ideal_map_t, ideal_map_init, ideal_map_freeze, &
         ideal_map_hessian, ideal_map_solve, ideal_map_solve_report_t, &
         ideal_map_parallel_mass, ideal_map_rdof, ideal_map_point, ideal_map_expand, &
-        IDEAL_MAP_BAD_INPUT
+        IDEAL_MAP_BAD_INPUT, ideal_map_triangle_rule
     use milca_ideal_seed, only: nested_seed_t, ideal_seed_init
     use fortfem_element_to_csr, only: csr_matrix_t
     use fortfem_gauss_quadrature_2d, only: gauss_quadrature_triangle_t
@@ -156,7 +156,7 @@ contains
         ! node and omega of a neighbouring interior node.
         type(ideal_map_t), intent(inout) :: map
         type(csr_matrix_t), intent(in) :: mp
-        type(gauss_quadrature_triangle_t) :: rule
+        real(dp), allocatable :: qx(:), qe(:), qw(:)
         real(dp), allocatable :: x0(:, :, :), vfull(:)
         real(dp) :: centre(2), dist, best, ent(3, 3), direct(3, 3), u(3, 3)
         real(dp) :: xi(2), bref(3), tang(3), dxm(3, 3), jac, w, h, scale_x, err
@@ -186,13 +186,15 @@ contains
         x0 = map%x
         scale_x = maxval(abs(x0))
         allocate (vfull(size(x0)))
-        call rule%init(7)
+        ! the map's own rule: the entries must agree to roundoff
+        call ideal_map_triangle_rule(7, qx, qe, qw, k)
+        if (k /= 0) error stop 'direct: rule'
         direct = 0
         do e = 1, map%cells
             if (.not. (any(map%conn(:, e) == node1) .or. any(map%conn(:, e) == node2))) &
                 cycle
-            do k = 1, rule%n_points
-                xi = [rule%xi(k), rule%eta(k)]
+            do k = 1, size(qw)
+                xi = [qx(k), qe(k)]
                 do i = 1, 3
                     call unit_increment(map, dofs(i), vfull)
                     map%x = x0 + reshape(eps*scale_x*vfull, shape(x0))
@@ -215,7 +217,7 @@ contains
                     - dxm(1, 2)*(dxm(2, 1)*dxm(3, 3) - dxm(2, 3)*dxm(3, 1)) &
                     + dxm(1, 3)*(dxm(2, 1)*dxm(3, 2) - dxm(2, 2)*dxm(3, 1))
                 ! Axisymmetric (ntor = 0, nfp = 1): the phi integral is 2 pi.
-                w = rule%weights(k)*2*pi*abs(jac)
+                w = qw(k)*2*pi*abs(jac)
                 do j = 1, 3
                     do i = 1, 3
                         direct(i, j) = direct(i, j) + w*dot_product(u(:, i), tang) &
