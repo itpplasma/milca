@@ -341,6 +341,23 @@ The spectrum of the preconditioned operator is a broad band (Ritz values
 0.03 to 7 at 8 nodes, mu = 1e-4), not a few outliers, and its lower end
 moves down under refinement.
 
+Relabelling directions (`ideal_map_relabel_space`, position gauge): the
+displacements f(rho) g(theta, phi) dX/dtheta with f = rho^k (1 - rho^2),
+k <= 3, and g = cos, sin(m theta - n nfp phi). Energy slope along them over
+the slope along a radial expansion (1 - rho^2)(X - X_axis), Landreman seed
+(P3, ntor 2) deformed without stellarator symmetry
+(`test/test_ideal_map_relabel.f90`):
+
+| radial nodes | 8 | 12 | 16 | 24 |
+|---|---|---|---|---|
+| reshuffles g = 1, largest | 0.13 | 0.059 | 0.012 | 0.011 |
+| m = 1, k = 0, largest | 1.6 | 1.6 | 1.6 | - |
+
+The reshuffles theta -> theta + f(rho) are continuum nulls (slope falls with
+h), the theta-dependent family is not (slope independent of h, a force).
+Only the reshuffles may be projected out of a gradient norm, the wider family
+serves as a coarse space.
+
 Converged when the reduced free gradient falls by 1e-6 (tests; seed ladders
 stop at 1e-11 x the gradient of X0 = id). Element energy, gradient and
 Hessian blocks are OpenMP-parallel over cells. The report gives wall time for
