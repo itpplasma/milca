@@ -26,6 +26,6 @@
   zbs(2,0) = -0.03682784231950535,
   zbs(2,1) = 0.00440818844083923,
   zbs(2,2) = -0.005866094173978942,
-  iota(0) = 0.3, prescribe_current = .true.,
+  iota(0) = 0.3, prescribe_current = .true., iota_nodes = 8,
   boundary_nodes = 16, degree = 3, angle_mpol = 4, tolerance = 1e-8, max_iterations = 400,
 /
