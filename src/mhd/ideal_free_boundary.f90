@@ -390,10 +390,13 @@ contains
 
     subroutine ideal_fb_init(fb, mesh, chain, chart, field, nfp, ntor, f_vac, &
                              circulation, status, mu0, nphi, panels_per_edge, &
-                             quadrature_order, exterior_from)
+                             quadrature_order, exterior_from, plasma_points)
         ! mesh: curved P2/P3 mesh of the Gamma_c region with Gamma_p as the
         ! constrained internal chain (initialize_gs with interior_chain);
         ! chain: the Gamma_p vertices used for it; field: frozen plasma data.
+        ! plasma_points: the reference of the plasma cells, where the frozen
+        ! field lives, when it is not the shell reference mesh%points (for
+        ! example an elliptic disc mapped onto a shaped Gamma_p).
         type(ideal_fb_t), intent(out) :: fb
         type(gs_state_t), intent(in) :: mesh
         real(dp), intent(in) :: chain(:, :), f_vac, circulation
@@ -406,6 +409,7 @@ contains
         !> A state on the same Gamma_c (for example another frozen field):
         !! its per-n exterior operators are reused when the panels agree.
         type(ideal_fb_t), intent(in), optional :: exterior_from
+        real(dp), intent(in), optional :: plasma_points(:, :)
         type(gs_state_t) :: sub
         logical, allocatable :: inside(:), in_plasma(:), in_shell(:)
         integer :: e, a, nodes, cells, nplasma, k, st, ppe
@@ -450,6 +454,9 @@ contains
             end if
         end do
         if (count(inside) == 0 .or. count(.not. inside) == 0) return
+        if (present(plasma_points)) then
+            if (any(shape(plasma_points) /= shape(mesh%points))) return
+        end if
         if (any(mesh%boundary .and. in_plasma)) return
         ! Plasma sub-mesh in the form ideal_map_init reads.
         nplasma = count(in_plasma)
@@ -463,6 +470,7 @@ contains
                 if (.not. in_plasma(a)) cycle
                 k = k + 1; number(a) = k; fb%plasma_global(k) = a
                 sub%points(:, k) = mesh%points(:, a)
+                if (present(plasma_points)) sub%points(:, k) = plasma_points(:, a)
                 sub%boundary(k) = in_shell(a)
             end do
             k = 0
@@ -509,12 +517,13 @@ contains
         ! Centre of the poloidal-angle lift: the reference axis node, or the
         ! interior plasma node nearest the plasma centroid when the frozen
         ! labels put the extremum on Gamma_p.
-        fb%theta_centre = fb%plasma%reference(:, fb%plasma%axis_node)
+        ! (in the shell reference, mesh%points)
+        fb%theta_centre = mesh%points(:, fb%plasma_global(fb%plasma%axis_node))
         if (sub%boundary(fb%plasma%axis_node)) then
             centre = sum(sub%points, dim=2)/nplasma
             k = minloc(norm2(sub%points - spread(centre, 2, nplasma), dim=1), dim=1, &
                 mask=.not. sub%boundary)
-            fb%theta_centre = sub%points(:, k)
+            fb%theta_centre = mesh%points(:, fb%plasma_global(k))
         end if
         call shell_geometry(fb)
         call shell_laplacian(fb)

@@ -65,11 +65,13 @@ contains
     end subroutine
 
     subroutine fb_nested_geometry(boundary, nfp, margin, box, obstacles, centre, axes, &
-                                  curve, margin_used, status, message)
+                                  curve, outline_mean, margin_used, status, message)
         !! boundary(1:4, n, m) = (rc, rs, zc, zs) of cos/sin(m theta - n nfp
         !! phi), counter-clockwise in (R, Z). centre and axes: the elliptic
-        !! reference disc inscribed in the mean bounding box of the sections,
-        !! so that the shell map starts close to the identity.
+        !! reference disc of the frozen field, inscribed in the mean bounding
+        !! box of the sections. outline_mean(k): the mean over the sections of
+        !! their distance from the centre along the ray alpha = 2 pi (k - 1)/rays,
+        !! the reference of Gamma_p in the shell (fb_nested_mesh).
         !! curve(k): Gamma_c as r(alpha) about the centre at alpha = 2 pi k/rays,
         !! linear in between. It keeps the clearance margin*a from every section of
         !! the guess, a the minor radius of the mean section area, and stays in
@@ -81,7 +83,7 @@ contains
         integer, intent(in) :: nfp
         real(dp), intent(in) :: margin, box(4), obstacles(:, :)
         real(dp), intent(out) :: centre(2), axes(2), margin_used
-        real(dp), allocatable, intent(out) :: curve(:)
+        real(dp), allocatable, intent(out) :: curve(:), outline_mean(:)
         integer, intent(out) :: status
         character(*), intent(out) :: message
         integer, parameter :: ntheta = 1024
@@ -132,7 +134,7 @@ contains
             limit(k) = minval(room([(modulo(k - 1 + i, rays) + 1, i=-2*window, &
                 2*window)]))
         end do
-        call outline(core)
+        call outline(core, outline_mean)
         if (any(core >= room)) then
             message = 'a coil or the edge of the coil field grid touches the' &
                 //' boundary guess'
@@ -172,7 +174,7 @@ contains
 
         subroutine widened(clearance, r)
             ! r(alpha) of the union of discs of radius clearance about every
-            ! section point and about the reference ellipse
+            ! section point
             real(dp), intent(in) :: clearance
             real(dp), intent(out) :: r(:)
             real(dp) :: e(2), q(2), along, across
@@ -180,14 +182,9 @@ contains
             r = 0
             do k = 1, rays
                 e = [cos(2*pi*(k - 1)/rays), sin(2*pi*(k - 1)/rays)]
-                do j = 1, nphi + 1
+                do j = 1, nphi
                     do i = 1, ntheta
-                        if (j <= nphi) then
-                            q = rz(:, i, j) - centre
-                        else
-                            q = axes*[cos(2*pi*(i - 1)/ntheta), &
-                                sin(2*pi*(i - 1)/ntheta)]
-                        end if
+                        q = rz(:, i, j) - centre
                         along = dot_product(q, e); across = q(2)*e(1) - q(1)*e(2)
                         if (abs(across) < clearance) &
                             r(k) = max(r(k), along + sqrt(clearance**2 - across**2))
@@ -196,18 +193,20 @@ contains
             end do
         end subroutine
 
-        subroutine outline(r)
-            ! r(alpha) of the farthest crossing of the ray with every section
-            ! and with the reference ellipse
+        subroutine outline(r, mean)
+            ! r(alpha) of the farthest crossing of the ray with every section,
+            ! and the mean over the sections of their farthest crossing
             real(dp), intent(out) :: r(:)
-            real(dp) :: e(2), a(2), b(2), f(2), det, along, s
+            real(dp), allocatable, intent(out) :: mean(:)
+            real(dp) :: e(2), a(2), b(2), f(2), det, along, s, here
             integer :: k, i, j
             r = 0
+            allocate (mean(rays))
+            mean = 0
             do k = 1, rays
                 e = [cos(2*pi*(k - 1)/rays), sin(2*pi*(k - 1)/rays)]
-                ! the ellipse (x/axes)^2 = 1 along the ray
-                r(k) = 1/norm2(e/axes)
                 do j = 1, nphi
+                    here = 0
                     do i = 1, ntheta
                         a = rz(:, i, j) - centre
                         b = rz(:, mod(i, ntheta) + 1, j) - centre
@@ -218,8 +217,10 @@ contains
                         s = (a(2)*e(1) - a(1)*e(2))/det
                         if (s < 0 .or. s > 1) cycle
                         along = dot_product(a + s*f, e)
-                        r(k) = max(r(k), along)
+                        here = max(here, along)
                     end do
+                    r(k) = max(r(k), here)
+                    mean(k) = mean(k) + here/nphi
                 end do
             end do
         end subroutine
@@ -266,32 +267,38 @@ contains
         r = (1 - t)*curve(k + 1) + t*curve(mod(k + 1, size(curve)) + 1)
     end function
 
-    subroutine fb_nested_mesh(mesh, chain, centre, axes, curve, nodes, degree, status)
-        !! Reference mesh of the region inside Gamma_c with the reference
-        !! ellipse (nodes points) as the constrained chain Gamma_p. The cells
-        !! are at most the chain spacing and twice the narrowest reference
-        !! gap between Gamma_p and Gamma_c, so that a thin shell has cells
-        !! across it; Gamma_c gets the same spacing.
+    subroutine fb_nested_mesh(mesh, chain, plasma_points, centre, axes, curve, &
+                              outline_mean, nodes, degree, status)
+        !! Mesh of the region inside Gamma_c in the shell reference, where
+        !! Gamma_p is the mean section outline_mean of the guess (nodes chain
+        !! points). The plasma cells get their own reference plasma_points,
+        !! the elliptic disc of the frozen field, through the radial map
+        !!     G(y) = centre + (y - centre) rho_s(alpha)/rho_e(alpha)
+        !! between the ellipse rho_e and the mean section rho_s at the polar
+        !! angle alpha about the centre. The harmonic extension of the shell
+        !! map then starts from the guess itself instead of carrying the
+        !! displacement from the ellipse to the section across the shell,
+        !! which folds a shell thinner than that displacement. The cells are
+        !! at most the chain spacing and twice the narrowest gap between
+        !! Gamma_p and Gamma_c; Gamma_c gets the same spacing.
         type(gs_state_t), intent(out) :: mesh
-        real(dp), allocatable, intent(out) :: chain(:, :)
-        real(dp), intent(in) :: centre(2), axes(2), curve(:)
+        real(dp), allocatable, intent(out) :: chain(:, :), plasma_points(:, :)
+        real(dp), intent(in) :: centre(2), axes(2), curve(:), outline_mean(:)
         integer, intent(in) :: nodes, degree
         integer, intent(out) :: status
         real(dp), allocatable :: contour(:, :)
-        real(dp) :: h, length, alpha, gap
-        integer :: j, nc, nchain
+        real(dp) :: h, length, alpha, gap, y(2)
+        integer :: j, nc, nchain, a
         h = 0
         do j = 1, rays
             alpha = 2*pi*(j - 1)/rays
-            h = h + norm2(axes*([cos(alpha + 2*pi/rays), sin(alpha + 2*pi/rays)] &
-                - [cos(alpha), sin(alpha)]))/nodes
+            h = h + norm2(on_section(alpha + 2*pi/rays) - on_section(alpha))/nodes
         end do
         length = 0; gap = huge(1.0_dp)
         do j = 1, rays
             alpha = 2*pi*(j - 1)/rays
             length = length + norm2(point(alpha) - point(alpha + 2*pi/rays))
-            gap = min(gap, curve_radius(curve, alpha) - 1/norm2([cos(alpha), &
-                sin(alpha)]/axes))
+            gap = min(gap, curve_radius(curve, alpha) - section_radius(alpha))
         end do
         ! a chain segment longer than the gap would let its curved edge bulge
         ! to Gamma_c: the chain gets at least one node per 2 gaps
@@ -300,21 +307,60 @@ contains
         nc = max(nchain, ceiling(length/h))
         allocate (chain(2, nchain), contour(2, nc))
         do j = 1, nchain
+            ! the image of the ellipse node at parameter 2 pi (j - 1)/nchain
             alpha = 2*pi*(j - 1)/nchain
-            chain(:, j) = centre + axes*[cos(alpha), sin(alpha)]
+            y = axes*[cos(alpha), sin(alpha)]
+            chain(:, j) = on_section(atan2(y(2), y(1)))
         end do
         do j = 1, nc
             contour(:, j) = point(2*pi*(j - 1)/nc)
         end do
         call initialize_gs(mesh, contour, h*h/2, status, degree, curved=.true., &
             interior_chain=chain, geometry_only=.true.)
+        if (status /= 0) return
+        allocate (plasma_points, mold=mesh%points)
+        do a = 1, size(mesh%points, 2)
+            y = mesh%points(:, a) - centre
+            alpha = atan2(y(2), y(1))
+            plasma_points(:, a) = centre + y/(section_radius(alpha)*norm2([cos(alpha), &
+                sin(alpha)]/axes))
+        end do
     contains
         function point(a) result(p)
             real(dp), intent(in) :: a
             real(dp) :: p(2)
             p = centre + curve_radius(curve, a)*[cos(a), sin(a)]
         end function
+
+        function on_section(a) result(p)
+            real(dp), intent(in) :: a
+            real(dp) :: p(2)
+            p = centre + section_radius(a)*[cos(a), sin(a)]
+        end function
+
+        real(dp) function section_radius(a) result(r)
+            ! the trigonometric interpolant of the ray samples, smooth in alpha
+            real(dp), intent(in) :: a
+            integer :: k, n
+            n = size(outline_mean)
+            r = 0
+            do k = 1, n
+                r = r + outline_mean(k)*dirichlet(a - 2*pi*(k - 1)/n, n)
+            end do
+        end function
     end subroutine
+
+    pure real(dp) function dirichlet(x, n) result(w)
+        ! cardinal function of trigonometric interpolation on n (even)
+        ! equispaced points, the Nyquist mode split evenly
+        real(dp), intent(in) :: x
+        integer, intent(in) :: n
+        if (abs(sin(x/2)) < 1e-12_dp) then
+            w = 1
+            return
+        end if
+        w = sin(n*x/2)*cos(x/2)/(n*sin(x/2))
+    end function
 
     subroutine fb_nested_seed(fb, boundary, centre, axes, status)
         !! Plasma map from the boundary guess: harmonic extension on the

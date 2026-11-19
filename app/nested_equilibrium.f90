@@ -97,7 +97,7 @@ program nested_equilibrium
     type(cylindrical_chart_t) :: chart
     real(dp), allocatable :: filament_drive(:, :), filament_load(:, :)
     real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
-    real(dp), allocatable :: fb_curve(:)
+    real(dp), allocatable :: fb_curve(:), fb_section(:)
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -353,7 +353,7 @@ contains
         call mgrid_current_nodes(coil_basis, extcur(:grid%nextcur), coils_inside)
         call fb_nested_geometry(boundary_input, nfp, coupling_margin, [grid%rmin, &
             grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
-            fb_curve, margin_used, local, message)
+            fb_curve, fb_section, margin_used, local, message)
         if (local /= 0) call fail(trim(message))
         print '(a,2f9.4,a,2f8.4,a,f6.3)', 'reference disc centre', fb_centre, &
             ' half-widths', fb_axes, ', coupling margin', margin_used
@@ -373,15 +373,15 @@ contains
         integer, intent(in) :: nodes
         logical, intent(in) :: first
         type(ideal_fb_t) :: next
-        real(dp), allocatable :: chain(:, :), d(:, :, :), l(:, :, :)
+        real(dp), allocatable :: chain(:, :), d(:, :, :), l(:, :, :), points(:, :)
         real(dp) :: closure(1), f(1), spread(1)
         integer :: local
-        call fb_nested_mesh(mesh, chain, fb_centre, fb_axes, fb_curve, nodes, degree, &
-            local)
+        call fb_nested_mesh(mesh, chain, points, fb_centre, fb_axes, fb_curve, &
+            fb_section, nodes, degree, local)
         if (local /= 0) call fail('the free-boundary mesh failed')
         seed%profile = profile
         call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, 0.0_dp, &
-            circulation, local, nphi=max(1, 4*ntor_level + 1))
+            circulation, local, nphi=max(1, 4*ntor_level + 1), plasma_points=points)
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
         call ideal_fb_circuits_build(next, coil_basis, circuits, local)
         if (local /= IDEAL_FB_OK) &
