@@ -76,6 +76,7 @@ module milca_ideal_map
     public :: ideal_map_solve_report_t, ideal_map_eliminate_omega
     public :: ideal_map_gauge_project, ideal_map_angle_enable, ideal_map_angle_rdof
     public :: ideal_map_angle_value, ideal_map_parallel_mass
+    public :: ideal_map_relabel_space, ideal_map_relabel_project
     integer, parameter, public :: IDEAL_MAP_OK = 0, IDEAL_MAP_FOLDED = 1, &
         IDEAL_MAP_NOT_CONVERGED = 2, IDEAL_MAP_SOLVE_FAILED = 3, &
         IDEAL_MAP_BAD_INPUT = 4
@@ -984,6 +985,150 @@ contains
                 end do
             end do
         end do
+    end subroutine
+
+    subroutine ideal_map_relabel_space(map, x, basis, status, rho_order, mpol, ntor)
+        ! Orthonormal reduced vectors (position gauge) of the poloidal
+        ! relabellings theta -> theta + f(rho) g(theta, phi) of the map x:
+        ! f g dX/dtheta with f = rho^k (1 - rho^2), k = 0..rho_order, and
+        ! g = cos, sin(m theta - n nfp phi), 0 <= m <= mpol, |n| <= ntor.
+        ! The default mpol = ntor = 0 gives the reshuffles theta -> theta + f(rho),
+        ! the continuum nulls of the frozen-flux energy (area- and field-preserving
+        ! on the reference disk), along which the discrete gradient vanishes with
+        ! h. Larger mpol, ntor add the soft but physical directions of a coarse
+        ! space, along which the gradient is a force. dX/dtheta at a node is the
+        ! derivative of the interpolant along a rotation of the reference point
+        ! about the disk centre, and f g dX/dtheta is projected onto the map's
+        ! toroidal modes by least squares over the energy planes. Toroidal
+        ! relabellings need a toroidal displacement, which the position gauge
+        ! does not have. Wall and field-angle dofs carry none, dependent
+        ! directions are dropped. Default rho_order 3.
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), allocatable, intent(out) :: basis(:, :)
+        integer, intent(out) :: status
+        integer, intent(in), optional :: rho_order, mpol, ntor
+        real(dp), parameter :: rotation = 1.0e-6_dp
+        real(dp) :: centre(2), radius, y(2), turned(2), xi(2), rho, theta, f, before
+        real(dp) :: shape(TRIANGLE_MAX_NODES), gradient(2, TRIANGLE_MAX_NODES)
+        real(dp), allocatable :: dq(:, :, :), dtheta(:, :), proj(:, :), gram(:, :), &
+            lam(:), v(:, :), g(:)
+        integer, allocatable :: first(:), next(:), cell_of(:)
+        integer :: a, e, i, j, k, l, m, n, kmax, mmax, nmax, located, nv, ncol, item
+        status = IDEAL_MAP_BAD_INPUT
+        allocate (basis(map%nred, 0))
+        if (.not. map%position_gauge) return
+        kmax = 3; mmax = 0; nmax = 0
+        if (present(rho_order)) kmax = rho_order
+        if (present(mpol)) mmax = mpol
+        if (present(ntor)) nmax = min(ntor, map%ntor)
+        if (kmax < 0 .or. mmax < 0 .or. nmax < 0) return
+        centre = (maxval(map%reference, dim=2) + minval(map%reference, dim=2))/2
+        radius = maxval(norm2(map%reference - spread(centre, 2, map%nodes), dim=1))
+        ! cells incident to each node, as linked lists
+        allocate (first(map%nodes), next(map%cells*map%nloc), cell_of(map%cells*map%nloc))
+        first = 0; item = 0
+        do e = 1, map%cells
+            do i = 1, map%nloc
+                item = item + 1
+                cell_of(item) = e
+                next(item) = first(map%conn(i, e))
+                first(map%conn(i, e)) = item
+            end do
+        end do
+        allocate (dq(2, map%nmode, map%nodes))
+        dq = 0
+        do a = 1, map%nodes
+            if (map%boundary(a)) cycle
+            y = map%reference(:, a) - centre
+            turned = centre + [cos(rotation)*y(1) - sin(rotation)*y(2), &
+                sin(rotation)*y(1) + cos(rotation)*y(2)]
+            item = first(a)
+            do while (item > 0)
+                e = cell_of(item); item = next(item)
+                call triangle_locate(map%reference(:, map%conn(:, e)), turned, xi, located)
+                if (located /= 0) cycle
+                if (minval([xi, 1 - sum(xi)]) < -1.0e-9_dp) cycle
+                call triangle_basis_jet(xi, shape(:map%nloc), gradient(:, :map%nloc))
+                do m = 1, map%nmode
+                    dq(:, m, a) = (matmul(x(1:2, m, map%conn(:, e)), shape(:map%nloc)) &
+                        - x(1:2, m, a))/rotation
+                end do
+                exit
+            end do
+        end do
+        ! least-squares projection of plane values onto the toroidal modes
+        gram = matmul(map%trig, transpose(map%trig))
+        call symmetric_eigen(gram, lam, status)
+        if (status /= IDEAL_MAP_OK) return
+        status = IDEAL_MAP_BAD_INPUT
+        where (lam > 1.0e-12_dp*maxval(lam))
+            lam = 1/lam
+        elsewhere
+            lam = 0
+        end where
+        proj = matmul(gram, matmul(diag_scale(lam, gram), map%trig))
+        ncol = (kmax + 1)*(2*(mmax*(2*nmax + 1) + nmax) + 1)
+        allocate (v(map%nred, ncol), dtheta(2, map%nphi), g(map%nphi))
+        v = 0; nv = 0
+        do k = 0, kmax
+            do m = 0, mmax
+                do n = merge(0, -nmax, m == 0), nmax
+                    do l = 1, 2
+                        if (l == 2 .and. m == 0 .and. n == 0) cycle
+                        nv = nv + 1
+                        do a = 1, map%nodes
+                            if (map%boundary(a)) cycle
+                            y = map%reference(:, a) - centre
+                            rho = norm2(y)/radius
+                            theta = atan2(y(2), y(1))
+                            f = rho**k*(1 - rho**2)
+                            do j = 1, map%nphi
+                                g(j) = merge(cos(m*theta - n*map%nfp*map%phi(j)), &
+                                    sin(m*theta - n*map%nfp*map%phi(j)), l == 1)
+                            end do
+                            dtheta = matmul(dq(:, :, a), map%trig)
+                            do i = 1, 2
+                                v([(ideal_map_rdof(map, i, j, a), j=1, map%nmode)], nv) = &
+                                    matmul(proj, f*g*dtheta(i, :))
+                            end do
+                        end do
+                    end do
+                end do
+            end do
+        end do
+        where (spread(map%fixed, 2, nv)) v(:, :nv) = 0
+        ! modified Gram-Schmidt, twice
+        k = 0
+        do j = 1, nv
+            before = norm2(v(:, j))
+            if (.not. before > 0) cycle
+            do l = 1, 2
+                do i = 1, k
+                    v(:, j) = v(:, j) - dot_product(v(:, i), v(:, j))*v(:, i)
+                end do
+            end do
+            if (.not. norm2(v(:, j)) > 1.0e-8_dp*before) cycle
+            k = k + 1
+            v(:, k) = v(:, j)/norm2(v(:, j))
+        end do
+        basis = v(:, :k)
+        status = IDEAL_MAP_OK
+    contains
+        pure function diag_scale(d, q) result(r)
+            ! diag(d) q^T
+            real(dp), intent(in) :: d(:), q(:, :)
+            real(dp) :: r(size(q, 2), size(q, 1))
+            r = spread(d, 2, size(q, 1))*transpose(q)
+        end function
+    end subroutine
+
+    pure subroutine ideal_map_relabel_project(basis, v)
+        ! v <- v - B B^T v, the part of v orthogonal to the orthonormal
+        ! columns of B (ideal_map_relabel_space)
+        real(dp), intent(in) :: basis(:, :)
+        real(dp), intent(inout) :: v(:)
+        v = v - matmul(basis, matmul(v, basis))
     end subroutine
 
     subroutine ideal_map_prolong(fine, coarse, status)

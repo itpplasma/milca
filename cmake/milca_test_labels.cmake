@@ -881,6 +881,8 @@ milca_test_labels(equilibrium_map_3d_loop fast CLASSES mhd
     TARGETS test_map_3d_loop)
 milca_test_labels(ideal_map_hvp fast CLASSES mhd
     TARGETS test_ideal_map_hvp)
+milca_test_labels(ideal_map_relabel fast CLASSES mhd
+    TARGETS test_ideal_map_relabel)
 milca_test_labels(ideal_map_mode_pc fast CLASSES mhd
     TARGETS test_ideal_map_mode_pc)
 milca_test_labels(ideal_map_matrix_free fast CLASSES mhd

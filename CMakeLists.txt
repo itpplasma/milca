@@ -682,6 +682,11 @@ target_link_libraries(test_ideal_map_hvp PRIVATE milca)
 add_test(NAME ideal_map_hvp COMMAND test_ideal_map_hvp)
 set_tests_properties(ideal_map_hvp PROPERTIES PROCESSORS 4
     ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_ideal_map_relabel test/test_ideal_map_relabel.f90)
+target_link_libraries(test_ideal_map_relabel PRIVATE milca)
+add_test(NAME ideal_map_relabel COMMAND test_ideal_map_relabel)
+set_tests_properties(ideal_map_relabel PROPERTIES PROCESSORS 4
+    ENVIRONMENT "OMP_NUM_THREADS=4")
 add_executable(test_ideal_map_mode_pc test/test_ideal_map_mode_pc.f90)
 target_link_libraries(test_ideal_map_mode_pc PRIVATE milca)
 add_test(NAME ideal_map_mode_pc COMMAND test_ideal_map_mode_pc)
