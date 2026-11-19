@@ -136,6 +136,7 @@ program test_ideal_free_boundary
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t
     use milca_ideal_free_boundary, only: ideal_fb_init_fixed, ideal_fb_fixed_mode
     use milca_nested_ring_mesh, only: nested_ring_mesh
+    use milca_ideal_free_boundary, only: assembly_asymmetry
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, &
         ideal_fb_set_drive, ideal_fb_gradient, ideal_fb_hessian, ideal_fb_step, &
         ideal_fb_solve_vacuum, ideal_fb_shell_field, ideal_fb_shell_locate, &
@@ -208,6 +209,8 @@ program test_ideal_free_boundary
         call fixed_kink()
     case ('fixed_pinch')
         call fixed_pinch()
+    case ('symmetry')
+        call hessian_symmetry()
     case ('hypotheses')
         call hypothesis_checks()
     case ('curvature')
@@ -843,6 +846,38 @@ contains
                 end if
             end do
             chain(:, j) = fil + mid*[cos(t), sin(t)]
+        end do
+    end subroutine
+
+    subroutine hessian_symmetry()
+        ! The assembled KKT matrix is symmetric bitwise (the LDL^T of the
+        ! inertia-controlled Newton reads it so) and its raw assembly, before
+        ! symmetrize_csr, differs from that only by roundoff (N = 0, 1, with
+        ! the state perturbed off the reference).
+        type(ideal_fb_t) :: fb
+        integer, allocatable :: rowptr(:), colidx(:)
+        real(dp), allocatable :: val(:), du(:)
+        integer :: ntor, r, q, c, q2
+        do ntor = 0, 1
+            call build(8, 6, 2, .false., 3, ntor, fb, solovev=.true.)
+            allocate (du(fb%n))
+            call random_number(du)
+            call ideal_fb_step(fb, 1.0e-3_dp*(du - 0.5_dp), 1.0_dp)
+            call ideal_fb_hessian(fb, rowptr, colidx, val)
+            do r = 1, size(rowptr) - 1
+                do q = rowptr(r), rowptr(r + 1) - 1
+                    c = colidx(q)
+                    q2 = findloc(colidx(rowptr(c):rowptr(c + 1) - 1), r, dim=1)
+                    if (q2 == 0) error stop 'Hessian pattern not symmetric'
+                    if (abs(val(q) - val(rowptr(c) + q2 - 1)) > 0) &
+                        error stop 'Hessian not symmetric bitwise'
+                end do
+            end do
+            print '(a,i0,a,2es10.2)', 'ntor ', ntor, &
+                ': raw assembly asymmetry (global, row-scaled) ', assembly_asymmetry
+            if (.not. assembly_asymmetry(1) < 1.0e-14_dp) &
+                error stop 'raw assembly asymmetry above roundoff'
+            deallocate (du)
         end do
     end subroutine
 

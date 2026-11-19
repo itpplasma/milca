@@ -515,9 +515,9 @@ set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
 target_sources(milca_mhd PRIVATE src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90
-    src/generated/milca_fb_spine_leaves.f90 src/mhd/inertia_newton.f90)
+    src/mhd/inertia_newton.f90)
 set_source_files_properties(src/generated/milca_vacuum_shell_leaves.f90
-    src/generated/milca_fold_barrier_leaves.f90 src/generated/milca_fb_spine_leaves.f90
+    src/generated/milca_fold_barrier_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 target_sources(milca_equilibrium PRIVATE
     src/generated/milca_nested_oracle_leaves.f90 src/equilibrium/nested_oracles.f90)
@@ -596,6 +596,9 @@ add_test(NAME ideal_fb_external_kink COMMAND test_ideal_free_boundary kink)
 set_tests_properties(ideal_fb_external_kink PROPERTIES ENVIRONMENT
     "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4 TIMEOUT 120)
 add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
+add_test(NAME ideal_fb_hessian_symmetry COMMAND test_ideal_free_boundary symmetry)
+milca_test_labels(ideal_fb_hessian_symmetry fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_vertical_newton COMMAND test_ideal_free_boundary vertical)
 add_executable(test_field_shell test/test_field_shell.f90)
 target_link_libraries(test_field_shell PRIVATE milca_field)
@@ -1551,7 +1554,7 @@ if(MILCA_FORTSYM_BUILD)
         WILL_FAIL TRUE WORKING_DIRECTORY ${gs_check_dir}/wrong_weight)
     foreach(generator vrmhd_leaves gs_error grad_shafranov ideal_map ideal_gll ideal_xi
             ideal_response_error equilibrium_core curve_chart ideal_seed_3d map_3d_readback
-            ideal_field_angle nonnested islands metriplectic vacuum_shell fold_barrier fb_spine
+            ideal_field_angle nonnested islands metriplectic vacuum_shell fold_barrier
             landreman nested_oracles winslow_seed
             response_strip_jets
             response_fluid
@@ -3431,6 +3434,21 @@ add_test(NAME equilibrium_nested_free-boundary-tokamak COMMAND ${CMAKE_COMMAND}
     -P ${CMAKE_SOURCE_DIR}/test/check_nested_free_boundary.cmake)
 set_tests_properties(equilibrium_nested_free-boundary-tokamak PROPERTIES
     TIMEOUT 600 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+# The same on a D-shaped plasma whose layered shell is thin (Gamma_c at 0.2
+# and 0.3 minor radii): inertia-controlled Newton converged with the fold
+# barrier off, independent of Gamma_c.
+add_test(NAME equilibrium_nested_free-boundary-dshape COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:nested_equilibrium>
+    -DCHECK=$<TARGET_FILE:test_nested_equilibrium_app>
+    -DMGRID=$<TARGET_FILE:test_mgrid_field>
+    -DCONFIG=${CMAKE_SOURCE_DIR}/examples/nested-equilibrium/free-boundary-dshape.nml
+    -DWORK=${CMAKE_BINARY_DIR}/nested-equilibrium-free-boundary-dshape
+    "-DMARGINS=0.3;0.2"
+    -P ${CMAKE_SOURCE_DIR}/test/check_nested_free_boundary.cmake)
+set_tests_properties(equilibrium_nested_free-boundary-dshape PROPERTIES
+    TIMEOUT 600 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+milca_test_labels(equilibrium_nested_free-boundary-dshape fast CLASSES mhd
+    TARGETS nested_equilibrium test_nested_equilibrium_app test_mgrid_field)
 milca_test_labels(equilibrium_nested_free-boundary-tokamak fast CLASSES mhd
     TARGETS nested_equilibrium test_nested_equilibrium_app test_mgrid_field)
 add_executable(test_ideal_fb_circuits test/test_ideal_fb_circuits.f90)

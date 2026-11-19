@@ -514,7 +514,7 @@ contains
 
     subroutine fb_nested_layer_mesh(boundary, centre, axes, nodes, degree, layers, &
                                     distance, mesh, chain, positions, lines, line_t, &
-                                    status, spines, spine_origins, plasma_cells, section)
+                                    status, plasma_cells, section)
         !! Reference mesh of the plasma disc (the reference ellipse, nodes
         !! boundary nodes) and a layered shell around it for
         !! ideal_fb_init(positions, lines, line_t). Every Gamma_p chain node y_p
@@ -533,11 +533,6 @@ contains
         real(dp), allocatable, intent(out) :: chain(:, :), positions(:, :), line_t(:)
         integer, allocatable, intent(out) :: lines(:, :)
         integer, intent(out) :: status
-        !> outward normal of the guess's section at every Gamma_p node: the
-        !! spine along which ideal_fb_init lets that node move
-        real(dp), allocatable, intent(out), optional :: spines(:, :)
-        !> the guess's section point of every Gamma_p node: the spine origin
-        real(dp), allocatable, intent(out), optional :: spine_origins(:, :)
         !> the disc cells (the first ones)
         logical, allocatable, intent(out), optional :: plasma_cells(:)
         !> polygon whose convex hull, offset by distance, is Gamma_c (default:
@@ -611,16 +606,6 @@ contains
             end do
         end do
         allocate (positions(2, k), lines(2, k), line_t(k))
-        if (present(spines) .and. present(spine_origins)) then
-            allocate (spines(2, k), spine_origins(2, k))
-            spines = 0; spine_origins = 0
-            do i = 1, nring
-                spine_origins(:, ring(i)) = section_point(boundary, centre, axes, &
-                    atan2((disc%points(2, ring(i)) - centre(2))/axes(2), &
-                    (disc%points(1, ring(i)) - centre(1))/axes(1)))
-                spines(:, ring(i)) = xc(:, i) - spine_origins(:, ring(i))
-            end do
-        end if
         positions = points; lines = 0; line_t = -1
         do r = 1, nr
             t = real(r, dp)/nr

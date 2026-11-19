@@ -106,9 +106,9 @@ contains
             end if
             if (opt%inertia(1) == n_pos .and. opt%inertia(2) == n_neg .and. &
                 opt%inertia(3) == 0) exit
-            if (delta == 0 .and. opt%delta_last > 0) then
+            if (.not. delta > 0 .and. opt%delta_last > 0) then
                 delta = max(opt%delta_min, opt%delta_last/3)
-            else if (delta == 0) then
+            else if (.not. delta > 0) then
                 delta = opt%delta_first
             else
                 delta = opt%delta_factor*delta
