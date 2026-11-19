@@ -16,7 +16,8 @@ module milca_import_desc_spectre
     use milca_import_text, only: kv_store_t, read_lines, read_toml, lower, parse_reals
     use milca_equilibrium_import, only: imported_equilibrium_t, import_profile_t, import_note, &
         import_refuse, import_fail, IMPORT_OK, boundary_fit, boundary_area, power_series_profile, &
-        hermite_profile, spline_profile, hermite_value, profile_value, IN_MMAX, IN_NMAX
+        hermite_profile, spline_profile, hermite_value, profile_value, IN_MMAX, IN_NMAX, &
+        boundary_reserve
     implicit none
     private
     public :: import_desc, import_spectre
@@ -303,7 +304,8 @@ contains
         do f = 1, 4
             call p%modes('physics_'//trim(fields(f)), m, n, v)
             do k = 1, size(v)
-                if (m(k) < 0 .or. m(k) > IN_MMAX .or. abs(n(k)) > IN_NMAX) cycle
+                if (m(k) < 0) cycle
+                call boundary_reserve(eq, m(k), abs(n(k)))
                 select case (f)
                 case (1)
                     eq%rbc(n(k), m(k)) = v(k)

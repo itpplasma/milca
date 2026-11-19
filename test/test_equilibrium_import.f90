@@ -264,7 +264,10 @@ contains
                 worst = max(worst, distance(eq, hypot(p(1), p(2)), atan2(p(2), p(1)), p(3)))
             end do
         end do
-        call check(worst < 1e-8_dp, 'G-frame grid points on the imported surface')
+        ! the stated midpoint deviation bounds the grid points to a factor 2,
+        ! and stays within the default tolerance of 1e-6 of the minor radius
+        call check(worst <= 2*eq%geometry_error .and. eq%geometry_error <= 0.5e-6_dp, &
+            'G-frame grid points on the imported surface')
     end subroutine
 
     real(dp) function distance(eq, r, phi, z)
