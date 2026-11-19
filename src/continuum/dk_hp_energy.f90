@@ -69,6 +69,9 @@ module milca_dk_hp_energy
         hp_energy_coefficients, hp_energy_apply, hp_energy_solve, hp_energy_free
     !> The node factors exceed the memory budget.
     integer, parameter, public :: HP_NO_MEMORY = 4
+    !> The geometry of node sys%invalid = [k, a] has a measure that changes
+    !> sign or terms that are not finite.
+    integer, parameter, public :: HP_INVALID_NODE = 5
 
     real(dp), parameter :: pi = 4*atan(1.0_dp)
     real(dp), parameter :: gmres_tolerance = 1e-8_dp
@@ -118,7 +121,7 @@ module milca_dk_hp_energy
 
     type :: hp_energy_system_t
         integer :: ns = 0, nx = 0, n = 0, model = 0, n_dof = 0, n_coarse = 0, n_factors = 0, &
-            l_field = 0, n_t = 0
+            l_field = 0, n_t = 0, invalid(2) = 0
         ! factor_peak: the most factor bytes held at once during setup.
         integer(int64) :: factor_bytes = 0, factor_peak = 0
         type(hp_energy_node_t), allocatable :: node(:, :)
@@ -230,6 +233,14 @@ contains
                     nd%mesh = mid(k, a)
                     call hp_ntv_terms(geom(k, a), meshes(nd%mesh), ops(k, a), nd%terms, status)
                     if (status /= HP_OK) return
+                    ! A measure that changes sign or is not finite at some
+                    ! quadrature point (orbits that leave the file between the
+                    ! samples a geometry checks) would carry NaN into GMRES.
+                    if (.not. node_regular(nd%terms)) then
+                        sys%invalid = [k, a]
+                        status = HP_INVALID_NODE
+                        return
+                    end if
                     status = HP_BAD_INPUT
                     nd%nu = sys%nu(k, a)
                     nd%v = sys%vt(a)*grid%x(k + 1)
@@ -304,6 +315,16 @@ contains
         end do
         call coarse_matrix(sys, status)
     end subroutine hp_energy_setup
+
+    !> Whether the terms of a node are finite with a measure of one sign at
+    !> every quadrature point (the sign follows the orientation of the file).
+    logical function node_regular(t) result(ok)
+        type(hp_terms_t), intent(in) :: t
+        ok = (all(t%q_w > 0) .or. all(t%q_w < 0)) .and. all(abs(t%q_w) < huge(1.0_dp)) .and. &
+            all(abs(t%load3) < huge(1.0_dp)) .and. all(abs(t%load4) < huge(1.0_dp)) .and. &
+            all(abs(t%s) < huge(1.0_dp)) .and. all(abs(t%c) < huge(1.0_dp)) .and. &
+            all(abs(t%ph) < huge(1.0_dp)) .and. all(abs(t%pr) < huge(1.0_dp))
+    end function node_regular
 
     !> Factors of the diagonal blocks, one per node. Whether all of them fit
     !> the budget is estimated from one factor per mesh before the others are

@@ -54,7 +54,7 @@ module milca_ntv_device
     use milca_dk_hp, only: hp_operator_t, hp_mesh_t, hp_default_mesh, hp_ntv_kernel, HP_OK, &
         HP_SINGULAR, HP_NO_CONVERGENCE, hp_ntv_estimate, hp_refine, hp_geometry_t, hp_mesh_join
     use milca_dk_hp_energy, only: hp_energy_system_t, hp_energy_setup, &
-        hp_energy_coefficients, hp_energy_free, HP_NO_MEMORY
+        hp_energy_coefficients, hp_energy_free, HP_NO_MEMORY, HP_INVALID_NODE
     use milca_ntv_hp_line, only: hp_line_field_t, hp_line_field
     use milca_ntv_orbit_geometry, only: hp_orbit_geometry_t, hp_orbit_geometry, &
         hp_orbit_perturbation, hp_orbit_confined
@@ -470,8 +470,11 @@ contains
         !> with orbit_width every node on the orbit geometry of psi* = s and
         !> its energy with its own mesh, the collisions at fixed psi*. Where
         !> the orbits of a node leave the file, the speed grid ends below the
-        !> lowest such speed (0.98 of it, found by bisection) and lost_weight
-        !> is the share of the K_11 weight y^6 exp(-y^2) above it.
+        !> lowest such speed (0.98 of it, found by bisection on the sample of
+        !> hp_orbit_confined, or halfway to the last good node when only the
+        !> node's quadrature points leave) and lost_weight is the share of
+        !> the K_11 weight y^6 exp(-y^2) above it. The surface fails with
+        !> DEVICE_ORBIT_LOST when that end falls below the thermal speed.
         subroutine coupled_surface(is, st)
             integer, intent(in) :: is
             integer, intent(out) :: st
@@ -486,6 +489,8 @@ contains
             integer, allocatable :: mid(:, :)
             real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2), x_cut, y_lost, y_ok
             integer :: aa, kx, nx, ks, its, attempt
+            ! Speed grids tried while orbits of the top nodes leave the model.
+            integer, parameter :: max_attempts = 6
             st = DEVICE_SOLVE
             do aa = 1, nsp
                 csp(aa) = collop_species_t(species(aa)%mass, species(aa)%z, &
@@ -496,7 +501,7 @@ contains
                     /collop_nuhat(csp(aa), csp(aa), 1.0_dp)
             end do
             x_cut = res%x_max
-            do attempt = 1, 2
+            do attempt = 1, max_attempts
                 call collop_make_grid(x_cut, res%nelem, res%order, grid, ks)
                 if (ks /= COLLOP_OK) return
                 nx = grid%n - 1
@@ -532,23 +537,31 @@ contains
                         end if
                     end do
                 end do
-                if (y_lost == huge(1.0_dp)) exit
+                if (y_lost == huge(1.0_dp)) then
+                    if (res%orbit_width) then
+                        call hp_energy_setup(go, ops, meshes, mid, grid, csp, lnl, &
+                            res%collisions, int(res%hp_energy_memory*2.0_dp**30, int64), sys, &
+                            ks, gid=mid)
+                    else
+                        call start_mesh(gl(1, 1), meshes(1))
+                        call hp_energy_setup(gl, ops, meshes, mid, grid, csp, lnl, &
+                            res%collisions, int(res%hp_energy_memory*2.0_dp**30, int64), sys, ks)
+                    end if
+                    if (ks /= HP_INVALID_NODE .or. .not. res%orbit_width) exit
+                    ! Orbits that leave the file between the samples of
+                    ! hp_orbit_confined: the speed grid ends below that node.
+                    y_lost = grid%x(sys%invalid(1) + 1)
+                    y_ok = maxval(grid%x, mask=grid%x < y_lost)
+                    x_cut = (y_ok + y_lost)/2
+                else
+                    y_ok = maxval(grid%x, mask=grid%x < y_lost)
+                    x_cut = 0.98_dp*confined_speed(is, y_ok, y_lost)
+                end if
                 st = DEVICE_ORBIT_LOST
-                if (attempt == 2) return
-                y_ok = maxval(grid%x, mask=grid%x < y_lost)
-                x_cut = 0.98_dp*confined_speed(is, y_ok, y_lost)
-                ! Most of the transport weight would be lost.
-                if (x_cut < 1) return
+                ! The last attempt, or most of the transport weight would be lost.
+                if (attempt == max_attempts .or. x_cut < 1) return
                 st = DEVICE_SOLVE
             end do
-            if (res%orbit_width) then
-                call hp_energy_setup(go, ops, meshes, mid, grid, csp, lnl, res%collisions, &
-                    int(res%hp_energy_memory*2.0_dp**30, int64), sys, ks, gid=mid)
-            else
-                call start_mesh(gl(1, 1), meshes(1))
-                call hp_energy_setup(gl, ops, meshes, mid, grid, csp, lnl, res%collisions, &
-                    int(res%hp_energy_memory*2.0_dp**30, int64), sys, ks)
-            end if
             if (ks == HP_NO_MEMORY) st = DEVICE_MEMORY
             if (ks /= HP_OK) return
             call hp_energy_coefficients(sys, j0(is), kk, qq, node_r, its, ks)

@@ -31,6 +31,12 @@ program test_ntv_device
     ! The coupled finite-width kernel takes minutes: a test of its own.
     only = ''
     if (command_argument_count() > 0) call get_command_argument(1, only)
+    if (only == 'orbit_width_edge_node') then
+        call orbit_width_edge_node()
+        if (failures > 0) error stop 'FAIL'
+        print '(a)', 'All tests passed!'
+        stop
+    end if
     if (only == 'orbit_width_coupled') then
         call orbit_width_coupled()
         if (failures > 0) error stop 'FAIL'
@@ -769,6 +775,65 @@ contains
         call check('full operator counts its nodes', wide(1, 1)%factorisations > 1 .and. &
             wide(1, 1)%mesh_unknowns > 0)
     end subroutine orbit_width_coupled
+
+    !> Deuterons at 4.3 keV on s = 0.45: the top speed node (x = 4.18, 75 keV)
+    !> has orbits that stay in the file on the 32 x 32 sample of
+    !> hp_orbit_confined but leave it at quadrature points of its mesh, where
+    !> the measure is undefined. The coupled kernel refuses that node and
+    !> ends the speed grid below it instead of carrying NaN into GMRES.
+    subroutine orbit_width_edge_node()
+        character(*), parameter :: eq_name = 'ntv_edge_eq.bc', pert_name = 'ntv_edge_pert.bc'
+        type(boozer_file_t), target :: eq, pert
+        type(ntv_species_t) :: sp(1)
+        type(ntv_profile_t) :: prof
+        type(ntv_resolution_t) :: res
+        type(ntv_species_result_t), allocatable :: wide(:, :)
+        type(orbit_particle_t) :: p
+        type(hp_orbit_geometry_t) :: g
+        integer :: status
+        call write_file(eq_name, .false.)
+        call write_file(pert_name, .true.)
+        call load_boozer_file(eq_name, eq, status)
+        call load_boozer_file(pert_name, pert, status)
+        ! The premise: confined on the sample, not on a finer one.
+        p%mass = 3.3435837768e-27_dp
+        p%charge = 1.602176634e-19_dp
+        p%energy = 75*kev
+        p%s_ref = 0.45_dp
+        call hp_orbit_geometry(eq, p, 0.45_dp, b0, g, status)
+        call hp_orbit_perturbation(g, pert, 3, b0)
+        call check('edge node passes the sample', hp_orbit_confined(g, 32, 32))
+        call check('edge node leaves the file between samples', &
+            .not. hp_orbit_confined(g, 256, 256))
+        sp(1) = ntv_species_t(1.0_dp, 3.3435837768e-27_dp)
+        prof%s = [0.45_dp]
+        prof%omega_te = [0.0_dp]
+        allocate (prof%density(1, 1), prof%temperature(1, 1), prof%density_s(1, 1), &
+            prof%temperature_s(1, 1), prof%kappa(1, 1))
+        prof%density = 3e19_dp
+        prof%temperature = 4.3_dp*kev
+        prof%density_s = -1e19_dp
+        prof%temperature_s = -1*kev
+        prof%kappa = 3e-4_dp
+        res%x_tol = 0
+        res%n_theta = 33
+        res%n_leg = 80
+        res%n_x = 2
+        res%sources = .false.
+        res%orbit_width = .true.
+        res%hp_columns = 16
+        res%hp_rows = 6
+        res%collisions = 1
+        res%x_max = 5
+        res%nelem = 4
+        res%order = 4
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, wide, status)
+        call check('edge node: profile solved', status == DEVICE_OK)
+        call check('edge node: speeds above the cut counted', wide(1, 1)%lost_weight > 0 &
+            .and. wide(1, 1)%lost_weight < 1e-3_dp)
+        print '(a,i0,a,es10.3,a,es12.4)', 'edge node: status ', wide(1, 1)%status, &
+            ' lost weight ', wide(1, 1)%lost_weight, ' K11 ', wide(1, 1)%k11
+    end subroutine orbit_width_edge_node
 
     subroutine write_file(name, perturbation)
         character(*), intent(in) :: name
