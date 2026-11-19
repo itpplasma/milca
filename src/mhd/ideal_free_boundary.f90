@@ -62,6 +62,7 @@ module milca_ideal_free_boundary
         dw_point_inertia
     use milca_vacuum_shell_leaves, only: vacuum_energy_density, &
         vacuum_energy_gradient, vacuum_energy_hessian
+    use milca_fb_spine_leaves
     use milca_fold_barrier_leaves, only: fold_barrier_density, fold_barrier_gradient, &
         fold_barrier_hessian
     use milca_triangle_basis, only: triangle_basis_jet
@@ -186,21 +187,20 @@ module milca_ideal_free_boundary
         ! coupling surface; elsewhere any point with the constraint rows
         ! satisfied). Equal to reference unless ideal_fb_init got positions.
         real(dp), allocatable :: position(:, :)
+        ! Spined shell (ideal_fb_init spines): a Gamma_p shell node is the
+        ! intersection of its fixed spine (origin, unit direction) with the
+        ! plasma boundary chain gamma_p_chain (plasma nodes in order, order
+        ! per edge), not a copy of one plasma node. The vacuum sees only the
+        ! shape of Gamma_p, so a tangential redistribution of the plasma
+        ! nodes moves the shell only through the shape change and cannot
+        ! crush its layers. spine_start: chain index where the search starts.
+        real(dp), allocatable :: spine_origin(:, :), spine_dir(:, :)
+        integer, allocatable :: spine_start(:), gamma_p_chain(:)
         ! Master derivatives of theta/(2 pi) and the reference det per point.
         real(dp), allocatable :: theta_s(:, :, :), det(:, :)
         ! Reference Laplacian of the shell (harmonic extension), CSR.
         integer, allocatable :: lap_ptr(:), lap_col(:)
         real(dp), allocatable :: lap_val(:)
-        ! Layered shell: the (Gamma_p, Gamma_c) shell nodes of every segment.
-        integer, allocatable :: line_pair(:, :)
-        ! Spines of the Gamma_p plasma nodes (unit chart directions, zero
-        ! elsewhere). Sliding Gamma_p along itself is a reparametrisation null
-        ! of the free boundary that crushes a layered shell tangentially, so
-        ! with spines a Gamma_p node moves only along its spine: its slot c = 1
-        ! of every mode carries the spine displacement, slot 2 is pinned
-        ! (zero gradient, unit-scaled diagonal) in the gradient, Hessian,
-        ! step and sensitivity (spine_reduce, spine_expand).
-        real(dp), allocatable :: spine(:, :)
         ! Gamma_c: nt trace dofs (shell nodes), ccw edges (0:order, nedge),
         ! Galerkin S per harmonic k (nt, nt, 0:ntor), external trace a and
         ! normal-field load h per real mode (nt, nmode).
@@ -405,7 +405,7 @@ contains
     subroutine ideal_fb_init(fb, mesh, chain, chart, field, nfp, ntor, f_vac, &
                              circulation, status, mu0, nphi, panels_per_edge, &
                              quadrature_order, exterior_from, positions, lines, &
-                             line_t, spines)
+                             line_t, spines, spine_origins)
         ! mesh: curved P2/P3 mesh of the Gamma_c region with Gamma_p as the
         ! constrained internal chain (initialize_gs with interior_chain);
         ! chain: the Gamma_p vertices used for it; field: frozen plasma data.
@@ -429,6 +429,7 @@ contains
         !! its per-n exterior operators are reused when the panels agree.
         type(ideal_fb_t), intent(in), optional :: exterior_from
         real(dp), intent(in), optional :: positions(:, :), line_t(:), spines(:, :)
+        real(dp), intent(in), optional :: spine_origins(:, :)
         integer, intent(in), optional :: lines(:, :)
         type(gs_state_t) :: sub
         logical, allocatable :: inside(:), in_plasma(:), in_shell(:)
@@ -538,18 +539,20 @@ contains
         if (st /= IDEAL_MAP_OK) return
         call slide_directions(fb)
         if (present(spines)) then
-            allocate (fb%spine(2, fb%plasma%nodes))
-            fb%spine = 0
+            ! only the axisymmetric (one-mode) intersection is implemented
+            if (.not. present(spine_origins) .or. fb%nmode /= 1) return
+            call chain_of_plasma(fb%plasma, fb%order, fb%gamma_p_chain, st)
+            if (st /= 0) return
+            allocate (fb%spine_origin(2, fb%ns), fb%spine_dir(2, fb%ns), &
+                fb%spine_start(fb%ns))
+            fb%spine_origin = 0; fb%spine_dir = 0; fb%spine_start = 0
             do k = 1, fb%ns
                 if (fb%role(k) /= 1) cycle
-                fb%spine(:, fb%plasma_node(k)) = spines(:, fb%shell_global(k)) &
+                fb%spine_origin(:, k) = spine_origins(:, fb%shell_global(k))
+                fb%spine_dir(:, k) = spines(:, fb%shell_global(k)) &
                     /norm2(spines(:, fb%shell_global(k)))
-            end do
-            if (.not. all(ieee_is_finite(fb%spine))) return
-            ! The spines already fix the tangential labelling of Gamma_p, so
-            ! the slide moments act on the interior nodes only.
-            do a = 1, fb%plasma%nodes
-                if (any(abs(fb%spine(:, a)) > 0)) fb%slide(:, a, :) = 0
+                fb%spine_start(k) = findloc(fb%gamma_p_chain, fb%plasma_node(k), dim=1)
+                if (fb%spine_start(k) == 0) return
             end do
         end if
         fb%mu0 = fb%plasma%mu0
@@ -1823,13 +1826,20 @@ contains
         type(ideal_fb_t), intent(in) :: fb
         real(dp), intent(out) :: res(:, :, :)
         real(dp), allocatable :: u(:, :, :)
-        integer :: s, p
+        real(dp) :: p2(2), dp2(2, 8), h2(8, 8)
+        integer :: s, p, nodes(0:3), st
         u = fb%xs
         u(1:2, 1, :) = u(1:2, 1, :) - fb%position
         do s = 1, fb%ns
             select case (fb%role(s))
             case (1)
                 res(:, :, s) = fb%xs(:, :, s) - fb%plasma%x(:, :, fb%plasma_node(s))
+                if (allocated(fb%spine_dir)) then
+                    call spine_point(fb, s, [0.0_dp, 0.0_dp], p2, dp2, h2, nodes, st)
+                    if (st /= 0) p2 = ieee_value(1.0_dp, ieee_quiet_nan)
+                    res(1:2, 1, s) = fb%xs(1:2, 1, s) - p2
+                    res(3, 1, s) = fb%xs(3, 1, s)
+                end if
             case (3)
                 res(:, :, s) = u(:, :, s)
             case default
@@ -1849,8 +1859,8 @@ contains
         real(dp), intent(out), optional :: lagrangian, min_jacobian
         real(dp), allocatable :: gfull(:), gx(:, :, :), gf(:, :), res(:, :, :), u(:)
         real(dp), allocatable :: cx(:, :, :), exterior_load(:)
-        real(dp) :: wp, ev, ec, minp, mins, cm
-        integer :: st, s, m, c, p, a, k
+        real(dp) :: wp, ev, ec, minp, mins, cm, p2(2), dp2(2, 8), h2(8, 8)
+        integer :: st, s, m, c, p, a, k, nodes(0:3)
         status = IDEAL_FB_BAD_INPUT
         if (.not. ideal_fb_exterior_ready(fb)) return
         allocate (gfull(fb%plasma%ndof), gx(3, fb%nmode, fb%ns), gf(fb%nmode, fb%ns), &
@@ -1899,6 +1909,18 @@ contains
             select case (fb%role(s))
             case (1)
                 cx(:, :, s) = cx(:, :, s) + fb%lam(:, :, s)
+                if (allocated(fb%spine_dir)) then
+                    call spine_point(fb, s, [0.0_dp, 0.0_dp], p2, dp2, h2, nodes, st)
+                    if (st /= 0) status = IDEAL_FB_FOLDED
+                    do a = 0, 3
+                        do c = 1, 2
+                            p = pidx(fb, c, 1, nodes(a))
+                            grad(p) = grad(p) - dot_product(fb%lam(1:2, 1, s), &
+                                dp2(:, c + 2*a))
+                        end do
+                    end do
+                    cycle
+                end if
                 a = fb%plasma_node(s)
                 do m = 1, fb%nmode
                     do c = 1, 2
@@ -1924,7 +1946,6 @@ contains
                 grad(iphi(fb, m, s)) = -gf(m, s)
             end do
         end do
-        call spine_reduce(fb, grad)
         if (allocated(fb%shift)) grad = grad - fb%shift
         if (present(lagrangian)) lagrangian = wp - ev - ec + sum(fb%lam*res)
         if (present(min_jacobian)) min_jacobian = min(minp, mins)
@@ -1967,6 +1988,7 @@ contains
         if (allocated(fb%exterior_3d)) cap = (fb%nmode*fb%nt)**2
         cap = size(hp%val) + size(hs%val) + cap &
             + 2*3*fb%nmode*(size(fb%lap_val) + 2*fb%ns) + fb%np
+        if (allocated(fb%spine_dir)) cap = cap + fb%ns*(4*8 + 64)
         allocate (ci(cap), cj(cap), cv(cap))
         cnt = 0
         do i = 1, fb%np
@@ -2010,10 +2032,16 @@ contains
                     select case (fb%role(s))
                     case (1)
                         ! Gamma_p tie: shell (q1, q2) = plasma (q1, q2), shell
-                        ! omega = 0 (position gauge of the plasma).
+                        ! omega = 0 (position gauge of the plasma); spined:
+                        ! shell (q1, q2) = P(chain), with lam . d2P in the
+                        ! plasma block.
                         call pair(il(fb, c, m, s), ix(fb, c, m, s), 1.0_dp)
-                        if (c < 3) call pair(il(fb, c, m, s), &
-                            pidx(fb, c, m, fb%plasma_node(s)), -1.0_dp)
+                        if (allocated(fb%spine_dir)) then
+                            if (c == 1) call spine_entries(s)
+                        else if (c < 3) then
+                            call pair(il(fb, c, m, s), &
+                                pidx(fb, c, m, fb%plasma_node(s)), -1.0_dp)
+                        end if
                     case (3)
                         call pair(il(fb, c, m, s), ix(fb, c, m, s), 1.0_dp)
                     case default
@@ -2025,7 +2053,6 @@ contains
                 end do
             end do
         end do
-        if (allocated(fb%spine)) call spine_matrix(fb, ci, cj, cv, cnt)
         call coo_to_csr(fb%n, ci(:cnt), cj(:cnt), cv(:cnt), rowptr, colidx, val)
     contains
         integer function shell_global(q)
@@ -2039,6 +2066,27 @@ contains
             real(dp), intent(in) :: v
             cnt = cnt + 1
             ci(cnt) = r; cj(cnt) = col; cv(cnt) = v
+        end subroutine
+
+        subroutine spine_entries(s)
+            integer, intent(in) :: s
+            real(dp) :: p2(2), dp2(2, 8), h2(8, 8)
+            integer :: nodes(0:3), st, a, c, b, d, n
+            call spine_point(fb, s, fb%lam(1:2, 1, s), p2, dp2, h2, nodes, st)
+            if (st /= 0) return
+            n = 4
+            do a = 0, 3
+                do c = 1, 2
+                    call pair(il(fb, 1, 1, s), pidx(fb, c, 1, nodes(a)), -dp2(1, c + 2*a))
+                    call pair(il(fb, 2, 1, s), pidx(fb, c, 1, nodes(a)), -dp2(2, c + 2*a))
+                    do b = 0, 3
+                        do d = 1, 2
+                            call push(pidx(fb, c, 1, nodes(a)), pidx(fb, d, 1, nodes(b)), &
+                                -h2(c + 2*a, d + 2*b))
+                        end do
+                    end do
+                end do
+            end do
         end subroutine
 
         subroutine pair(r, col, v)
@@ -2211,14 +2259,11 @@ contains
         end do
     end subroutine
 
-    subroutine ideal_fb_step(fb, du_in, alpha)
+    subroutine ideal_fb_step(fb, du, alpha)
         ! U <- U + alpha du in the global layout.
         type(ideal_fb_t), intent(inout) :: fb
-        real(dp), intent(in) :: du_in(:), alpha
-        real(dp), allocatable :: du(:)
+        real(dp), intent(in) :: du(:), alpha
         integer :: s, m, c, a
-        du = du_in
-        call spine_expand(fb, du)
         do a = 1, fb%plasma%nodes
             do m = 1, fb%nmode
                 do c = 1, 2
@@ -3041,29 +3086,38 @@ contains
         real(dp), intent(inout) :: grad(:)
         real(dp), allocatable, intent(out) :: d(:)
         logical, intent(out) :: ok
-        real(dp), allocatable :: rhs(:), tie(:)
+        real(dp), allocatable :: rhs(:)
         type(fortsparse_status_t) :: sst
-        integer :: s2, m, c, k
+        real(dp) :: p2(2), dp2(2, 8), h2(8, 8)
+        integer :: s2, m, c, k, a, nodes(0:3), st
         rhs = -grad(fb%np + 1:fb%np + fb%nx)
         allocate (d(fb%nx))
         call sparse_solve(csolver, rhs, d, sst)
         ok = status_ok(sst)
         if (.not. ok) return
         grad(fb%np + 1:fb%np + fb%nx) = 0
-        allocate (tie(fb%np))
-        tie = 0
         do s2 = 1, fb%ns
             if (fb%role(s2) /= 1) cycle
+            if (allocated(fb%spine_dir)) then
+                call spine_point(fb, s2, [0.0_dp, 0.0_dp], p2, dp2, h2, nodes, st)
+                if (st /= 0) cycle
+                k = 3*fb%nmode*(s2 - 1)
+                do a = 0, 3
+                    do c = 1, 2
+                        grad(pidx(fb, c, 1, nodes(a))) = grad(pidx(fb, c, 1, nodes(a))) &
+                            - dot_product(d(k + 1:k + 2), dp2(:, c + 2*a))
+                    end do
+                end do
+                cycle
+            end if
             do m = 1, fb%nmode
                 do c = 1, 2
                     k = c + 3*(m - 1) + 3*fb%nmode*(s2 - 1)
-                    tie(pidx(fb, c, m, fb%plasma_node(s2))) = &
-                        tie(pidx(fb, c, m, fb%plasma_node(s2))) - d(k)
+                    grad(pidx(fb, c, m, fb%plasma_node(s2))) = &
+                        grad(pidx(fb, c, m, fb%plasma_node(s2))) - d(k)
                 end do
             end do
         end do
-        call spine_reduce(fb, tie)
-        grad(1:fb%np) = grad(1:fb%np) + tie
     end subroutine
 
     subroutine scale_mode(fb, du, m, factor)
@@ -3454,7 +3508,6 @@ contains
             call sparse_solve(solver, [rhs(:, k), (0.0_dp, j = 1, nslide)], sol, sst)
             if (.not. status_ok(sst)) exit
             solution(:, k) = sol(:fb%n)
-            call spine_expand(fb, solution(:, k))
         end do
         call sparse_destroy(solver)
         if (status_ok(sst)) status = IDEAL_FB_OK
@@ -5641,11 +5694,9 @@ contains
         integer, intent(in) :: lines(:, :), number(:)
         real(dp), intent(in) :: line_t(:)
         integer, intent(out) :: status
-        integer :: k, a, p, c, nnz, npair
+        integer :: k, a, p, c, nnz
         status = 1
-        allocate (fb%lap_ptr(fb%ns + 1), fb%lap_col(3*fb%ns), fb%lap_val(3*fb%ns), &
-            fb%line_pair(2, fb%ns))
-        fb%line_pair = 0; npair = 0
+        allocate (fb%lap_ptr(fb%ns + 1), fb%lap_col(3*fb%ns), fb%lap_val(3*fb%ns))
         nnz = 0; fb%lap_ptr(1) = 1
         do k = 1, fb%ns
             a = fb%shell_global(k)
@@ -5654,10 +5705,6 @@ contains
                 if (p == 0 .or. c == 0) return
                 if (fb%role(p) /= 1 .or. fb%role(c) /= 3) return
                 if (.not. (line_t(a) > 0 .and. line_t(a) < 1)) return
-                if (findloc(fb%line_pair(1, :npair), p, dim=1) == 0) then
-                    npair = npair + 1
-                    fb%line_pair(:, npair) = [p, c]
-                end if
                 fb%lap_col(nnz + 1:nnz + 3) = [k, p, c]
                 fb%lap_val(nnz + 1:nnz + 3) = [1.0_dp, line_t(a) - 1, -line_t(a)]
                 nnz = nnz + 3
@@ -5665,87 +5712,136 @@ contains
             fb%lap_ptr(k + 1) = nnz + 1
         end do
         fb%lap_col = fb%lap_col(:nnz); fb%lap_val = fb%lap_val(:nnz)
-        fb%line_pair = fb%line_pair(:, :npair)
         status = 0
     end subroutine
 
-    subroutine spine_reduce(fb, g)
-        ! Covector of the plasma rows in the spine basis: slot 1 the spine
-        ! component, slot 2 zero.
-        type(ideal_fb_t), intent(in) :: fb
-        real(dp), intent(inout) :: g(:)
-        integer :: a, m, i1, i2
-        if (.not. allocated(fb%spine)) return
-        do a = 1, fb%plasma%nodes
-            if (.not. any(abs(fb%spine(:, a)) > 0)) cycle
-            do m = 1, fb%nmode
-                i1 = pidx(fb, 1, m, a); i2 = pidx(fb, 2, m, a)
-                g(i1) = dot_product(fb%spine(:, a), g([i1, i2])); g(i2) = 0
+    subroutine spine_leaf(x, t, tau, o, lam, f, ft, p, jac, h)
+        ! Generated spine leaves (gen/gen_fb_spine.f90) on the Catmull-Rom
+        ! segment of the chain nodes x(2, 0:3): f, f_t, P, jac = dP/dx (2, 8)
+        ! and the full matrix lam . d2P/dx dx.
+        real(dp), intent(in) :: x(2, 0:3), t, tau(2), o(2), lam(2)
+        real(dp), intent(out) :: f, ft, p(2), jac(2, 8), h(8, 8)
+        real(dp) :: d(16), u(36)
+        integer :: a, b, k
+        call fb_spine_residual(x(1, 0), x(2, 0), x(1, 1), x(2, 1), x(1, 2), x(2, 2), &
+            x(1, 3), x(2, 3), t, tau(1), tau(2), o(1), o(2), f, ft)
+        call fb_spine_point(x(1, 0), x(2, 0), x(1, 1), x(2, 1), x(1, 2), x(2, 2), &
+            x(1, 3), x(2, 3), t, tau(1), tau(2), p(1), p(2), d(1), d(2), d(3), d(4), &
+            d(5), d(6), d(7), d(8), d(9), d(10), d(11), d(12), d(13), d(14), d(15), &
+            d(16))
+        call fb_spine_hessian(x(1, 0), x(2, 0), x(1, 1), x(2, 1), x(1, 2), x(2, 2), &
+            x(1, 3), x(2, 3), t, tau(1), tau(2), lam(1), lam(2), u(1), u(2), u(3), &
+            u(4), u(5), u(6), u(7), u(8), u(9), u(10), u(11), u(12), u(13), u(14), &
+            u(15), u(16), u(17), u(18), u(19), u(20), u(21), u(22), u(23), u(24), &
+            u(25), u(26), u(27), u(28), u(29), u(30), u(31), u(32), u(33), u(34), &
+            u(35), u(36))
+        jac = reshape(d, [2, 8])
+        k = 0
+        do b = 1, 8
+            do a = 1, b
+                k = k + 1
+                h(a, b) = u(k); h(b, a) = u(k)
             end do
         end do
     end subroutine
 
-    subroutine spine_expand(fb, du)
-        ! Displacement from the spine basis: (q1, q2) = spine times slot 1.
+    subroutine spine_point(fb, s, lam, p, jac, h, nodes, status)
+        ! Intersection of the spine of Gamma_p shell node s with the
+        ! Catmull-Rom curve through the plasma boundary chain (n = 0
+        ! positions): Newton on the segment parameter, moving to the
+        ! neighbouring segment when it leaves [0, 1]. nodes: the four plasma
+        ! nodes of the segment, in the column order of jac and h.
         type(ideal_fb_t), intent(in) :: fb
-        real(dp), intent(inout) :: du(:)
-        real(dp) :: dn
-        integer :: a, m, i1, i2
-        if (.not. allocated(fb%spine)) return
-        do a = 1, fb%plasma%nodes
-            if (.not. any(abs(fb%spine(:, a)) > 0)) cycle
-            do m = 1, fb%nmode
-                i1 = pidx(fb, 1, m, a); i2 = pidx(fb, 2, m, a)
-                dn = du(i1)
-                du(i1) = fb%spine(1, a)*dn; du(i2) = fb%spine(2, a)*dn
+        integer, intent(in) :: s
+        real(dp), intent(in) :: lam(2)
+        real(dp), intent(out) :: p(2), jac(:, :), h(:, :)
+        integer, intent(out) :: nodes(0:)
+        integer, intent(out) :: status
+        real(dp) :: x(2, 0:3), t, f, ft, tau(2), scale
+        integer :: seg, nc, it, l
+        status = 1
+        nc = size(fb%gamma_p_chain)
+        tau = [-fb%spine_dir(2, s), fb%spine_dir(1, s)]
+        seg = fb%spine_start(s); t = 0
+        scale = norm2(fb%spine_origin(:, s)) + 1
+        do it = 1, 100
+            do l = 0, 3
+                nodes(l) = fb%gamma_p_chain(modulo(seg + l - 2, nc) + 1)
+                x(:, l) = fb%plasma%x(1:2, 1, nodes(l))
             end do
+            call spine_leaf(x, t, tau, fb%spine_origin(:, s), lam, f, ft, p, &
+                jac(:, :8), h(:8, :8))
+            if (abs(f) <= 1.0e-14_dp*scale .and. t >= 0 .and. t <= 1) then
+                status = 0
+                return
+            end if
+            if (.not. abs(ft) > 0) return
+            t = t - f/ft
+            if (t < 0) then
+                seg = modulo(seg - 2, nc) + 1; t = min(1.0_dp, t + 1)
+            else if (t > 1) then
+                seg = mod(seg, nc) + 1; t = max(0.0_dp, t - 1)
+            end if
         end do
     end subroutine
 
-    subroutine spine_matrix(fb, ci, cj, cv, cnt)
-        ! T^T H T on the assembled entries, T = spine_expand; the pinned
-        ! slot 2 rows get the mean plasma diagonal.
-        type(ideal_fb_t), intent(in) :: fb
-        integer, allocatable, intent(inout) :: ci(:), cj(:)
-        real(dp), allocatable, intent(inout) :: cv(:)
-        integer, intent(inout) :: cnt
-        integer, allocatable :: target(:)
-        real(dp), allocatable :: factor(:)
-        real(dp) :: mean
-        integer :: k, a, m, i1, i2, n2
-        allocate (target(fb%n), factor(fb%n))
-        target = [(k, k = 1, fb%n)]; factor = 1
-        n2 = 0
-        do a = 1, fb%plasma%nodes
-            if (.not. any(abs(fb%spine(:, a)) > 0)) cycle
-            do m = 1, fb%nmode
-                i1 = pidx(fb, 1, m, a); i2 = pidx(fb, 2, m, a)
-                target(i2) = i1
-                factor(i1) = fb%spine(1, a); factor(i2) = fb%spine(2, a)
-                n2 = n2 + 1
+    subroutine chain_of_plasma(map, order, chain, status)
+        ! Plasma boundary nodes in chain order (order per boundary edge).
+        type(ideal_map_t), intent(in) :: map
+        integer, intent(in) :: order
+        integer, allocatable, intent(out) :: chain(:)
+        integer, intent(out) :: status
+        integer :: lattice(0:3, 0:3), corner(2, 3), e, i, j, l, k, a, ne, nedge
+        integer, allocatable :: edges(:, :)
+        logical, allocatable :: used(:)
+        real(dp) :: values(10), gradient(2, 10)
+        status = 1
+        do i = 0, order
+            do j = 0, order - i
+                call triangle_basis_jet([real(i, dp), real(j, dp)]/order, &
+                    values(:map%nloc), gradient(:, :map%nloc))
+                k = maxloc(values(:map%nloc), dim=1)
+                if (abs(values(k) - 1) > 1.0e-10_dp) return
+                lattice(i, j) = k
             end do
         end do
-        mean = 0
-        do k = 1, cnt
-            if (ci(k) == cj(k) .and. ci(k) <= fb%np) mean = mean + abs(cv(k))
-        end do
-        mean = mean/fb%np
-        do k = 1, cnt
-            cv(k) = cv(k)*factor(ci(k))*factor(cj(k))
-            ci(k) = target(ci(k)); cj(k) = target(cj(k))
-        end do
-        if (size(ci) < cnt + n2) then
-            ci = [ci(:cnt), (0, k = 1, n2)]
-            cj = [cj(:cnt), (0, k = 1, n2)]
-            cv = [cv(:cnt), (0.0_dp, k = 1, n2)]
-        end if
-        do a = 1, fb%plasma%nodes
-            if (.not. any(abs(fb%spine(:, a)) > 0)) cycle
-            do m = 1, fb%nmode
-                i2 = pidx(fb, 2, m, a)
-                cnt = cnt + 1
-                ci(cnt) = i2; cj(cnt) = i2; cv(cnt) = mean
+        corner = reshape([0, 0, order, 0, 0, order], [2, 3])
+        allocate (edges(0:order, 3*map%cells))
+        ne = 0
+        do e = 1, map%cells
+            do a = 1, 3
+                k = mod(a, 3) + 1
+                ne = ne + 1
+                do l = 0, order
+                    i = corner(1, a) + l*(corner(1, k) - corner(1, a))/order
+                    j = corner(2, a) + l*(corner(2, k) - corner(2, a))/order
+                    edges(l, ne) = map%conn(lattice(i, j), e)
+                end do
+                if (.not. all(map%boundary(edges(:, ne)))) ne = ne - 1
             end do
         end do
+        if (ne < 3) return
+        allocate (used(ne), chain(ne*order))
+        used = .false.; used(1) = .true.
+        chain(1:order) = edges(0:order - 1, 1)
+        k = edges(order, 1)
+        do nedge = 2, ne
+            j = 0
+            do i = 1, ne
+                if (used(i)) cycle
+                if (edges(0, i) == k) then
+                    j = i; exit
+                end if
+                if (edges(order, i) == k) then
+                    edges(:, i) = edges(order:0:-1, i); j = i; exit
+                end if
+            end do
+            if (j == 0) return
+            used(j) = .true.
+            chain((nedge - 1)*order + 1:nedge*order) = edges(0:order - 1, j)
+            k = edges(order, j)
+        end do
+        if (k /= chain(1)) return
+        status = 0
     end subroutine
 end module milca_ideal_free_boundary

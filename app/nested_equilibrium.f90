@@ -112,7 +112,7 @@ program nested_equilibrium
     real(dp) :: shell_distance
     real(dp), allocatable :: shell_positions(:, :), shell_t(:)
     integer, allocatable :: shell_lines(:, :)
-    real(dp), allocatable :: shell_spines(:, :)
+    real(dp), allocatable :: shell_spines(:, :), shell_origins(:, :)
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
         ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
@@ -408,11 +408,13 @@ contains
         if (shell_layers > 0) then
             call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
                 shell_layers, shell_distance, mesh, chain, shell_positions, &
-                shell_lines, shell_t, local, spines=shell_spines)
+                shell_lines, shell_t, local, spines=shell_spines, &
+                spine_origins=shell_origins)
             if (local /= 0) call fail('the free-boundary mesh failed')
             call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, &
                 0.0_dp, circulation, local, nphi=max(1, 4*ntor_level + 1), &
-                positions=shell_positions, lines=shell_lines, line_t=shell_t)
+                positions=shell_positions, lines=shell_lines, line_t=shell_t, &
+                spines=shell_spines, spine_origins=shell_origins)
         else
             call fb_nested_mesh(mesh, chain, fb_centre, fb_axes, fb_curve, nodes, &
                 degree, local)
@@ -562,11 +564,6 @@ contains
         allocate (v(fb%n), gp(fb%n), gm(fb%n), hv(fb%n))
         call random_number(v); v = v - 0.5_dp
         v(fb%np + fb%nx + 1:fb%np + 2*fb%nx) = 0
-        if (allocated(fb%spine)) then
-            do i = 1, fb%plasma%nodes
-                if (any(abs(fb%spine(:, i)) > 0)) v(2*fb%nmode*(i - 1) + 2:2*fb%nmode*i:2) = 0
-            end do
-        end if
         b = [0, fb%np, fb%np + fb%nx, fb%np + 2*fb%nx, fb%n]
         do i = 1, fb%n
             hv(i) = 0
