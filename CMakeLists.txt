@@ -1125,7 +1125,9 @@ add_executable(test_surface_phi1 test/test_surface_phi1.f90)
 target_link_libraries(test_surface_phi1 PRIVATE milca)
 add_test(NAME surface_phi1_closure COMMAND test_surface_phi1 closure)
 add_test(NAME surface_phi1_continuity COMMAND test_surface_phi1 continuity)
-foreach(check closure continuity)
+add_test(NAME surface_phi1_sfincs COMMAND test_surface_phi1 sfincs
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data/surface_phi1_sfincs.txt)
+foreach(check closure continuity sfincs)
     milca_test_labels(surface_phi1_${check} fast CLASSES continuum
         TARGETS test_surface_phi1)
 endforeach()

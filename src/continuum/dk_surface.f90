@@ -240,12 +240,20 @@ contains
     !> holds field, species and collision inputs fixed.
     !>
     !> phi1(n_theta, n_zeta) is a prescribed in-surface potential in volts on
-    !> the grid of b. Its radial E x B drift acts on the Maxwellian gradient:
-    !>   v_E.grad psi / v_d.grad psi = Z e B d_perp Phi_1 / (T x^2 (1 + xi^2) d_perp B),
-    !> d_perp = d_theta - (I/G) d_zeta, so its source is the radial-drive row
-    !> with (1 + xi^2) x^2 tz b_drift/b replaced by d_perp Phi_1 (P_0 only).
+    !> the grid of b. With F = f_M(psi, H), H = m v^2/2 + Z e Phi_1, the
+    !> unknown is f - F, and the response linear in Phi_1 has three sources,
+    !> eps = Z e Phi_1/T:
+    !>   (a) the radial E x B drift on f_M, whose ratio to the magnetic drift is
+    !>       Z e B d_perp Phi_1 / (T x^2 (1 + xi^2) d_perp B), d_perp = d_theta -
+    !>       (I/G) d_zeta: the radial-drive row with (1 + xi^2) x^2 tz b_drift/b
+    !>       replaced by d_perp Phi_1 (P_0 only);
+    !>   (b) the magnetic drift on the Phi_1 part of d F/d psi at fixed H,
+    !>       eps f_M (-f1 + (1 - x^2) f2);
+    !>   (c) the parallel electric field accelerating the gradient response g,
+    !>       x' = -(v_t/2) xi E, xi' = -(v_t/(2 x)) (1 - xi^2) E,
+    !>       E = b.grad eps, in the conservative weak form.
     !> d_phi(a, sb, i, jf) holds the moments of d for the response of species
-    !> a to this drive with force jf = 1, 2 of species sb (per unit force).
+    !> a to these sources with force jf = 1, 2 of species sb (per unit force).
     !> flow_local(i, a, sb, jf) is the local parallel flow U at point i of the
     !> response to drive jf = 1..3, normalised so that <b U> = d(a, sb, 3, jf)
     !> with <.> of weight 1/b^2; flow_local_phi(i, a, sb, jf) the same for the
@@ -275,7 +283,8 @@ contains
             vt(:), tz(:), coll(:, :, :), lo(:, :, :), up(:, :, :), v(:, :), vu(:, :), &
             rinv(:), rhs(:, :, :), x(:, :, :), radial(:), measure(:), bv(:), &
             electric_unit(:), electric_rows(:), dx(:, :, :), d_par(:, :), b_par(:), &
-            b_drift(:), d_perp(:, :), dphi(:)
+            b_drift(:), d_perp(:, :), dphi(:), xg(:, :, :, :, :), eps(:), epar(:), &
+            pitch_a(:, :), pitch_b(:, :), d2(:, :), m1(:, :), unused(:, :), unused_v(:)
         real(dp) :: j0, rate
         integer :: n, lmax, ns, nx, nm, a, sb, jf, k, l, st, its
         logical :: full
@@ -359,6 +368,8 @@ contains
         measure = 2/bv**3
         j0 = sum(1/bv**2)
         allocate (rhs(n, 0:lmax, nm))
+        if (present(phi1) .and. (present(d_phi) .or. present(flow_local_phi))) &
+            allocate (xg(n, 0:lmax, nm, ns, 2))
         do sb = 1, ns
             do jf = 1, 3
                 rhs = 0
@@ -383,6 +394,7 @@ contains
                     d(a, sb, :, jf) = moments(x, a)
                     if (present(flow_local)) flow_local(:, a, sb, jf) = local_flow(x, a)
                 end do
+                if (allocated(xg) .and. jf < 3) xg(:, :, :, sb, jf) = x
                 if (.not. present(d_drate)) cycle
                 if (full) then
                     call full_electric_action(x, rhs)
@@ -410,13 +422,25 @@ contains
                 return
             end if
             dphi = matmul(d_perp, reshape(phi1, [n]))
+            ! b.grad Phi_1 = kappa b (d_theta + q d_zeta) Phi_1.
+            epar = kappa*bv*matmul(d_par, reshape(phi1, [n]))
+            call parallel_field_operators(st)
+            if (st /= SURFACE_OK) then
+                status = st
+                return
+            end if
             do sb = 1, ns
+                eps = reshape(phi1, [n])/tz(sb)
                 do jf = 1, 2
-                    rhs = 0
+                    call parallel_field_action(xg(:, :, :, sb, jf), rhs)
+                    rhs = -rhs
                     do k = 1, nx
-                        associate (m => (sb - 1)*nx + k, row => ratio(k, sb)/(vt(sb)*d3(k)))
-                            rhs(:, 0, m) = row*merge(d4(k), d6(k), jf == 1) &
-                                /grid%x(k + 1)**2*dphi/q
+                        associate (m => (sb - 1)*nx + k, row => ratio(k, sb)/(vt(sb)*d3(k)), &
+                                w => merge(-d4(k), d4(k) - d6(k), jf == 1))
+                            rhs(:, 0, m) = rhs(:, 0, m) + row*merge(d4(k), d6(k), jf == 1) &
+                                /grid%x(k + 1)**2*dphi/q + row*tz(sb)*w*radial*eps
+                            rhs(:, 2, m) = rhs(:, 2, m) + row*tz(sb)*w &
+                                *(-2/(kappa*q))*geo%p%drift2*eps
                         end associate
                     end do
                     call solve(rhs, x, its, st)
@@ -435,6 +459,63 @@ contains
         end if
         status = SURFACE_OK
     contains
+        !> Pitch and speed matrices of the parallel electric acceleration:
+        !> pitch_a(l + 1, j + 1) = int xi P_l P_j, pitch_b(l + 1, j + 1) =
+        !> int (1 - xi^2) P_l' P_j,
+        !> d2(i, j) = int x^2 exp(-x^2) phi_i' phi_j, m1(i, j) = int x exp(-x^2)
+        !> phi_i phi_j on the speed grid with the x = 0 node.
+        subroutine parallel_field_operators(status)
+            integer, intent(out) :: status
+            real(dp), allocatable :: xi(:), wt(:), p(:, :), dp_dxi(:, :)
+            integer :: count, l
+            status = SURFACE_BAD_INPUT
+            count = n_leg + 1
+            allocate (xi(count), wt(count), p(count, 0:lmax), dp_dxi(count, 0:lmax), &
+                d2(grid%n, grid%n), m1(grid%n, grid%n), unused(grid%n, grid%n), &
+                unused_v(grid%n))
+            call gauss_legendre(count, xi, wt)
+            do l = 0, lmax
+                p(:, l) = legendre_p(l, 0, xi)
+                dp_dxi(:, l) = legendre_p_derivative(l, 0, xi)
+            end do
+            pitch_a = matmul(transpose(p), spread(wt*xi, 2, lmax + 1)*p)
+            pitch_b = matmul(transpose(dp_dxi), spread(wt*(1 - xi**2), 2, lmax + 1)*p)
+            call collop_moments(grid, 2, 2, unused, unused_v, d2)
+            call collop_moments(grid, 1, 1, m1, unused_v)
+            if (.not. all(ieee_is_finite(epar))) return
+            status = SURFACE_OK
+        end subroutine parallel_field_operators
+
+        !> Rows of (c) on h: the weak residual (v_t/2) E [d2 x pitch_a + m1 x
+        !> pitch_b] h, E = b.grad Phi_1/tz, mapped to the solver rows like the
+        !> full electric action; v_t and the surface measure cancel.
+        subroutine parallel_field_action(h, action)
+            real(dp), intent(in) :: h(:, 0:, :)
+            real(dp), intent(out) :: action(:, 0:, :)
+            real(dp), allocatable :: samples(:, :, :), weak(:, :, :)
+            integer :: a, k, l, j, m
+            allocate (samples(n, 0:lmax, grid%n), weak(n, 0:lmax, grid%n))
+            do a = 1, ns
+                samples(:, :, 1) = 0
+                samples(:, :, 2:) = h(:, :, (a - 1)*nx + 1:a*nx)
+                weak = 0
+                do l = 0, lmax
+                    do j = max(0, l - 1), min(lmax, l + 1)
+                        weak(:, l, :) = weak(:, l, :) &
+                            + pitch_a(l + 1, j + 1)*matmul(samples(:, j, :), transpose(d2)) &
+                            + pitch_b(l + 1, j + 1)*matmul(samples(:, j, :), transpose(m1))
+                    end do
+                end do
+                do k = 1, nx
+                    m = (a - 1)*nx + k
+                    do l = 0, lmax
+                        action(:, l, m) = epar/(2*tz(a))*weak(:, l, k + 1)*ratio(k, a) &
+                            *(2*l + 1)/(2*d3(k))
+                    end do
+                end do
+            end do
+        end subroutine parallel_field_action
+
         !> U(i) with <b U> = moments(h, a)(3).
         function local_flow(h, species_index) result(value)
             real(dp), intent(in) :: h(:, 0:, :)
