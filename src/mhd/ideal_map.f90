@@ -78,6 +78,9 @@ module milca_ideal_map
         IDEAL_MAP_NOT_CONVERGED = 2, IDEAL_MAP_SOLVE_FAILED = 3, &
         IDEAL_MAP_BAD_INPUT = 4
     ! Factor policies of the Krylov-step trials (ideal_map_t%factor_policy).
+    ! Count of Hessian assemblies: the factor cache rebuilds its values once
+    ! per assembly instead of comparing a copy of them.
+    integer, save :: hessian_stamp = 0
     integer, parameter, public :: IDEAL_MAP_FACTOR_SPD_LU = 0, &
         IDEAL_MAP_FACTOR_LDLT = 1
 
@@ -235,11 +238,11 @@ module milca_ideal_map
     end type
 
     type :: factor_cache_t
-        ! Per-pattern data of factor_masked. base is the masked, symmetrised
-        ! matrix with the diagonal unshifted, so that a trial only rewrites the
-        ! diagonal of val. keep/gauge/pattern identify the entries, raw the
-        ! Hessian values that base was built from.
-        integer :: nc = -1
+        ! Per-pattern data of factor_masked. a%val holds the masked, symmetrised
+        ! matrix, bdiag its unshifted diagonal, so that a trial only rewrites
+        ! the diagonal. keep/gauge/pattern identify the entries, stamp the
+        ! Hessian assembly (hessian_stamp) the values were built from.
+        integer :: nc = -1, stamp = -1
         logical :: pattern_ok = .false., base_ok = .false.
         real(dp) :: scale = 0, correction = 0
         logical, allocatable :: keep(:)
@@ -250,8 +253,9 @@ module milca_ideal_map
         integer, allocatable :: rowptr(:), colidx(:), src(:), dpos(:), refl(:)
         integer, allocatable :: mpos(:), gpos(:)
         real(dp), allocatable :: mval(:), gval(:)
-        real(dp), allocatable :: raw(:), base(:), bdiag(:)
-        ! The factor input itself (a%val: base with the trial diagonal). It
+        real(dp), allocatable :: bdiag(:)
+        ! The factor input itself (a%val: the masked matrix with the trial
+        ! diagonal). It
         ! goes through FortSparse's csc_t entry points, which keep the symbolic
         ! analysis after a failed numeric factor, unlike the raw-array ones.
         type(csc_t) :: a
@@ -1748,6 +1752,8 @@ contains
                 with_slots=.true.)
         ! The blocks are exactly symmetric (reflected above).
         call csr_assemble_blocks(matrix, map%redconn, blocks, symmetric=.true.)
+        !$omp atomic
+        hessian_stamp = hessian_stamp + 1
     end subroutine
 
     subroutine hessian_angle(map, x, nr, blocks)
@@ -2555,8 +2561,11 @@ contains
             do row = 1, map%nred
                 acc = 0
                 do kk = report%cache%rowptr(row), report%cache%rowptr(row + 1) - 1
-                    acc = acc + report%cache%base(kk)*input(report%cache%colidx(kk))
+                    acc = acc + report%cache%a%val(kk)*input(report%cache%colidx(kk))
                 end do
+                ! a%val carries the diagonal of the last factor's shift
+                if (report%cache%dpos(row) > 0) acc = acc + (report%cache%bdiag(row) &
+                    - report%cache%a%val(report%cache%dpos(row)))*input(row)
                 if (.not. map%fixed(row)) then
                     if (report%cache%dpos(row) > 0) acc = acc + shift(row)*input(row)
                 end if
@@ -3025,16 +3034,9 @@ contains
         end if
         info = 1
         if (.not. c%pattern_ok) return
-        if (c%base_ok) then
-            same = .true.
-            !$omp parallel do default(shared) private(k) &
-            !$omp reduction(.and.: same) schedule(static)
-            do k = 1, size(c%raw)
-                same = same .and. abs(c%raw(k) - matrix%val(k)) <= 0.0_dp
-            end do
-            !$omp end parallel do
-            c%base_ok = same
-        end if
+        ! a new Hessian assembly (or one modified after it, which refreshes
+        ! before its first factor) has a new stamp
+        if (c%base_ok) c%base_ok = c%stamp == hessian_stamp
         if (.not. c%base_ok) call factor_cache_refresh(map, matrix, c, info)
         if (c%base_ok) info = 0
     end subroutine
@@ -3163,11 +3165,10 @@ contains
                 if (col > row) c%refl(k) = p
             end do
         end do
-        c%raw = [(0.0_dp, k=1, size(matrix%val))]
-        c%base = [(0.0_dp, k=1, nz)]
         c%bdiag = [(0.0_dp, k=1, map%nred)]
         c%a%nrow = n; c%a%ncol = n; c%a%nnz = nz
-        c%a%col_ptr = c%rowptr; c%a%row_idx = c%colidx; c%a%val = c%base
+        c%a%col_ptr = c%rowptr; c%a%row_idx = c%colidx
+        c%a%val = [(0.0_dp, k=1, nz)]
         c%pattern_ok = .true.
     end subroutine
 
@@ -3212,21 +3213,21 @@ contains
         ! O(nnz) gathers, checks and copies, shared by the team; max and
         ! logical reductions are exact, so nothing depends on the thread count.
         !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%base)
-            if (c%src(k) > 0) c%base(k) = matrix%val(c%src(k))
+        do k = 1, size(c%a%val)
+            if (c%src(k) > 0) c%a%val(k) = matrix%val(c%src(k))
         end do
         !$omp end parallel do
-        c%base(c%gpos) = c%gval
-        c%base(c%mpos) = c%mval
+        c%a%val(c%gpos) = c%gval
+        c%a%val(c%mpos) = c%mval
         finite = .true.; scale = 0; correction = 0
         !$omp parallel do default(shared) private(k, p, delta) schedule(static) &
         !$omp reduction(.and.: finite) reduction(max: scale, correction)
-        do k = 1, size(c%base)
-            finite = finite .and. ieee_is_finite(c%base(k))
-            scale = max(scale, abs(c%base(k)))
+        do k = 1, size(c%a%val)
+            finite = finite .and. ieee_is_finite(c%a%val(k))
+            scale = max(scale, abs(c%a%val(k)))
             p = c%refl(k)
             if (p == 0) cycle
-            delta = abs(c%base(k) - c%base(p))
+            delta = abs(c%a%val(k) - c%a%val(p))
             if (delta <= 0.0_dp) cycle
             correction = max(correction, nearest(delta, 1.0_dp))
         end do
@@ -3238,30 +3239,20 @@ contains
         if (c%correction > rtol*c%scale) return
         ! Reflection targets are strict lower entries, never sources.
         !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%base)
-            if (c%refl(k) > 0) c%base(c%refl(k)) = c%base(k)
-        end do
-        !$omp end parallel do
-        !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%base)
-            c%a%val(k) = c%base(k)
-        end do
-        !$omp end parallel do
-        !$omp parallel do default(shared) private(k) schedule(static)
-        do k = 1, size(c%raw)
-            c%raw(k) = matrix%val(k)
+        do k = 1, size(c%a%val)
+            if (c%refl(k) > 0) c%a%val(c%refl(k)) = c%a%val(k)
         end do
         !$omp end parallel do
         do row = 1, map%nred
-            if (c%dpos(row) > 0) c%bdiag(row) = c%base(c%dpos(row))
+            if (c%dpos(row) > 0) c%bdiag(row) = c%a%val(c%dpos(row))
         end do
         if (map%verify_factor) then
             ! Debug: FortSparse's canonical projection must find nothing to do.
-            reference = c%base
+            reference = c%a%val
             call csc_normalize_symmetric_raw(size(c%rowptr) - 1, c%rowptr, c%colidx, &
                 reference, rtol, delta, sstatus)
             if (.not. status_ok(sstatus) .or. delta > 0.0_dp .or. &
-                any(abs(reference - c%base) > 0.0_dp)) &
+                any(abs(reference - c%a%val) > 0.0_dp)) &
                 error stop 'ideal_map: cached factor input is not canonical'
         end if
         c%base_ok = .true.
