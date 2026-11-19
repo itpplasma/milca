@@ -198,7 +198,7 @@ contains
         allocate (r%d(nsp, nsp, 3, 3), u(n, nsp, nsp, 3), r%flow(nsp), r%j_bs(n))
         if (with_phi) then
             phi1 = potential(inp%phi, inp%n_theta, inp%n_zeta, surf%nper)
-            allocate (r%d_phi(nsp, nsp, 3, 2), u_phi(n, nsp, nsp, 2), r%flow_phi(nsp), &
+            allocate (r%d_phi(nsp, nsp, 3, 3), u_phi(n, nsp, nsp, 3), r%flow_phi(nsp), &
                 r%j_phi(n))
             call surface_transport(b, surf%nper, r%q, r%i_over_g, r%kappa, sp, lnl, grid, &
                 inp%collisions, inp%n_leg, r%d, its, st, electric_rate=rate, phi1=phi1, &

@@ -4,9 +4,9 @@
 !!            form V_par = omega I/B + u B, so b U = c1 + c2 b^2 with a residual
 !!            at solver tolerance (#220);
 !!   closure  <b U> of the local flow equals the parallel-flow moment of every
-!!            drive, including the phi1 drive, and a constant phi1 acts as
-!!            the density rescaling exp(-Z e Phi_1/T) of F (pitch-angle
-!!            scattering);
+!!            drive, including the phi1 drives, and a constant phi1 acts as
+!!            the density rescaling exp(-Z e Phi_1/T) of F on all three drives
+!!            (pitch-angle scattering);
 !!   continuity  particle conservation on the surface fixes the local parallel
 !!            flow of every drive up to a constant: with psi the toroidal flux
 !!            over 2 pi, Boozer B.grad = B^2 (iota d_theta + d_zeta)/(G + iota I)
@@ -18,8 +18,10 @@
 !!            drift on the Phi_1 part of dF/dpsi at fixed total energy,
 !!            Maxwellian moments of x^2 (1 + xi^2)(f1 + x^2 f2), (f1 + x^2 f2) and
 !!            x^2 (1 + xi^2)(-f1 + (1 - x^2) f2); the parallel electric
-!!            acceleration conserves density. Independent of the collision
-!!            operator.
+!!            acceleration conserves density. The inductive drive and its phi1
+!!            response (Boltzmann factor of F, parallel acceleration) have no
+!!            density source, S = 0, so u is proportional to B. Independent
+!!            of the collision operator.
 program test_surface_phi1
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_dk_surface, only: surface_transport, SURFACE_OK
@@ -96,8 +98,8 @@ contains
     logical function closure() result(pass)
         type(collop_species_t) :: sp(1)
         type(collop_grid_t) :: grid
-        real(dp) :: lnl(1, 1), b(nt, nz), d(1, 1, 3, 3), d_phi(1, 1, 3, 2), &
-            u(nt*nz, 1, 1, 3), u_phi(nt*nz, 1, 1, 2), w(nt*nz), err, null, scale
+        real(dp) :: lnl(1, 1), b(nt, nz), d(1, 1, 3, 3), d_phi(1, 1, 3, 3), &
+            u(nt*nz, 1, 1, 3), u_phi(nt*nz, 1, 1, 3), w(nt*nz), err, null, scale
         integer :: its, st, jf
         call plasma(sp, lnl, grid)
         b = field()
@@ -111,19 +113,22 @@ contains
             err = max(err, abs(sum(w*u(:, 1, 1, jf))/sum(w**2) - d(1, 1, 3, jf)) &
                 /maxval(abs(d(1, 1, 3, :))))
         end do
-        do jf = 1, 2
+        do jf = 1, 3
             err = max(err, abs(sum(w*u_phi(:, 1, 1, jf))/sum(w**2) - d_phi(1, 1, 3, jf)) &
-                /maxval(abs(d_phi(1, 1, 3, :))))
+                /abs(d_phi(1, 1, 3, jf)))
         end do
         ! A constant c rescales F by exp(-eps), eps = Z e c/T, and shifts ln n'
-        ! by eps T'/T: the response is -eps g1 for force 1 and eps (g1 - g2) for
-        ! force 2 (the constant has zero spectral derivative up to rounding).
+        ! by eps T'/T: the response is -eps g1 for force 1, eps (g1 - g2) for
+        ! force 2 and -eps g3 for the inductive force (the constant has zero
+        ! spectral derivative up to rounding).
         call surface_transport(b, nper, q, ig, kappa, sp, lnl, grid, COLLOP_LORENTZ, n_leg, &
             d, its, st, phi1=spread(spread(3.0_dp, 1, nt), 2, nz), d_phi=d_phi)
         scale = 3.0_dp/(sp(1)%t/(sp(1)%z*elementary))
         null = max(maxval(abs(d_phi(1, 1, :, 1) + scale*d(1, 1, :, 1))), &
             maxval(abs(d_phi(1, 1, :, 2) - scale*(d(1, 1, :, 1) - d(1, 1, :, 2))))) &
             /(scale*maxval(abs(d(1, 1, :, 1:2))))
+        null = max(null, maxval(abs(d_phi(1, 1, :, 3) + scale*d(1, 1, :, 3))) &
+            /(scale*maxval(abs(d(1, 1, :, 3)))))
         print '(a,es10.2,a,es10.2)', 'local-to-average closure ', err, &
             ', constant potential against density rescaling ', null
         pass = st == SURFACE_OK .and. err < 1e-12_dp .and. null < 1e-10_dp
@@ -186,8 +191,8 @@ contains
         character(*), intent(in) :: path
         type(collop_species_t) :: sp(1)
         type(collop_grid_t) :: grid
-        real(dp) :: lnl(1, 1), b(nt, nz), d(1, 1, 3, 3), d_phi(1, 1, 3, 2), &
-            u_phi(nt*nz, 1, 1, 2), expected(nt*nz), expected_mean, computed(nt*nz), &
+        real(dp) :: lnl(1, 1), b(nt, nz), d(1, 1, 3, 3), d_phi(1, 1, 3, 3), &
+            u_phi(nt*nz, 1, 1, 3), expected(nt*nz), expected_mean, computed(nt*nz), &
             computed_mean, w(nt*nz), s, err_local, err_mean
         integer :: unit, cases, c, model, jf, its, st
         call plasma(sp, lnl, grid)
@@ -221,14 +226,15 @@ contains
     end function sfincs
 
     !> Residual of the continuity identity, relative to max |G S|, for the
-    !> magnetic drives (force 1, 2) and the phi1 drives (force 1, 2).
+    !> magnetic drives (force 1, 2) and the phi1 drives (force 1, 2); for the
+    !> inductive drive and its phi1 response (S = 0) relative to max |B D u|.
     logical function continuity(model) result(pass)
         integer, intent(in) :: model
         type(collop_species_t) :: sp(1)
         type(collop_grid_t) :: grid
-        real(dp) :: lnl(1, 1), b(nt, nz), d(1, 1, 3, 3), d_phi(1, 1, 3, 2), &
-            u(nt*nz, 1, 1, 3), u_phi(nt*nz, 1, 1, 2), dt(nt, nt), dz(nz, nz), &
-            bv(nt*nz), dpar_b(nt*nz), dperp_b(nt*nz), dperp_phi(nt*nz), s, tz, err(4)
+        real(dp) :: lnl(1, 1), b(nt, nz), d(1, 1, 3, 3), d_phi(1, 1, 3, 3), &
+            u(nt*nz, 1, 1, 3), u_phi(nt*nz, 1, 1, 3), dt(nt, nt), dz(nz, nz), &
+            bv(nt*nz), dpar_b(nt*nz), dperp_b(nt*nz), dperp_phi(nt*nz), s, tz, err(6)
         integer :: its, st, jf
         call plasma(sp, lnl, grid)
         b = field()
@@ -251,8 +257,11 @@ contains
                 g_cov*(dperp_phi*merge(1.0_dp, 1.5_dp, jf == 1) &
                 - reshape(potential(), [nt*nz])*dperp_b/bv*merge(2.0_dp, 3.0_dp, jf == 1)))
         end do
-        print '(a,i0,a,2es10.2,a,2es10.2)', 'continuity, collision ', model, &
-            ': magnetic drive ', err(1:2), ', phi1 drive ', err(3:4)
+        err(5) = unsourced(u(:, 1, 1, 3), bv, dt, dz)
+        err(6) = unsourced(u_phi(:, 1, 1, 3), bv, dt, dz)
+        print '(a,i0,a,2es10.2,a,2es10.2,a,2es10.2)', 'continuity, collision ', model, &
+            ': magnetic drive ', err(1:2), ', phi1 drive ', err(3:4), &
+            ', inductive drive and its phi1 response ', err(5:6)
         ! Exact up to the GMRES tolerance: the isotropic x = 0 node is
         ! condensed in the collision rows and its test row joins node 2 in the
         ! electric terms, so every term conserves density.
@@ -275,6 +284,16 @@ contains
         r = bv*par(flow, dt, dz) - flow*par(bv, dt, dz) - source
         residual = maxval(abs(r - sum(r)/size(r)))/maxval(abs(source))
     end function residual
+
+    !> max |r - mean r|/max |B D u| with r = B D u - u D B, D = iota d_theta +
+    !> d_zeta: zero when u is proportional to B.
+    real(dp) function unsourced(flow, bv, dt, dz)
+        real(dp), intent(in) :: flow(nt*nz), bv(nt*nz), dt(nt, nt), dz(nz, nz)
+        real(dp) :: r(nt*nz), bdu(nt*nz)
+        bdu = bv*par(flow, dt, dz)
+        r = bdu - flow*par(bv, dt, dz)
+        unsourced = maxval(abs(r - sum(r)/size(r)))/maxval(abs(bdu))
+    end function unsourced
 
     !> (iota d_theta + d_zeta) f by collocation.
     function par(f, dt, dz) result(v)

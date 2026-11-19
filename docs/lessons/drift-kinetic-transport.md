@@ -218,6 +218,14 @@ limit, three were input data and six were implementation defects.
   by parallel streaming. Check the solver conditioning before moving a
   conservation fix into another solver.
 
+- A reference with a zero-mean potential cannot test the Boltzmann factor of
+  the inductive drive. The varying part of eps B is a parallel gradient in the
+  Boozer measure, and its linear response is a density without flow. With a
+  zero-mean pattern, SFINCS runs with and without the factor agreed to 1e-8.
+  A mean of 0.4 of the amplitude made them differ by 40 % (pitch-angle
+  scattering). Choose reference inputs for which each term moves the
+  observable.
+
 ## Rules from this campaign
 
 1. Every term gets an oracle written from its defining equation and a limit
