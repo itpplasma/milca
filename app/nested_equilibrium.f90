@@ -9,7 +9,7 @@ program nested_equilibrium
         ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate
     use milca_ideal_map, only: ideal_map_t, ideal_map_solve, ideal_map_solve_report_t, &
         ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction, ideal_map_freeze, &
-        ideal_map_sensitivity
+        ideal_map_sensitivity, ideal_map_set_adiabatic, ideal_map_adiabatic_profile
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
     use milca_equilibrium_state, only: EQ_VALUES, EQ_BR, EQ_BZ, EQ_BPHI, EQ_P
     use milca_grad_shafranov, only: gs_state_t
@@ -28,6 +28,9 @@ program nested_equilibrium
     ! iota of the current matching: polynomial through iota_nodes
     ! Chebyshev-Gauss surfaces, stored as a Hermite profile on store_knots
     integer :: iota_nodes, iota_level
+    ! adiabatic index and the Legendre degree of the projected V'
+    real(dp) :: gamma
+    integer :: adiabatic_degree
     integer, parameter :: store_knots = 129, iota_nodes_max = 32
     integer, parameter :: mesh_nodes(7) = [16, 24, 32, 48, 64, 96, 128]
     logical :: automatic_ntor, automatic_mesh, automatic_iota
@@ -69,7 +72,7 @@ program nested_equilibrium
         current_tolerance, iota_type, pressure_type, &
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
-        iota_nodes, iota_tolerance
+        iota_nodes, iota_tolerance, gamma, adiabatic_degree
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -80,6 +83,7 @@ program nested_equilibrium
     map_ntor = -1; fourier_tolerance = 1e-4_dp
     mesh_tolerance = 1e-4_dp
     iota_nodes = -1; iota_tolerance = 1e-4_dp
+    gamma = 0; adiabatic_degree = 8
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -105,6 +109,8 @@ program nested_equilibrium
     if (.not. iota_tolerance > 0) error stop 'nested_equilibrium: iota_tolerance'
     if (iota_nodes > iota_nodes_max .or. (iota_nodes >= 0 .and. iota_nodes < 2)) &
         error stop 'nested_equilibrium: iota_nodes from 2 to 32, or -1'
+    if (gamma < 0 .or. .not. ieee_is_finite(gamma) .or. adiabatic_degree < 0) &
+        error stop 'nested_equilibrium: gamma >= 0 and adiabatic_degree >= 0'
     call run%open_resolved(unit)
     write (unit, nml=nested_input)
     call run%close_resolved(unit)
@@ -163,6 +169,7 @@ program nested_equilibrium
     residual = free_gradient()/max(tiny(1.0_dp), reference)
     call integrals(volume, area, magnetic, kinetic, status)
     if (status /= 0) call fail('a volume integral met a folded map')
+    if (gamma > 0) call adiabatic_integrals(kinetic, p_axis)
     call axis_radius(raxis, status)
     if (status /= 0) call fail('the magnetic axis was not found')
     ctor = edge_current(status)
@@ -602,7 +609,19 @@ contains
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
                 status, winslow=.true.)
         end if
+        if (status /= 0 .or. .not. gamma > 0) return
+        call ideal_map_set_adiabatic(map, seed, gamma, adiabatic_degree, mass, status)
     end subroutine
+
+    function mass(t) result(k)
+        ! VMEC's mass normalisation: p = mass/vp^gamma with vp = V'/(4 pi^2)
+        ! and mass = mu0 pressure (|phiedge|/(2 pi) r00)^gamma, so that the
+        ! input pressure is the pressure of a state with V' = 2 pi |phiedge| r00
+        real(dp), intent(in) :: t
+        real(dp) :: k, i, p, u
+        call profile%evaluate(t, i, p, u)
+        k = p*(2*pi*phiedge*rbc(0, 0))**gamma
+    end function
 
     subroutine resolve(local)
         ! freeze the new iota on the solved map and solve again
@@ -640,6 +659,21 @@ contains
             if (c(last) /= 0) return
         end do
     end function
+
+    subroutine adiabatic_integrals(kinetic, p_axis)
+        ! int p dV = int P_h V'_h ds and P_h on axis
+        real(dp), intent(out) :: kinetic, p_axis
+        integer, parameter :: nq = 32
+        real(dp) :: x(nq), w(nq), v(nq), p(nq), v0(1), p0(1)
+        integer :: local
+        call gauss_legendre(nq, x, w)
+        x = (x + 1)/2; w = w/2
+        call ideal_map_adiabatic_profile(map, map%x, x, v, p, local)
+        if (local /= 0) call fail('the adiabatic pressure met a folded map')
+        kinetic = sum(w*p*v)
+        call ideal_map_adiabatic_profile(map, map%x, [0.0_dp], v0, p0, local)
+        p_axis = p0(1)
+    end subroutine
 
     subroutine integrals(volume, area, magnetic, kinetic, status)
         ! Gauss-Legendre on the collapsed reference triangle and the trapezoidal

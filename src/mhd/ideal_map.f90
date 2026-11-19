@@ -51,6 +51,7 @@ module milca_ideal_map
     use fortfem_triangle_duffy_quadrature, only: triangle_duffy_quadrature
     use fortfem_element_to_csr, only: csr_matrix_t, csr_build_pattern, &
         csr_assemble_blocks
+    use fortnum_quadrature, only: gauss_legendre
     use fortnum_krylov, only: real_conjugate_gradient_operator, KRYLOV_OK
     use fortsparse, only: sparse_solver_t, sparse_factor, sparse_solve, &
         sparse_destroy, fortsparse_status_t, status_ok, &
@@ -74,6 +75,8 @@ module milca_ideal_map
     public :: ideal_map_solve_report_t, ideal_map_eliminate_omega
     public :: ideal_map_gauge_project, ideal_map_angle_enable, ideal_map_angle_rdof
     public :: ideal_map_angle_value, ideal_map_parallel_mass
+    public :: ideal_map_set_adiabatic, ideal_map_adiabatic_lowrank
+    public :: ideal_map_adiabatic_profile
     integer, parameter, public :: IDEAL_MAP_OK = 0, IDEAL_MAP_FOLDED = 1, &
         IDEAL_MAP_NOT_CONVERGED = 2, IDEAL_MAP_SOLVE_FAILED = 3, &
         IDEAL_MAP_BAD_INPUT = 4
@@ -87,6 +90,9 @@ module milca_ideal_map
     type, abstract :: ideal_frozen_t
     contains
         procedure(frozen_evaluate), deferred :: evaluate
+        ! Normalised toroidal flux s of the surface through a reference point,
+        ! needed only by adiabatic pressure (status 1: no such label).
+        procedure :: flux_label => frozen_no_label
     end type
     abstract interface
         subroutine frozen_evaluate(field, point, chi, chi_gradient, b3, pressure)
@@ -228,6 +234,14 @@ module milca_ideal_map
         ! The angle coefficients follow the node coefficients in the
         ! coefficient vector (ndof = 3 nmode nodes + nangle) and the node and
         ! axis dofs in the reduced vector. nangle = 0: no field angle.
+        ! Adiabatic pressure (ideal_map_set_adiabatic, docs/ideal-map-adiabatic.md):
+        ! gamma > 0 replaces the frozen p by p = K(s)/V'(s)^gamma, V' = dV/ds
+        ! over the full torus projected on shifted Legendre polynomials of
+        ! degree <= adiabatic_degree. label(q, e): s at the quadrature points;
+        ! mass_s, mass_w, mass: Gauss-Legendre nodes and weights in s and K.
+        real(dp) :: gamma = 0
+        integer :: adiabatic_degree = -1
+        real(dp), allocatable :: label(:, :), mass_s(:), mass_w(:), mass(:)
         integer :: nangle = 0, angle_mpol = -1, angle_ntor = 0
         integer, allocatable :: angle_m(:), angle_n(:)
         real(dp), allocatable :: angle(:), angle_form(:, :, :, :)
@@ -255,6 +269,13 @@ module milca_ideal_map
         ! goes through FortSparse's csc_t entry points, which keep the symbolic
         ! analysis after a failed numeric factor, unlike the raw-array ones.
         type(csc_t) :: a
+    end type
+
+    ! Low-rank adiabatic Hessian term in reduced coordinates (woodbury_*).
+    type :: woodbury_t
+        integer :: k = 0
+        real(dp), allocatable :: u(:, :), q(:, :), z(:, :), c(:, :)
+        integer, allocatable :: ipiv(:)
     end type
 
     type :: ideal_map_solve_report_t
@@ -709,6 +730,342 @@ contains
         end if
     end subroutine
 
+    subroutine frozen_no_label(field, point, s, status)
+        class(ideal_frozen_t), intent(in) :: field
+        real(dp), intent(in) :: point(2)
+        real(dp), intent(out) :: s
+        integer, intent(out) :: status
+        s = 0; status = 1
+    end subroutine
+
+    subroutine ideal_map_set_adiabatic(map, field, gamma, degree, mass, status)
+        ! Adiabatic pressure p = K(s)/V'(s)^gamma (Kruskal-Kulsrud): the energy
+        ! becomes W = int B^2/(2 mu0) dV + int K V'^(1-gamma)/(gamma-1) ds
+        ! (-int K ln V' ds at gamma = 1), V' = dV/ds of the full torus and K
+        ! the mass function. V' is the L2 projection of the coarea density on
+        ! shifted Legendre polynomials P_k(s), k <= degree:
+        !     b_k = int P_k(s(y)) J dy dphi-hat,  V'_h = nfp sum (2k+1) b_k P_k,
+        ! exact for any map, so W is a smooth function of the map. Its gradient
+        ! is the frozen-pressure gradient at p = P_h, the projection of
+        ! K/V'_h^gamma, and its Hessian adds the rank degree + 1 term of
+        ! adiabatic_lowrank. Set after ideal_map_freeze; gamma = 0 restores the
+        ! frozen pressure.
+        type(ideal_map_t), intent(inout) :: map
+        class(ideal_frozen_t), intent(in) :: field
+        real(dp), intent(in) :: gamma
+        integer, intent(in) :: degree
+        interface
+            function mass(s) result(k)
+                import :: dp
+                real(dp), intent(in) :: s
+                real(dp) :: k
+            end function
+        end interface
+        integer, intent(out) :: status
+        real(dp), allocatable :: t(:), w(:)
+        real(dp) :: y(2)
+        integer :: e, g, n
+        status = IDEAL_MAP_BAD_INPUT
+        map%gamma = 0
+        if (.not. abs(gamma) > 0) then
+            status = IDEAL_MAP_OK; return
+        end if
+        if (.not. gamma > 0 .or. degree < 0 .or. .not. allocated(map%p)) return
+        if (allocated(map%label)) deallocate (map%label)
+        allocate (map%label(map%nq, map%cells))
+        do e = 1, map%cells
+            do g = 1, map%nq
+                y = matmul(map%reference(:, map%conn(:, e)), map%shape(:, g))
+                call field%flux_label(y, map%label(g, e), status)
+                if (status /= 0) then
+                    status = IDEAL_MAP_BAD_INPUT; return
+                end if
+            end do
+        end do
+        map%label = min(1.0_dp, max(0.0_dp, map%label))
+        ! The s integrals hold K, V'_h^-gamma and P_k P_l: exact for the
+        ! polynomial part, spectral for the smooth rest.
+        n = 2*(degree + 1) + 16
+        allocate (t(n), w(n))
+        call gauss_legendre(n, t, w)
+        map%mass_s = (t + 1)/2; map%mass_w = w/2
+        allocate (map%mass(n))
+        do e = 1, n
+            map%mass(e) = mass(map%mass_s(e))
+        end do
+        if (.not. all(ieee_is_finite(map%mass)) .or. any(map%mass < 0)) return
+        map%gamma = gamma; map%adiabatic_degree = degree
+        status = IDEAL_MAP_OK
+    end subroutine
+
+    pure subroutine shifted_legendre(n, s, row)
+        ! P_k(2 s - 1), k = 0..n, orthogonal on [0, 1] with norm 1/(2k+1)
+        integer, intent(in) :: n
+        real(dp), intent(in) :: s
+        real(dp), intent(out) :: row(0:n)
+        real(dp) :: t
+        integer :: k
+        t = 2*s - 1
+        row(0) = 1
+        if (n >= 1) row(1) = t
+        do k = 1, n - 1
+            row(k + 1) = ((2*k + 1)*t*row(k) - k*row(k - 1))/(k + 1)
+        end do
+    end subroutine
+
+    subroutine point_volume(map, e, g, j, x, jac, gv)
+        ! J and dJ/dv of the generated leaf: w is affine in p with slope -J
+        ! and quadratic in b (both proved in gen/gen_ideal_map.f90), so
+        ! b = 0, p = -1 gives w = J exactly.
+        type(ideal_map_t), intent(in) :: map
+        integer, intent(in) :: e, g, j
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), intent(out) :: jac, gv(12)
+        real(dp) :: q(3), qd(3, 3), pos(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3), w
+        call point_jet(map, e, g, j, x, q, qd)
+        call map%chart%jet(q, pos, d1, d2, d3)
+        call ideal_point_gradient_jets(d1, d2, d3, qd, [0.0_dp, 0.0_dp, 0.0_dp], &
+            -1.0_dp, map%mu0, map%sigma, w, jac, gv)
+        jac = w
+    end subroutine
+
+    subroutine adiabatic_pressure(map, x, pressure, extra, status, moments, &
+            curvature, moment_gradient, projection)
+        ! P_h at the quadrature points and extra = W - W_frozen(P_h)
+        ! = sum pi_k b_k + int K f(V'_h) ds (per field period, f from thermal). moments: b_k;
+        ! curvature: Q = diag(2k+1) D diag(2k+1), D_kl = int gamma p/v P_k P_l ds
+        ! with v = V'_h/nfp, so that d2W/db2 = Q; moment_gradient(:, k): db_k/dx.
+        ! status IDEAL_MAP_FOLDED when V'_h <= 0 at an s node.
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), intent(out) :: pressure(:, :), extra
+        integer, intent(out) :: status
+        real(dp), intent(out), optional :: moments(0:), curvature(0:, 0:)
+        real(dp), intent(out), optional :: moment_gradient(:, 0:)
+        ! Legendre coefficients pi_k of P_h
+        real(dp), intent(out), optional :: projection(0:)
+        real(dp), allocatable :: cell(:, :), local(:, :, :), pk(:, :, :), pgv(:, :, :)
+        real(dp) :: b(0:map%adiabatic_degree), row(0:map%adiabatic_degree)
+        real(dp) :: pi_k(0:map%adiabatic_degree), v, p, u, dphi, jac
+        integer :: n, e, g, j, k, l, a, nl
+        logical :: want
+        n = map%adiabatic_degree
+        want = present(moment_gradient)
+        dphi = 2*acos(-1.0_dp)/(map%nfp*map%nphi)
+        nl = 3*map%nmode*map%nloc
+        allocate (cell(0:n, map%cells))
+        if (want) allocate (local(nl, 0:n, map%cells))
+        ! Cells in parallel, summed serially: the moments decide the energy.
+        !$omp parallel default(none) shared(map, x, cell, local, want, n, dphi, nl) &
+        !$omp private(e, g, j, k, a, row, jac, pk, pgv)
+        allocate (pgv(12, map%nq, map%nphi), pk(12, map%nq, map%nphi))
+        !$omp do schedule(static)
+        do e = 1, map%cells
+            cell(:, e) = 0
+            do j = 1, map%nphi
+                do g = 1, map%nq
+                    call point_volume(map, e, g, j, x, jac, pgv(:, g, j))
+                    call shifted_legendre(n, map%label(g, e), row)
+                    cell(:, e) = cell(:, e) + map%weight(g)*dphi*jac*row
+                end do
+            end do
+            if (.not. want) cycle
+            do k = 0, n
+                do j = 1, map%nphi
+                    do g = 1, map%nq
+                        call shifted_legendre(n, map%label(g, e), row)
+                        pk(:, g, j) = pgv(:, g, j)*row(k)
+                    end do
+                end do
+                do a = 1, map%nloc
+                    call energy_node_sum(map, a, dphi, pk, local(:, k, e))
+                end do
+            end do
+        end do
+        !$omp end do
+        !$omp end parallel
+        b = 0
+        do e = 1, map%cells
+            b = b + cell(:, e)
+        end do
+        status = IDEAL_MAP_FOLDED
+        extra = 0; pi_k = 0
+        if (present(curvature)) curvature = 0
+        do l = 1, size(map%mass)
+            u = map%mass_s(l)
+            call shifted_legendre(n, u, row)
+            v = sum([(2*k + 1, k=0, n)]*b*row)
+            if (.not. v > 0) return
+            p = map%mass(l)/(map%nfp*v)**map%gamma
+            extra = extra + map%mass_w(l)*map%mass(l)/map%nfp**map%gamma &
+                *thermal(v, map%gamma)
+            pi_k = pi_k + map%mass_w(l)*p*row
+            if (present(curvature)) then
+                do k = 0, n
+                    curvature(:, k) = curvature(:, k) &
+                        + map%mass_w(l)*map%gamma*p/v*row*row(k)
+                end do
+            end if
+        end do
+        pi_k = [(2*k + 1, k=0, n)]*pi_k
+        extra = extra + dot_product(pi_k, b)
+        do e = 1, map%cells
+            do g = 1, map%nq
+                call shifted_legendre(n, map%label(g, e), row)
+                pressure(g, e) = dot_product(pi_k, row)
+            end do
+        end do
+        if (present(moments)) moments = b
+        if (present(projection)) projection = pi_k
+        if (present(curvature)) then
+            do k = 0, n
+                curvature(:, k) = (2*k + 1)*[(2*l + 1, l=0, n)]*curvature(:, k)
+            end do
+        end if
+        if (want) then
+            moment_gradient = 0
+            do e = 1, map%cells
+                do k = 0, n
+                    moment_gradient(map%dofconn(:, e), k) = &
+                        moment_gradient(map%dofconn(:, e), k) + local(:, k, e)
+                end do
+            end do
+        end if
+        status = IDEAL_MAP_OK
+    end subroutine
+
+    pure real(dp) function thermal(v, gamma) result(f)
+        ! f(v) = (v^(1-gamma) - 1)/(gamma - 1), f' = -v^-gamma, continuous
+        ! through the isothermal limit -ln v at gamma = 1 (the constant does
+        ! not enter the gradient)
+        real(dp), intent(in) :: v, gamma
+        real(dp) :: z
+        z = (1 - gamma)*log(v)
+        if (abs(z) < 1e-4_dp) then
+            f = -log(v)*(1 + z/2 + z**2/6 + z**3/24)
+        else
+            f = (exp(z) - 1)/(gamma - 1)
+        end if
+    end function
+
+    subroutine ideal_map_adiabatic_profile(map, x, s, vprime, pressure, status)
+        ! V'_h = dV/ds of the full torus and the projected pressure P_h at s
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :), s(:)
+        real(dp), intent(out) :: vprime(:), pressure(:)
+        integer, intent(out) :: status
+        real(dp), allocatable :: pres(:, :)
+        real(dp) :: b(0:map%adiabatic_degree), pi_k(0:map%adiabatic_degree)
+        real(dp) :: row(0:map%adiabatic_degree), extra
+        integer :: i, k, n
+        status = IDEAL_MAP_BAD_INPUT
+        if (.not. map%gamma > 0) return
+        n = map%adiabatic_degree
+        allocate (pres(map%nq, map%cells))
+        call adiabatic_pressure(map, x, pres, extra, status, moments=b, projection=pi_k)
+        if (status /= IDEAL_MAP_OK) return
+        do i = 1, size(s)
+            call shifted_legendre(n, s(i), row)
+            vprime(i) = map%nfp*sum([(2*k + 1, k=0, n)]*b*row)
+            pressure(i) = dot_product(pi_k, row)
+        end do
+    end subroutine
+
+    subroutine ideal_map_adiabatic_lowrank(map, x, g, q, status)
+        ! The adiabatic Hessian beyond the frozen-pressure one at p = P_h:
+        ! G Q G^T with G(:, k) = db_k/dx (coefficient layout) and Q from
+        ! adiabatic_pressure; positive semidefinite (compression stiffens).
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp), allocatable, intent(out) :: g(:, :), q(:, :)
+        integer, intent(out) :: status
+        real(dp), allocatable :: pres(:, :)
+        real(dp) :: extra
+        integer :: n
+        n = map%adiabatic_degree
+        allocate (g(map%ndof, 0:n), q(0:n, 0:n), pres(map%nq, map%cells))
+        call adiabatic_pressure(map, x, pres, extra, status, curvature=q, &
+            moment_gradient=g)
+    end subroutine
+
+    subroutine woodbury_setup(map, x, wb, status)
+        ! Reduced columns U = R^T G and Q of the adiabatic low-rank Hessian
+        ! term at x (k = 0 without adiabatic pressure).
+        type(ideal_map_t), intent(in) :: map
+        real(dp), intent(in) :: x(:, :, :)
+        type(woodbury_t), intent(out) :: wb
+        integer, intent(out) :: status
+        real(dp), allocatable :: g(:, :)
+        integer :: k
+        status = IDEAL_MAP_OK
+        if (.not. map%gamma > 0) return
+        call ideal_map_adiabatic_lowrank(map, x, g, wb%q, status)
+        if (status /= IDEAL_MAP_OK) return
+        wb%k = size(g, 2)
+        allocate (wb%u(map%nred, wb%k), wb%z(map%nred, wb%k))
+        do k = 1, wb%k
+            call ideal_map_reduce(map, g(:, k - 1), wb%u(:, k))
+            where (map%fixed) wb%u(:, k) = 0
+        end do
+    end subroutine
+
+    subroutine woodbury_factor(map, wb, solver, ok)
+        ! Z = A^-1 U for the factor A of the frozen-pressure part and the
+        ! capacitance C = I + Q U^T Z, so that
+        !     (A + U Q U^T)^-1 r = y - Z C^-1 Q U^T y,  y = A^-1 r.
+        type(ideal_map_t), intent(in) :: map
+        type(woodbury_t), intent(inout) :: wb
+        type(sparse_solver_t), intent(inout) :: solver
+        logical, intent(out) :: ok
+        interface
+            subroutine dgetrf(m, n, a, lda, ipiv, info)
+                import :: dp
+                integer, intent(in) :: m, n, lda
+                real(dp), intent(inout) :: a(lda, *)
+                integer, intent(out) :: ipiv(*), info
+            end subroutine
+        end interface
+        type(fortsparse_status_t) :: sstatus
+        integer :: k, info
+        ok = .true.
+        if (wb%k == 0) return
+        ok = .false.
+        do k = 1, wb%k
+            call sparse_solve(solver, wb%u(:, k), wb%z(:, k), sstatus)
+            if (.not. status_ok(sstatus)) return
+            where (map%fixed) wb%z(:, k) = 0
+        end do
+        wb%c = matmul(wb%q, matmul(transpose(wb%u), wb%z))
+        do k = 1, wb%k
+            wb%c(k, k) = wb%c(k, k) + 1
+        end do
+        if (allocated(wb%ipiv)) deallocate (wb%ipiv)
+        allocate (wb%ipiv(wb%k))
+        call dgetrf(wb%k, wb%k, wb%c, wb%k, wb%ipiv, info)
+        ok = info == 0
+    end subroutine
+
+    subroutine woodbury_apply(wb, y)
+        type(woodbury_t), intent(in) :: wb
+        real(dp), intent(inout) :: y(:)
+        interface
+            subroutine dgetrs(trans, n, nrhs, a, lda, ipiv, b, ldb, info)
+                import :: dp
+                character, intent(in) :: trans
+                integer, intent(in) :: n, nrhs, lda, ldb, ipiv(*)
+                real(dp), intent(in) :: a(lda, *)
+                real(dp), intent(inout) :: b(ldb, *)
+                integer, intent(out) :: info
+            end subroutine
+        end interface
+        real(dp) :: t(wb%k)
+        integer :: info
+        if (wb%k == 0) return
+        t = matmul(wb%q, matmul(y, wb%u))
+        call dgetrs('N', wb%k, 1, wb%c, wb%k, wb%ipiv, t, wb%k, info)
+        y = y - matmul(wb%z, t)
+    end subroutine
+
     subroutine nested_omega_gauge(map)
         ! At n = 0 every omega = f(chi) rotates each surface rigidly in phi:
         ! b_pol . grad f(chi) = 0, so W is exactly invariant in the continuum
@@ -1050,8 +1407,9 @@ contains
         type(sparse_solver_t) :: solver
         type(ideal_map_solve_report_t) :: report
         type(fortsparse_status_t) :: sstatus
+        type(woodbury_t) :: wb
         real(dp), allocatable :: reduced(:), step(:), shift(:), diag(:)
-        logical :: done
+        logical :: done, ok
         integer :: info, i, k, column
         status = IDEAL_MAP_BAD_INPUT
         if (map%omega_elimination .and. .not. map%position_gauge) return
@@ -1070,11 +1428,16 @@ contains
         done = .false.
         call factor_masked(map, matrix, .not. map%fixed, shift, solver, done, info, report)
         if (info /= 0) return
+        call woodbury_setup(map, map%x, wb, info)
+        if (info /= IDEAL_MAP_OK) return
+        call woodbury_factor(map, wb, solver, ok)
+        if (.not. ok) return
         do column = 1, size(rhs, 2)
             call ideal_map_reduce(map, rhs(:, column), reduced)
             where (map%fixed) reduced = 0
             call sparse_solve(solver, -reduced, step, sstatus)
             if (.not. status_ok(sstatus)) exit
+            call woodbury_apply(wb, step)
             where (map%fixed) step = 0
             call ideal_map_expand(map, step, response(:, column))
         end do
@@ -1237,7 +1600,7 @@ contains
         y = matmul(map%reference(:, map%conn(:, e)), shape(:map%nloc))
     end subroutine
 
-    subroutine point_gradient(map, e, g, j, x, b, w, jac, gv, gb)
+    subroutine point_gradient(map, e, g, j, x, b, w, jac, gv, gb, pressure)
         ! Energy density w, Jacobian and the gradient with respect to
         ! v = (q(1:3), Q(1:3, 1:3)) (index 3 + k + 3*(i-1) for Q(k,i)): the
         ! generated chain-rule leaf (gen/gen_ideal_map.f90) on the chart jet,
@@ -1247,16 +1610,20 @@ contains
         real(dp), intent(in) :: x(:, :, :), b(3)
         real(dp), intent(out) :: w, jac, gv(12)
         real(dp), intent(out), optional :: gb(3)
-        real(dp) :: q(3), qd(3, 3), pos(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3)
+        ! the adiabatic pressure in place of the frozen one
+        real(dp), intent(in), optional :: pressure
+        real(dp) :: q(3), qd(3, 3), pos(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3), p
+        p = map%p(g, e)
+        if (present(pressure)) p = pressure
         call point_jet(map, e, g, j, x, q, qd)
         call map%chart%jet(q, pos, d1, d2, d3)
-        call ideal_point_gradient_jets(d1, d2, d3, qd, b, map%p(g, e), &
-            map%mu0, map%sigma, w, jac, gv)
+        call ideal_point_gradient_jets(d1, d2, d3, qd, b, p, map%mu0, map%sigma, w, &
+            jac, gv)
         if (present(gb)) call ideal_point_field_gradient_jets(d1, d2, d3, qd, b, &
-            map%p(g, e), map%mu0, map%sigma, gb)
+            p, map%mu0, map%sigma, gb)
     end subroutine
 
-    subroutine point_hessian(map, e, g, j, x, b, w, jac, gv, hp, hbb, hvb)
+    subroutine point_hessian(map, e, g, j, x, b, w, jac, gv, hp, hbb, hvb, pressure)
         ! As point_gradient with the Hessian with respect to v, packed in the
         ! group order of gen/gen_ideal_map.f90: hp(1:45) the upper triangle of
         ! the block of v(1:9), hp(46:72) the rows v(1:9) of the columns
@@ -1267,14 +1634,17 @@ contains
         real(dp), intent(in) :: x(:, :, :), b(3)
         real(dp), intent(out) :: w, jac, gv(12), hp(78)
         real(dp), intent(out), optional :: hbb(6), hvb(12, 3)
+        real(dp), intent(in), optional :: pressure
         real(dp) :: q(3), qd(3, 3), pos(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3)
-        real(dp) :: gb(3)
+        real(dp) :: gb(3), p
+        p = map%p(g, e)
+        if (present(pressure)) p = pressure
         call point_jet(map, e, g, j, x, q, qd)
         call map%chart%jet(q, pos, d1, d2, d3)
-        call ideal_point_hessian_jets(d1, d2, d3, qd, b, map%p(g, e), &
-            map%mu0, map%sigma, w, jac, gv, hp)
+        call ideal_point_hessian_jets(d1, d2, d3, qd, b, p, map%mu0, map%sigma, w, &
+            jac, gv, hp)
         if (present(hbb)) call ideal_point_field_jets(d1, d2, d3, qd, b, &
-            map%p(g, e), map%mu0, map%sigma, gb, hbb, hvb)
+            p, map%mu0, map%sigma, gb, hbb, hvb)
     end subroutine
 
     pure subroutine test_functions(map, g, j, a, m, f)
@@ -1301,11 +1671,21 @@ contains
         real(dp), intent(in), optional :: angle(:)
         real(dp), allocatable :: local(:, :), cell_energy(:), cell_jac(:)
         real(dp), allocatable :: pw(:, :, :), pjac(:, :, :), pgv(:, :, :, :)
-        real(dp), allocatable :: eta(:), alocal(:, :), pab(:, :, :, :)
-        real(dp) :: dphi, minjac
+        real(dp), allocatable :: eta(:), alocal(:, :), pab(:, :, :, :), pres(:, :)
+        real(dp) :: dphi, minjac, extra
         integer :: e, g, j, a, c, item, nt, na
         logical :: want, wangle
         want = present(gradient)
+        pres = map%p; extra = 0
+        if (map%gamma > 0) then
+            call adiabatic_pressure(map, x, pres, extra, status)
+            if (status /= IDEAL_MAP_OK) then
+                energy = huge(1.0_dp)
+                if (present(min_jacobian)) min_jacobian = 0
+                if (want) gradient = 0
+                return
+            end if
+        end if
         na = map%nangle
         wangle = want .and. na > 0
         allocate (eta(na), alocal(na, map%cells))
@@ -1329,7 +1709,7 @@ contains
         !$ nt = omp_get_max_threads()
         if (map%cells >= nt) then
             !$omp parallel default(none) shared(map, x, want, wangle, local, &
-            !$omp cell_energy, cell_jac, dphi, alocal) private(e, g, j, a, pw, pjac, &
+            !$omp cell_energy, cell_jac, dphi, alocal, pres) private(e, g, j, a, pw, pjac, &
             !$omp pgv, pab)
             allocate (pw(map%nq, map%nphi, 1), pjac(map%nq, map%nphi, 1), &
                 pgv(12, map%nq, map%nphi, 1), pab(2, map%nq, map%nphi, 1))
@@ -1357,7 +1737,8 @@ contains
             allocate (pw(map%nq, map%nphi, map%cells), pjac(map%nq, map%nphi, map%cells), &
                 pgv(12, map%nq, map%nphi, map%cells), pab(2, map%nq, map%nphi, map%cells))
             !$omp parallel default(none) shared(map, x, want, wangle, dphi, local, &
-            !$omp cell_energy, cell_jac, pw, pjac, pgv, pab, alocal) private(item, e, g, j, a)
+            !$omp cell_energy, cell_jac, pw, pjac, pgv, pab, alocal, pres) &
+            !$omp private(item, e, g, j, a)
             !$omp do schedule(static)
             do item = 1, map%cells*map%nphi
                 e = 1 + (item - 1)/map%nphi
@@ -1387,7 +1768,7 @@ contains
             end if
             !$omp end parallel
         end if
-        energy = 0
+        energy = extra
         do e = 1, map%cells
             energy = energy + cell_energy(e)
         end do
@@ -1430,11 +1811,11 @@ contains
             real(dp) :: bp(3), gb(3), et(na), ep(na)
             call point_density(map, eta, e, g, j, bp, et, ep)
             if (wangle) then
-                call point_gradient(map, e, g, j, x, bp, w, jac, gv, gb)
+                call point_gradient(map, e, g, j, x, bp, w, jac, gv, gb, pres(g, e))
                 ab = [dot_product(gb, map%angle_form(:, 1, g, e)), &
                     dot_product(gb, map%angle_form(:, 2, g, e))]
             else
-                call point_gradient(map, e, g, j, x, bp, w, jac, gv)
+                call point_gradient(map, e, g, j, x, bp, w, jac, gv, pressure=pres(g, e))
             end if
             if (na == 0) return
             if (.not. bp(3)*map%b(3, g, e) > 0) jac = -abs(jac)
@@ -1540,13 +1921,17 @@ contains
         real(dp), allocatable :: full(:, :, :), half(:, :, :)
         real(dp), allocatable :: pa(:, :), pb(:, :), pc(:, :), pks(:, :), pyw(:, :)
         real(dp), allocatable :: pft(:, :), pfull(:, :), phalf(:, :)
-        real(dp), allocatable :: et(:), ep(:)
-        real(dp) :: w, jac, gv(12), hp(78), dphi, weight, bp(3)
-        integer :: e, g, j, a, k, nl, nr, nlm, nmm, nmc, nloc, nq, nphi, nra
+        real(dp), allocatable :: et(:), ep(:), pres(:, :)
+        real(dp) :: w, jac, gv(12), hp(78), dphi, weight, bp(3), extra
+        integer :: e, g, j, a, k, nl, nr, nlm, nmm, nmc, nloc, nq, nphi, nra, astatus
         integer :: nmode, ne, eb, item, nh, nt
         nloc = map%nloc; nq = map%nq; nphi = map%nphi; nmode = map%nmode
         nlm = nloc*nmode
         nl = 3*nlm
+        ! The adiabatic Hessian is this one at p = P_h plus the low-rank term
+        ! of adiabatic_lowrank, which the solves add by Woodbury.
+        pres = map%p
+        if (map%gamma > 0) call adiabatic_pressure(map, x, pres, extra, astatus)
         nr = 2*nlm + 2*map%npoly*nmode
         nmm = nmode**2
         nmc = 9*nmm
@@ -1579,7 +1964,7 @@ contains
         if (map%cells >= nt) then
             ! Thread-private workspaces, allocated once per parallel region.
             !$omp parallel default(none) shared(map, x, blocks, phig, phik, dphi, nl, &
-            !$omp nr, nlm, nmm, nmc, nloc, nq, nphi, nmode, nh) &
+            !$omp nr, nlm, nmm, nmc, nloc, nq, nphi, nmode, nh, pres) &
             !$omp private(e, g, j, a, k, w, jac, gv, hp, weight, ka, kb, kc, item, pa, &
             !$omp pb, pc, pks, pyw, pft, pfull, phalf, bp, et, ep)
             allocate (et(map%nangle), ep(map%nangle))
@@ -1592,7 +1977,7 @@ contains
                     weight = map%weight(g)*dphi
                     do j = 1, nphi
                         call point_density(map, map%angle, e, g, j, bp, et, ep)
-                        call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                        call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp, pressure=pres(g, e))
                         do k = 1, 45
                             pa(j, k + 45*(g - 1)) = weight*hp(k)
                         end do
@@ -1646,7 +2031,7 @@ contains
                 full(nl, nl, ne), half(nl, nr, ne))
             !$omp parallel default(none) shared(map, x, blocks, phig, phik, dphi, nl, &
             !$omp nr, nlm, nmm, nmc, nloc, nq, nphi, nmode, ne, nh, hwa, hwb, hwc, &
-            !$omp ks, yw, ft, full, half) &
+            !$omp ks, yw, ft, full, half, pres) &
             !$omp private(e, eb, item, g, j, a, k, w, jac, gv, hp, weight, ka, kb, kc, &
             !$omp bp, et, ep)
             allocate (et(map%nangle), ep(map%nangle))
@@ -1659,7 +2044,7 @@ contains
                 weight = map%weight(g)*dphi
                 do j = 1, nphi
                     call point_density(map, map%angle, e, g, j, bp, et, ep)
-                    call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp)
+                    call point_hessian(map, e, g, j, x, bp, w, jac, gv, hp, pressure=pres(g, e))
                     do k = 1, 45
                         hwa(j, k + 45*(g - 1), eb) = weight*hp(k)
                     end do
@@ -2173,6 +2558,7 @@ contains
         type(csr_matrix_t) :: matrix, omatrix, pmatrix
         type(sparse_solver_t) :: solver, osolver, lsolver
         type(fortsparse_status_t) :: sstatus
+        type(woodbury_t) :: wb
         real(dp), allocatable :: grad(:), gred(:), step(:), full(:), diag(:)
         real(dp), allocatable :: trial(:, :, :), rhs(:), shift(:), trial_angle(:)
         logical, allocatable :: omask(:), damped(:)
@@ -2180,7 +2566,7 @@ contains
         real(dp) :: cap_x, cap_w, t0, trial_minjac
         integer :: it, i, k, tries, estatus
         logical :: talk, accepted, factored, ofactored, lfactored, use_lu, nested
-        logical :: retained, direct, pc_failed, spd
+        logical :: retained, direct, pc_failed, spd, wok
         real(dp) :: eta, ginit
         ! Quasi-Newton state (map%lagged_hessian): qn_slot 1/2: solver/lsolver
         ! holds the last factor (0: none); secant pairs qs, qy with 1/(s.y) in
@@ -2195,6 +2581,10 @@ contains
         nested = map%omega_elimination .and. .not. map%position_gauge
         status = IDEAL_MAP_BAD_INPUT
         if (map%parallel_damping < 0 .or. (map%parallel_damping > 0 .and. nested)) &
+            return
+        ! The adiabatic low-rank term is applied by Woodbury on the direct
+        ! factor only.
+        if (map%gamma > 0 .and. (nested .or. map%krylov_step .or. map%lagged_hessian)) &
             return
         allocate (grad(map%ndof), full(map%ndof), gred(map%nred), step(map%nred), &
             diag(map%nred), rhs(map%nred), shift(map%nred))
@@ -2248,6 +2638,10 @@ contains
             if (.not. quasi) then
                 t0 = wall_seconds()
                 call ideal_map_hessian(map, map%x, matrix)
+                call woodbury_setup(map, map%x, wb, estatus)
+                if (estatus /= IDEAL_MAP_OK) then
+                    status = IDEAL_MAP_FOLDED; call cleanup(); return
+                end if
                 report%hessian_s = report%hessian_s + wall_seconds() - t0
                 report%hessians = report%hessians + 1
                 !$omp parallel do default(shared) private(i, k) schedule(static)
@@ -2287,6 +2681,10 @@ contains
                             else
                                 call factor_masked(map, matrix, .not. map%fixed, shift, &
                                     solver, factored, estatus, report)
+                                if (estatus == 0) then
+                                    call woodbury_factor(map, wb, solver, wok)
+                                    if (.not. wok) estatus = 1
+                                end if
                             end if
                             retained = estatus == 0 .and. spd
                             if (estatus /= 0) then
@@ -2296,6 +2694,7 @@ contains
                                 call sparse_solve(lsolver, rhs, step, sstatus)
                             else
                                 call sparse_solve(solver, rhs, step, sstatus)
+                                call woodbury_apply(wb, step)
                             end if
                             if (.not. status_ok(sstatus)) then
                                 status = IDEAL_MAP_SOLVE_FAILED; call cleanup(); return
