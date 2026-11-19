@@ -553,6 +553,7 @@ contains
         real(dp), allocatable :: points(:, :), xc(:, :)
         real(dp) :: nu(2), delta, xp(2), tangent(2), alpha, t, area
         real(dp), allocatable :: outline(:, :), hull(:, :), dray(:, :), local_d(:)
+        real(dp), allocatable :: outref(:, :)
         real(dp) :: origin(2), lo, hi
         integer :: np, nring, nr, i, r, k, e, l, nloc, ncell, ntri, a, b, next
         integer :: local(2, 10), corner(2, 3), j
@@ -578,6 +579,21 @@ contains
         ! dist(x, hull) = distance on that ray (bisection).
         if (present(section)) then
             outline = section
+            if (present(section_reference)) then
+                ! outline_at walks the vertices by increasing reference angle,
+                ! so a clockwise polygon (the plasma chain may run either way)
+                ! is reversed
+                outref = section_reference
+                area = 0
+                do k = 1, size(outref, 2)
+                    j = mod(k, size(outref, 2)) + 1
+                    area = area + cross2(outref(:, k), outref(:, j))
+                end do
+                if (area < 0) then
+                    outline = outline(:, size(outline, 2):1:-1)
+                    outref = outref(:, size(outref, 2):1:-1)
+                end if
+            end if
         else
             call fb_nested_section(boundary, centre, axes, outline)
         end if
@@ -712,19 +728,19 @@ contains
             real(dp) :: y(2), t, da
             real(dp), allocatable :: a(:)
             integer :: m, n, j
-            n = size(section, 2)
+            n = size(outline, 2)
             allocate (a(n))
             do m = 1, n
-                a(m) = atan2((section_reference(2, m) - centre(2))/axes(2), &
-                    (section_reference(1, m) - centre(1))/axes(1))
+                a(m) = atan2((outref(2, m) - centre(2))/axes(2), &
+                    (outref(1, m) - centre(1))/axes(1))
             end do
-            y = section(:, 1)
+            y = outline(:, 1)
             do m = 1, n
                 j = mod(m, n) + 1
                 da = modulo(a(j) - a(m), 2*pi)
                 t = modulo(angle - a(m), 2*pi)
                 if (t <= da .and. da > 0) then
-                    y = section(:, m) + t/da*(section(:, j) - section(:, m))
+                    y = outline(:, m) + t/da*(outline(:, j) - outline(:, m))
                     return
                 end if
             end do

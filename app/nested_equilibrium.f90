@@ -26,7 +26,7 @@ program nested_equilibrium
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
-        ideal_fb_boundary_polygon
+        ideal_fb_boundary_polygon, last_jacobian
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
     use milca_ideal_fb_nested, only: fb_nested_offset_distance, fb_nested_layer_mesh, &
@@ -480,7 +480,7 @@ contains
         if (solve_status /= IDEAL_FB_OK .and. shell_layers > 0 .and. &
             replacements < 3) then
             replacements = replacements + 1
-            call ideal_fb_boundary_polygon(fb, 16, shell_section, local, &
+            call ideal_fb_boundary_polygon(fb, 64, shell_section, local, &
                 reference=shell_section_reference)
             if (local /= 0) call fail('the solved boundary is not a closed chain')
             call fb_nested_offset_distance(shell_section, shell_box, shell_obstacles, &
@@ -586,8 +586,9 @@ contains
         allocate (g(state%n))
         call ideal_fb_gradient(state, g, local, lagrangian=lagrangian, &
             min_jacobian=jacobian)
-        print '(3a,es10.2,a,i0,a,4l2)', 'check of ', what, ': min jacobian ratio ', &
-            jacobian, ', status ', local, ', finite (L, plasma, shell, potential) ', &
+        print '(3a,2es10.2,a,i0,a,4l2)', 'check of ', what, &
+            ': smallest Jacobian ratio (plasma, shell) ', last_jacobian, ', status ', &
+            local, ', finite (L, plasma, shell, potential) ', &
             ieee_is_finite(lagrangian), all(ieee_is_finite(g(:state%np))), &
             all(ieee_is_finite(g(state%np + 1:state%np + 2*state%nx))), &
             all(ieee_is_finite(g(state%np + 2*state%nx + 1:)))

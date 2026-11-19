@@ -119,7 +119,7 @@ module milca_ideal_free_boundary
     real(dp), save, protected, public :: assembly_asymmetry(2) = 0
     ! Smallest plasma and shell Jacobian ratios of the last ideal_fb_gradient
     ! (verbose reports of which map is crushed).
-    real(dp), save :: last_jacobian(2) = 0
+    real(dp), save, protected, public :: last_jacobian(2) = 0
 
     ! External field of real Fourier harmonic k (n = k*nfp) at (R, Z):
     ! B = bcos cos(n phi) + bsin sin(n phi), components (B_R, B_phi, B_Z).

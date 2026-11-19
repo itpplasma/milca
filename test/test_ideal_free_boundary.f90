@@ -136,7 +136,9 @@ program test_ideal_free_boundary
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t
     use milca_ideal_free_boundary, only: ideal_fb_init_fixed, ideal_fb_fixed_mode
     use milca_nested_ring_mesh, only: nested_ring_mesh
-    use milca_ideal_free_boundary, only: assembly_asymmetry
+    use milca_ideal_free_boundary, only: assembly_asymmetry, ideal_fb_boundary_polygon
+    use milca_ideal_fb_nested, only: fb_nested_layer_mesh, fb_nested_seed, &
+        fb_nested_transfer, fb_nested_settle
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, &
         ideal_fb_set_drive, ideal_fb_gradient, ideal_fb_hessian, ideal_fb_step, &
         ideal_fb_solve_vacuum, ideal_fb_shell_field, ideal_fb_shell_locate, &
@@ -211,6 +213,9 @@ program test_ideal_free_boundary
         call fixed_pinch()
     case ('symmetry')
         call hessian_symmetry()
+    case ('replace')
+        call replace_checks(.false.)
+        call replace_checks(.true.)
     case ('hypotheses')
         call hypothesis_checks()
     case ('curvature')
@@ -846,6 +851,86 @@ contains
                 end if
             end do
             chain(:, j) = fil + mid*[cos(t), sin(t)]
+        end do
+    end subroutine
+
+    subroutine replace_checks(deformed)
+        logical, intent(in) :: deformed
+        ! Gamma_c re-placed around a valid state (the seed of a D-shaped
+        ! layered shell): the transferred state evaluates without a fold, and
+        ! at the same offset distance its Gamma_c agrees with the original one
+        ! to the sampling of the boundary polygon.
+        type(ideal_fb_t) :: fb, next
+        type(gs_state_t) :: mesh
+        type(cylindrical_chart_t) :: chart
+        type(simple_field_t) :: field
+        real(dp), allocatable :: chain(:, :), positions(:, :), line_t(:), g(:)
+        real(dp), allocatable :: polygon(:, :), reference(:, :), xc0(:, :)
+        integer, allocatable :: lines(:, :)
+        logical, allocatable :: cells(:)
+        real(dp) :: boundary(4, 0:0, 0:2), centre(2), axes(2), jacobian, lagrangian
+        real(dp) :: distances(2), deviation
+        integer :: st, k, s
+        boundary = 0
+        boundary(1, 0, 0:2) = [3.05_dp, 0.3_dp, -0.04_dp]
+        boundary(4, 0, 1:2) = [0.45_dp, -0.03_dp]
+        centre = [3.05_dp, 0.0_dp]; axes = [0.3_dp, 0.45_dp]
+        distances = [0.12_dp, 0.06_dp]
+        call fb_nested_layer_mesh(boundary, centre, axes, 8, 3, 2, distances(1), mesh, &
+            chain, positions, lines, line_t, st, plasma_cells=cells)
+        if (st /= 0) error stop 'layer mesh'
+        call ideal_fb_init(fb, mesh, chain, chart, field, 1, 0, 0.0_dp, 0.0_dp, st, &
+            positions=positions, lines=lines, line_t=line_t, plasma_cells=cells)
+        if (st /= 0) error stop 'init'
+        call fb_nested_seed(fb, boundary, centre, axes, st)
+        if (st /= 0) error stop 'seed'
+        allocate (g(fb%n))
+        call ideal_fb_gradient(fb, g, st, lagrangian=lagrangian, min_jacobian=jacobian)
+        print '(a,es10.2)', 'seed: smallest Jacobian ratio ', jacobian
+        if (st /= 0 .or. .not. jacobian > 0) error stop 'seed folded'
+        xc0 = fb%xs(1:2, 1, pack([(s, s = 1, fb%ns)], fb%role == 3))
+        if (deformed) then
+            ! a smooth outward bulge and shift of the plasma, as a solve moves it
+            do s = 1, fb%plasma%nodes
+                fb%plasma%x(1:2, 1, s) = fb%plasma%x(1:2, 1, s) + 0.03_dp &
+                    *[1 + (fb%plasma%x(1, 1, s) - 3.05_dp)/0.3_dp, &
+                    0.5_dp*fb%plasma%x(2, 1, s)/0.45_dp]
+            end do
+            call fb_nested_settle(fb, st)
+            call ideal_fb_gradient(fb, g, st, lagrangian=lagrangian, &
+                min_jacobian=jacobian)
+            print '(a,es10.2)', 'deformed: smallest Jacobian ratio ', jacobian
+            if (st /= 0 .or. .not. jacobian > 0) error stop 'deformed state folded'
+        end if
+        call ideal_fb_boundary_polygon(fb, 64, polygon, st, reference=reference)
+        if (st /= 0) error stop 'polygon'
+        do k = 1, 2
+            call fb_nested_layer_mesh(boundary, centre, axes, 8, 3, 2, distances(k), &
+                mesh, chain, positions, lines, line_t, st, plasma_cells=cells, &
+                section=polygon, section_reference=reference, &
+                box=merge([2.0_dp, 4.0_dp, -0.55_dp, 0.55_dp], &
+                [-1.0e3_dp, 1.0e3_dp, -1.0e3_dp, 1.0e3_dp], deformed), &
+                obstacles=reshape([0.0_dp], [2, 0]))
+            if (st /= 0) error stop 'layer mesh around the polygon'
+            call ideal_fb_init(next, mesh, chain, chart, field, 1, 0, 0.0_dp, 0.0_dp, st, &
+                positions=positions, lines=lines, line_t=line_t, plasma_cells=cells)
+            if (st /= 0) error stop 'init around the polygon'
+            call fb_nested_transfer(next, fb, st)
+            if (st /= 0) error stop 'transfer'
+            deallocate (g); allocate (g(next%n))
+            call ideal_fb_gradient(next, g, st, lagrangian=lagrangian, &
+                min_jacobian=jacobian)
+            print '(a,f6.3,a,es10.2,a,i0)', 'd ', distances(k), &
+                ': transferred smallest Jacobian ratio ', jacobian, ', status ', st
+            if (st /= 0 .or. .not. jacobian > 0) error stop 'transferred state folded'
+            if (.not. ieee_is_finite(lagrangian) .or. .not. all(ieee_is_finite(g))) &
+                error stop 'transferred state not finite'
+            if (k == 1 .and. .not. deformed) then
+                deviation = maxval(abs(next%xs(1:2, 1, pack([(s, s = 1, next%ns)], &
+                    next%role == 3)) - xc0))
+                print '(a,es10.2)', 'same d: largest Gamma_c displacement (m) ', deviation
+                if (deviation > 1.0e-3_dp*distances(1)) error stop 'Gamma_c moved'
+            end if
         end do
     end subroutine
 

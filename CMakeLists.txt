@@ -597,6 +597,9 @@ set_tests_properties(ideal_fb_external_kink PROPERTIES ENVIRONMENT
     "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4 TIMEOUT 120)
 add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
 add_test(NAME ideal_fb_hessian_symmetry COMMAND test_ideal_free_boundary symmetry)
+add_test(NAME ideal_fb_replace_coupling COMMAND test_ideal_free_boundary replace)
+milca_test_labels(ideal_fb_replace_coupling fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
 milca_test_labels(ideal_fb_hessian_symmetry fast CLASSES mhd
     TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_vertical_newton COMMAND test_ideal_free_boundary vertical)
