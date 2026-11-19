@@ -1,4 +1,10 @@
-file(MAKE_DIRECTORY "${WORK}/output")
+# FRESH: a new working directory without output/, which the application creates
+if(FRESH)
+    file(REMOVE_RECURSE "${WORK}")
+    file(MAKE_DIRECTORY "${WORK}")
+else()
+    file(MAKE_DIRECTORY "${WORK}/output")
+endif()
 execute_process(COMMAND "${APP}" --config "${CONFIG}" WORKING_DIRECTORY "${WORK}"
     RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE errors)
 if(NOT status EQUAL 0)

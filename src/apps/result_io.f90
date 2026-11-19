@@ -5,7 +5,8 @@
 !> opens the file, checks the read status, captures the literal text and the
 !> resolved (defaults materialized) text, and rejects groups no reader owns.
 !>
-!> Output: `output/<application>.nc`, a NetCDF-4/HDF5 file written by FortIO
+!> Output: `output/<application>.nc` (the directory is created when missing),
+!> a NetCDF-4/HDF5 file written by FortIO
 !> with named real variables (scalar, 1-3D), units/long_name and an optional
 !> per-variable error/certificate status, plus global provenance attributes.
 module milca_result_io
@@ -188,8 +189,14 @@ contains
         class(result_file_t), intent(inout) :: this
         type(run_t), intent(in) :: run
         character(len=:), allocatable :: commit, dirty
+        integer :: exit_status, ios
         if (len(run%resolved) == 0) call fail(run%name, &
             'resolved configuration must be captured before the result file')
+        ! a run started in a fresh directory still writes its result
+        call execute_command_line('mkdir -p '//result_directory, exitstat=exit_status, &
+            cmdstat=ios)
+        if (ios /= 0 .or. exit_status /= 0) call fail(run%name, &
+            'cannot create the result directory '//result_directory)
         this%path = result_directory//'/'//run%name//'.nc'
         this%dimension_count = 0
         call check(nf90_create(this%path, ior(NF90_NETCDF4, NF90_CLOBBER), &

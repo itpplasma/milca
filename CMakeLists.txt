@@ -1318,6 +1318,16 @@ foreach(case IN ITEMS "circular-tokamak|3.0366;0.0750949;59.2176264"
     set_tests_properties(equilibrium_nested_${name} PROPERTIES
         ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4)
 endforeach()
+# A run in a working directory without output/ still writes its result.
+add_test(NAME equilibrium_nested_fresh-directory COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:nested_equilibrium>
+    -DCHECK=$<TARGET_FILE:test_nested_equilibrium_app>
+    -DCONFIG=${CMAKE_SOURCE_DIR}/examples/nested-equilibrium/doubled-boundary.nml
+    -DWORK=${CMAKE_BINARY_DIR}/nested-equilibrium-fresh-directory
+    -DFRESH=ON "-DEXPECTED=failure"
+    -P ${CMAKE_SOURCE_DIR}/test/check_nested_equilibrium.cmake)
+set_tests_properties(equilibrium_nested_fresh-directory PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 # VMEC2000 (NTOR 6) on input.nfp2_QI of the VMEX examples at zero net current:
 # raxis, wb, volume and edge iota; the interior toroidal modes are chosen by
 # nested_equilibrium's own truncation estimate.
