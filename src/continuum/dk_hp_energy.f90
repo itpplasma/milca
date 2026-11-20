@@ -75,7 +75,7 @@ module milca_dk_hp_energy
     integer, parameter, public :: HP_INVALID_NODE = 5
 
     real(dp), parameter :: pi = 4*atan(1.0_dp)
-    real(dp), parameter :: gmres_tolerance = 1e-8_dp
+    real(dp), parameter, public :: gmres_tolerance = 1e-8_dp
     ! Rounding in the weighted operator sets a residual floor that rises with
     ! the mesh order (3e-8 on a 4x32x8 orbit mesh). A solve that stalls on
     ! it is accepted up to this residual.
@@ -1409,9 +1409,9 @@ contains
     !> header), node_r(k, a, b, j) = Re(load4_ak . h_ak); iterations the
     !> largest GMRES count of the 2 ns solves (at most max_iterations each,
     !> default 400, else HP_NO_CONVERGENCE); solutions(:, b, j) the coupled
-    !> vectors h on request.
+    !> vectors h on request; residual the largest final GMRES residual.
     subroutine hp_energy_coefficients(sys, j0, k, q, node_r, iterations, status, &
-            solutions, max_iterations)
+            solutions, max_iterations, residual)
         type(hp_energy_system_t), intent(inout) :: sys
         real(dp), intent(in) :: j0
         real(dp), intent(out) :: k(:, :, :), q(:, :, :)
@@ -1419,11 +1419,14 @@ contains
         integer, intent(out) :: iterations, status
         complex(dp), allocatable, intent(out), optional :: solutions(:, :, :)
         integer, intent(in), optional :: max_iterations
+        real(dp), intent(out), optional :: residual
         complex(dp), allocatable :: b(:), h(:)
+        real(dp) :: r
         integer :: sb, jf, a, kk, its
 
         status = HP_BAD_INPUT
         iterations = 0
+        if (present(residual)) residual = 0
         if (.not. allocated(sys%node)) return
         if (any(shape(k) /= [sys%ns, sys%ns, 2]) .or. any(shape(q) /= shape(k)) .or. &
             j0 <= 0) return
@@ -1438,8 +1441,10 @@ contains
                             *nd%terms%load3/nd%v
                     end associate
                 end do
-                call hp_energy_solve(sys, b, h, its, status, max_iterations)
+                call hp_energy_solve(sys, b, h, its, status, max_iterations, &
+                    residual=r)
                 iterations = max(iterations, its)
+                if (present(residual)) residual = max(residual, r)
                 if (status /= HP_OK) return
                 if (present(solutions)) solutions(:, sb, jf) = h
                 do a = 1, sys%ns
@@ -1470,22 +1475,25 @@ contains
     !> max_iterations (default 400), iterations its. Restart cycles also stop
     !> when the residual falls by less than 1 % in one; short of the
     !> tolerance the solution is accepted up to residual gmres_floor, else
-    !> HP_NO_CONVERGENCE.
-    subroutine hp_energy_solve(sys, b, h, its, status, max_iterations, tolerance)
+    !> HP_NO_CONVERGENCE. residual is the final relative residual.
+    subroutine hp_energy_solve(sys, b, h, its, status, max_iterations, tolerance, &
+            residual)
         type(hp_energy_system_t), intent(inout) :: sys
         complex(dp), intent(in) :: b(:)
         complex(dp), intent(out) :: h(:)
         integer, intent(out) :: its, status
         integer, intent(in), optional :: max_iterations
         real(dp), intent(in), optional :: tolerance
+        real(dp), intent(out), optional :: residual
         complex(dp), allocatable :: r(:), u(:)
         real(dp), allocatable :: wt(:)
-        real(dp) :: scale, residual, previous, tol
+        real(dp) :: scale, res, previous, tol
         integer :: a, kk, info, max_its, st, cycle_its, n
 
         status = HP_BAD_INPUT
         its = 0
         h = 0
+        if (present(residual)) residual = 0
         if (.not. allocated(sys%node) .or. size(b) /= sys%n_dof) return
         max_its = default_iterations
         if (present(max_iterations)) max_its = max_iterations
@@ -1515,16 +1523,17 @@ contains
         do
             n = min(gmres_restart, max_its - its)
             call complex_gmres_operator(operator, r, u, tol, n, n, info, cycle_its, &
-                residual)
+                res)
             its = its + cycle_its
             if (st /= HP_OK .or. info == KRYLOV_OK .or. its >= max_its) exit
-            if (residual > 0.99_dp*previous) exit
-            previous = residual
+            if (res > 0.99_dp*previous) exit
+            previous = res
         end do
+        if (present(residual)) residual = res
         status = st
         if (status /= HP_OK) return
         status = HP_NO_CONVERGENCE
-        if (info /= KRYLOV_OK .and. residual > gmres_floor) return
+        if (info /= KRYLOV_OK .and. res > gmres_floor) return
         call precondition(sys, u/wt, h, status)
         if (status /= HP_OK) return
         h = scale*h

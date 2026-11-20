@@ -28,12 +28,15 @@
 !! spent there). With a deposit line, each row ends with the torque density
 !! of its psi* surface split over the N + 1 bins (below the first edge,
 !! between edges, above the last), summing to the torque density. The
-!! program ends with an error when any status is not 0.
+!! program ends with an error when any status is not 0. A surface whose
+!! energy-coupled GMRES solve stalled above its tolerance and was accepted
+!! is named on standard error with its residual.
 program ntv_profile
     use, intrinsic :: iso_fortran_env, only: dp => real64, error_unit
     use milca_boozer_file, only: boozer_file_t, load_boozer_file, BOOZER_OK
     use milca_ntv_device, only: ntv_species_t, ntv_profile_t, ntv_resolution_t, &
         ntv_species_result_t, ntv_device_profile, ntv_read_input, DEVICE_OK, DEVICE_SOLVE
+    use milca_dk_hp_energy, only: gmres_tolerance
     implicit none
     type(boozer_file_t), target :: eq, pert
     type(ntv_species_t), allocatable :: species(:)
@@ -76,6 +79,12 @@ program ntv_profile
                 write (*, '(*(es18.9))', advance='no') result(i, a)%deposit
             write (*, '(a)') ''
         end do
+    end do
+    do i = 1, ns
+        if (result(i, 1)%residual > gmres_tolerance) write (error_unit, &
+            '(a,f10.6,a,es9.2,a,es9.2,a)') 'ntv_profile: s = ', prof%s(i), &
+            ': GMRES accepted at residual ', result(i, 1)%residual, &
+            ' (rounding floor, tolerance ', gmres_tolerance, ')'
     end do
     write (error_unit, '(a,f10.2)') 'wall s ', real(c1 - c0, dp)/rate
     if (status /= DEVICE_OK) then
