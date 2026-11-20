@@ -6466,8 +6466,8 @@ contains
                 ! sheet: the factor is only the preconditioner (its vacuum block
                 ! lacks the coil curvature), so its inertia does not decide the
                 ! shift; GMRES solves the exact operator, and the undamped step
-                ! is tried first and kept when the stationarity norm drops
-                if (allocated(fb%sheet)) near = tries == 1 .and. growths < 2
+                ! is tried first in every iteration and judged by the true model
+                if (allocated(fb%sheet)) near = tries == 1
                 call inertia_newton_factor(opt, srows, scols, smat, shift, n_pos, n_neg, &
                     solver, delta, st, minimum=dmin, any_inertia=near)
                 factored = st == INERTIA_NEWTON_OK
@@ -6505,7 +6505,10 @@ contains
                     gp = gtrial
                     call project_slide(fb, w, gp)
                     gtrial_norm = sqrt(sum(w*gp**2))
-                    if (near) then
+                    if (near .and. allocated(fb%sheet)) then
+                        accepted = gtrial_norm < gnorm .or. (predicted > 0 .and. &
+                            energy - etrial >= 0.25_dp*predicted)
+                    else if (near) then
                         accepted = gtrial_norm < gnorm
                         growths = merge(0, growths + 1, accepted)
                     else if (fb%unstable == 0) then
