@@ -488,9 +488,11 @@ contains
         call fb_nested_plasma_mesh(mesh, fb_centre, fb_axes, nodes, degree, local)
         if (local /= 0) call fail('the plasma mesh failed')
         if (sheet_3d) then
+            ! the boundary on a Fourier curve of mpol + 2 poloidal harmonics
             call ideal_fb_init_sheet(next, mesh, chart, seed, nfp, ntor_level, &
-                coil_field, circulation, local, nphi=max(1, 4*ntor_level + 1))
+                coil_field, circulation, mpol + 2, local, nphi=max(1, 4*ntor_level + 1))
             if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
+            if (.not. any(abs(boundary(2:3, :, :)) > 0)) call ideal_fb_fix_vertical(next)
             print '(a,es12.4,a,i0,a,i0)', 'F_vac (T m)', next%f_vac, ', unknowns ', &
                 next%n, ', modes ', ntor_level
             return

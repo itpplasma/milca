@@ -138,8 +138,8 @@ program test_ideal_free_boundary
     use milca_ideal_free_boundary, only: ideal_fb_init_bem
     use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit, fb_coil_flux_value, &
         fb_bem_t, fb_bem_setup, fb_bem_exact, fb_bem_terms
-    use milca_ideal_fb_sheet, only: fb_sheet_t, fb_sheet_setup, fb_sheet_size, &
-        fb_sheet_terms, fb_sheet_exact, fb_sheet_geometry_index, fb_sheet_phi_index
+    use milca_ideal_fb_sheet, only: fb_sheet_t, fb_sheet_setup, fb_sheet_terms, &
+        fb_sheet_exact, fb_sheet_hvp, fb_sheet_reduced_hvp
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_jets_t, &
         mgrid_jets_init
     use milca_nested_ring_mesh, only: nested_ring_mesh
@@ -1269,23 +1269,28 @@ contains
 
     subroutine sheet_checks()
         ! Vacuum as a 3D sheet current (free-boundary-plasma-boundary-sheet-3d.md)
-        ! on a P2 chain around an ellipse:
+        ! on a P2 chain around an ellipse, corrected trapezoidal rule:
         !  - F alone (B_c = F/R e_phi, no current): L_v = pi F^2 S/mu0, S =
         !    int int dR dZ/R = oint ln R dZ, the toroidal-field term that the
         !    axisymmetric form adds by hand;
         !  - axisymmetric limit for the PF rings (F = 0): L_v and its node
         !    gradient equal the axisymmetric single layer's, L_v up to the
         !    flux c 2 pi psi_c(L)/mu0 through L that the ribbon drops;
-        !  - the gradient and Hessian against central differences on a 3D
-        !    surface (nfp = 3, one toroidal mode) in the fitted window field.
+        !  - on a 3D surface (nfp = 3, one toroidal mode) in the window-coil
+        !    mgrid field: the gradient and Hessian-vector product in (x, phi)
+        !    against central differences, and the reduced product (phi
+        !    eliminated) against central differences of the reduced gradient.
         type(fb_sheet_t) :: sheet
         type(fb_bem_t) :: bem
-        real(dp), allocatable :: x(:, :, :), gx(:), gt(:), g(:), h(:, :), gp(:), &
-            gm(:), hp(:, :), u(:), dir(:), x2(:, :)
+        real(dp), allocatable :: x(:, :, :), gx(:), gt(:), x2(:, :), g3(:, :, :), &
+            gp3(:, :, :), gm3(:, :, :), d3(:, :, :), h3(:, :, :), gph(:, :), gpp(:, :), &
+            gpm(:, :), dph(:, :), hph(:, :)
         integer, allocatable :: node(:)
         real(dp) :: axis(2, 3), e, ev, gpsi, ep, em, err, area, c, psi, pg(2), ph(3), step
-        integer :: nb, b, k, st, n, level
-        real(dp) :: gerr(2)
+        real(dp) :: gerr(2), eerr(2)
+        real(dp), allocatable :: d2(:, :)
+        integer :: nb, b, k, st, level
+
         nb = 48
         node = [(b, b=1, nb)]
         allocate (x(2, nb, 1))
@@ -1294,24 +1299,21 @@ contains
         end do
         axis = 0
         axis(:, 1) = [3.05_dp, 0.0_dp]
-        call fb_sheet_setup(sheet, node, x, axis(:, :1), 2, 1, 0, st)
+        call fb_sheet_setup(sheet, node, x, axis(:, :1), 1, 0, nb/2 - 1, st)
         if (st /= 0) error stop 'sheet setup'
-
         call fb_sheet_exact(sheet, x, tf_field, 0.0_dp, f_vac, mu0, st)
         if (st /= 0) error stop 'sheet solve'
         call fb_sheet_terms(sheet, x, tf_field, 0.0_dp, f_vac, mu0, e)
-        area = chain_log_integral(sheet, x)
-        err = abs(e - pi*f_vac**2*area/mu0)/abs(e)
-        print '(a,2es16.8,a,es9.2)', 'sheet: F alone L_v, pi F^2 S/mu0', e, &
-            pi*f_vac**2*area/mu0, ' rel', err
-        ! the default toroidal quadrature gives about 2e-6 here
-        if (err > 1.0e-5_dp) error stop 'sheet toroidal-field energy'
+        area = chain_log_integral(x)
+        ! the toroidal field is the volume term of the plasma side, pi F^2 S/mu0
+        err = abs(e)/(pi*f_vac**2*area/mu0)
+        print '(a,es16.8,a,es9.2)', 'sheet: F alone L_v', e, ' relative to pi F^2 S/mu0', err
+        if (err > 1.0e-12_dp) error stop 'sheet toroidal-field energy'
 
         coil%source = pf(1:2, :)
         coil%coef = mu0*pf(3, :)
         c = -circulation
         do level = 1, 2
-            ! the node gradients of the two discretizations differ by O(h^2)
             nb = 24*level
             node = [(b, b=1, nb)]
             deallocate (x)
@@ -1320,7 +1322,7 @@ contains
                 x(:, b, 1) = [3.05_dp + 0.6_dp*cos(2*pi*(b - 1)/nb), &
                     0.9_dp*sin(2*pi*(b - 1)/nb)]
             end do
-            call fb_sheet_setup(sheet, node, x, axis(:, :1), 2, 1, 0, st)
+            call fb_sheet_setup(sheet, node, x, axis(:, :1), 1, 0, nb/2 - 1, st)
             if (st /= 0) error stop 'sheet setup'
             bem = fb_bem_t()
             bem%coil = coil
@@ -1329,29 +1331,35 @@ contains
             if (st /= 0) error stop 'bem setup'
             call fb_bem_exact(bem, x2, c, st)
             if (st /= 0) error stop 'bem solve'
-            if (allocated(gx)) deallocate (gx, gt, g)
-            allocate (gx(2*nb), gt(bem%nt), g(fb_sheet_size(sheet)))
+            if (allocated(gx)) deallocate (gx, gt, g3, d2)
+            allocate (gx(2*nb), gt(bem%nt), g3(2, nb, 1), d2(2, nb))
             call fb_bem_terms(bem, x2, mu0, c, ev, gx, gt, gpsi)
             call fb_sheet_exact(sheet, x, ring_field, c, 0.0_dp, mu0, st)
             if (st /= 0) error stop 'sheet solve'
-            call fb_sheet_terms(sheet, x, ring_field, c, 0.0_dp, mu0, e, g)
+            call fb_sheet_terms(sheet, x, ring_field, c, 0.0_dp, mu0, e, g3)
             call fb_coil_flux_value(coil, axis(:, 1), psi, pg, ph)
             e = e - c*2*pi*psi/mu0
             err = abs(e - ev)/abs(ev)
             print '(a,i0,a,2es16.8,a,es9.2)', 'sheet: nb ', nb, &
                 ', L_v - c Psi(L)/mu0, axisymmetric L_v', e, ev, ' rel', err
-            if (err > 1.0e-5_dp) error stop 'sheet axisymmetric energy'
+            eerr(level) = err
+            ! the shape derivative along smooth displacements (the node
+            ! values split the force differently between vertex and middle
+            ! nodes in the two discretisations)
             gerr(level) = 0
-            do b = 1, nb
-                do k = 1, 2
-                    gerr(level) = max(gerr(level), &
-                        abs(g(fb_sheet_geometry_index(sheet, k, 1, b)) - gx(2*(b - 1) + k)))
+            do k = 1, 3
+                do b = 1, nb
+                    d2(:, b) = [cos(2*pi*k*(b - 1)/nb + 0.3_dp), sin(2*pi*(k + 1)*(b - 1)/nb)]
                 end do
+                gerr(level) = max(gerr(level), abs(sum(g3(:, :, 1)*d2) &
+                    - sum(reshape(gx, [2, nb])*d2))/sum(abs(reshape(gx, [2, nb])*d2)))
             end do
-            gerr(level) = gerr(level)/maxval(abs(gx))
             print '(a,i0,a,es9.2)', 'sheet: nb ', nb, &
-                ', node gradient vs axisymmetric, max rel', gerr(level)
+                ', shape derivative vs axisymmetric, rel', gerr(level)
         end do
+        ! the resampled surface and the P2 chain converge to the same curve
+        if (eerr(2) > 1.0e-4_dp .or. eerr(2) > 0.35_dp*eerr(1)) &
+            error stop 'sheet axisymmetric energy'
         if (gerr(2) > 1.0e-3_dp .or. gerr(2) > 0.35_dp*gerr(1)) &
             error stop 'sheet axisymmetric gradient'
 
@@ -1366,36 +1374,54 @@ contains
             x(1, b, 2) = 0.05_dp*cos(2*pi*(b - 1)/nb)
             x(2, b, 3) = 0.05_dp*sin(2*pi*(b - 1)/nb)
         end do
-        call fb_sheet_setup(sheet, node, x, axis, 2, 3, 1, st)
+        call fb_sheet_setup(sheet, node, x, axis, 3, 1, nb/2 - 1, st)
         if (st /= 0) error stop 'sheet setup 3d'
-        sheet%plan%nv = 4; sheet%plan%ng_u = 3; sheet%plan%ng_v = 3
-        sheet%plan%ng_far = 3; sheet%ng_s = 4; sheet%ng_line = 4
-        do b = 1, nb
-            sheet%surface%phi(b, :) = [0.2_dp*sin(1.1_dp*b), 0.1_dp*cos(0.7_dp*b), &
-                0.05_dp*sin(0.3_dp*b)]*abs(circulation)
+        sheet%ng_s = 4
+        sheet%phi = 0.1_dp*abs(circulation)*reshape([(sin(0.37_dp*k), k=1, &
+            size(sheet%phi))], shape(sheet%phi))
+        sheet%phi = sheet%phi - sheet%phi(1, 1)
+        allocate (gp3, mold=x); allocate (gm3, mold=x); allocate (d3, mold=x)
+        allocate (h3, mold=x)
+        deallocate (g3); allocate (g3, mold=x)
+        allocate (gph, mold=sheet%phi); allocate (gpp, mold=sheet%phi)
+        allocate (gpm, mold=sheet%phi); allocate (dph, mold=sheet%phi)
+        allocate (hph, mold=sheet%phi)
+        do k = 1, size(d3)
+            d3(1 + mod(k - 1, 2), 1 + mod((k - 1)/2, nb), 1 + (k - 1)/(2*nb)) = &
+                0.01_dp*cos(1.9_dp*k + 0.3_dp)
         end do
-        n = fb_sheet_size(sheet)
-        deallocate (g)
-        allocate (g(n), h(n, n), gp(n), gm(n), hp(n, n), dir(n))
-        do k = 1, n
-            dir(k) = cos(1.9_dp*k + 0.3_dp)
-        end do
-        u = state(sheet, x)
-        dir = dir*abs(u)
-        dir = dir*0.01_dp
-        call fb_sheet_terms(sheet, x, window_jets, c, wfield%f_vac, mu0, e, g, h)
+        dph = 0.01_dp*abs(circulation)*reshape([(cos(1.3_dp*k), k=1, size(dph))], &
+            shape(dph))
+        dph(1, 1) = 0
         step = 1.0e-4_dp
-        call move(sheet, x, u + step*dir)
-        call fb_sheet_terms(sheet, x, window_jets, c, wfield%f_vac, mu0, ep, gp, hp)
-        call move(sheet, x, u - step*dir)
-        call fb_sheet_terms(sheet, x, window_jets, c, wfield%f_vac, mu0, em, gm, hp)
-        call move(sheet, x, u)
-        err = abs((ep - em)/(2*step) - dot_product(g, dir))/sum(abs(g*dir))
+        call fb_sheet_terms(sheet, x, window_jets, c, wfield%f_vac, mu0, e, g3, gph)
+        call fb_sheet_hvp(sheet, x, window_jets, c, wfield%f_vac, mu0, d3, dph, h3, hph)
+        sheet%phi = sheet%phi + step*dph
+        call fb_sheet_terms(sheet, x + step*d3, window_jets, c, wfield%f_vac, mu0, ep, &
+            gp3, gpp)
+        sheet%phi = sheet%phi - 2*step*dph
+        call fb_sheet_terms(sheet, x - step*d3, window_jets, c, wfield%f_vac, mu0, em, &
+            gm3, gpm)
+        sheet%phi = sheet%phi + step*dph
+        err = abs((ep - em)/(2*step) - sum(g3*d3) - sum(gph*dph)) &
+            /(sum(abs(g3*d3)) + sum(abs(gph*dph)))
         print '(a,es9.2)', 'sheet 3D: gradient vs central difference', err
         if (err > 1.0e-7_dp) error stop 'sheet gradient'
-        err = maxval(abs((gp - gm)/(2*step) - matmul(h, dir)))/maxval(abs(matmul(h, dir)))
-        print '(a,es9.2)', 'sheet 3D: Hessian vs central difference', err
+        err = max(maxval(abs((gp3 - gm3)/(2*step) - h3)), &
+            maxval(abs((gpp - gpm)/(2*step) - hph)))/max(maxval(abs(h3)), maxval(abs(hph)))
+        print '(a,es9.2)', 'sheet 3D: Hessian-vector product vs central difference', err
         if (err > 1.0e-6_dp) error stop 'sheet Hessian'
+        ! reduced: phi solved exactly at every geometry
+        call fb_sheet_exact(sheet, x + step*d3, window_jets, c, wfield%f_vac, mu0, st)
+        call fb_sheet_terms(sheet, x + step*d3, window_jets, c, wfield%f_vac, mu0, ep, gp3)
+        call fb_sheet_exact(sheet, x - step*d3, window_jets, c, wfield%f_vac, mu0, st)
+        call fb_sheet_terms(sheet, x - step*d3, window_jets, c, wfield%f_vac, mu0, em, gm3)
+        call fb_sheet_exact(sheet, x, window_jets, c, wfield%f_vac, mu0, st)
+        if (st /= 0) error stop 'sheet 3D solve'
+        call fb_sheet_reduced_hvp(sheet, x, window_jets, c, wfield%f_vac, mu0, d3, h3)
+        err = maxval(abs((gp3 - gm3)/(2*step) - h3))/maxval(abs(h3))
+        print '(a,es9.2)', 'sheet 3D: reduced Hessian-vector product vs central difference', err
+        if (err > 1.0e-6_dp) error stop 'sheet reduced Hessian'
         print '(a)', 'sheet ok'
     end subroutine sheet_checks
 
@@ -1427,63 +1453,25 @@ contains
         call wfield%eval(r, z, v, bf, db, d2b)
     end subroutine window_jets
 
-    function state(sheet, x) result(u)
-        ! (geometry, phi without the gauge) in the order of fb_sheet_terms.
-        type(fb_sheet_t), intent(in) :: sheet
-        real(dp), intent(in) :: x(:, :, :)
-        real(dp) :: u(fb_sheet_size(sheet))
-        integer :: b, m, k
-        do b = 1, sheet%nb
-            do m = 1, sheet%nmode
-                do k = 1, 2
-                    u(fb_sheet_geometry_index(sheet, k, m, b)) = x(k, b, m)
-                end do
-                if (fb_sheet_phi_index(sheet, m, b) > 0) &
-                    u(fb_sheet_phi_index(sheet, m, b)) = sheet%surface%phi(b, m)
-            end do
-        end do
-    end function state
 
-    subroutine move(sheet, x, u)
-        type(fb_sheet_t), intent(inout) :: sheet
-        real(dp), intent(inout) :: x(:, :, :)
-        real(dp), intent(in) :: u(:)
-        integer :: b, m, k
-        do b = 1, sheet%nb
-            do m = 1, sheet%nmode
-                do k = 1, 2
-                    x(k, b, m) = u(fb_sheet_geometry_index(sheet, k, m, b))
-                end do
-                if (fb_sheet_phi_index(sheet, m, b) > 0) &
-                    sheet%surface%phi(b, m) = u(fb_sheet_phi_index(sheet, m, b))
-            end do
-        end do
-    end subroutine move
-
-    function chain_log_integral(sheet, x) result(total)
-        ! oint ln R dZ along the P_k chain of mode 1, 20 Gauss points per panel.
-        type(fb_sheet_t), intent(in) :: sheet
+    function chain_log_integral(x) result(total)
+        ! oint ln R dZ along the P2 chain of mode 1, 20 Gauss points per panel.
         real(dp), intent(in) :: x(:, :, :)
-        real(dp) :: total, gx(20), gw(20), xi, r, dz, nl(4), dn(4)
-        integer :: p, q, i, j, node, deg
-        deg = sheet%surface%degree
+        real(dp) :: total, gx(20), gw(20), xi, r, dz, nl(3), dn(3)
+        integer :: p, q, i, node, nb
+        nb = size(x, 2)
         call gauss_legendre(20, gx, gw)
         gx = 0.5_dp*(gx + 1); gw = 0.5_dp*gw
         total = 0
-        do p = 1, sheet%surface%n_panels
+        do p = 1, nb/2
             do q = 1, 20
                 xi = gx(q)
-                nl = 0; dn = 0
-                do i = 1, deg + 1
-                    do j = deg + 1, 1, -1
-                        nl(i) = nl(i)*xi + sheet%surface%lagrange(i, j)
-                        if (j > 1) dn(i) = dn(i)*xi + (j - 1)*sheet%surface%lagrange(i, j)
-                    end do
-                end do
+                nl = [2*(xi - 0.5_dp)*(xi - 1), -4*xi*(xi - 1), 2*xi*(xi - 0.5_dp)]
+                dn = [4*xi - 3, -8*xi + 4, 4*xi - 1]
                 r = 0; dz = 0
-                do i = 1, deg + 1
-                    node = (p - 1)*deg + i
-                    if (node > sheet%nb) node = node - sheet%nb
+                do i = 1, 3
+                    node = 2*(p - 1) + i
+                    if (node > nb) node = node - nb
                     r = r + nl(i)*x(1, node, 1)
                     dz = dz + dn(i)*x(2, node, 1)
                 end do

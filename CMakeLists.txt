@@ -343,9 +343,8 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # second-kind Nedelec edges #148, exact moment gradients #149 and the
 # boundary trace projection #152, the toroidal period #154 and its tensor
 # forms #160, factored anisotropic apply, the toroidal sheet-current energy
-# #224 with its net-current ramps #225, local-block assembly #226 and
-# point-input pair kernels #227).
-set(MILCA_FORTFEM_REVISION "b5a099ff476dfdc7387ee2e6b12cdd31c204992c")
+# #224-#227 and its corrected trapezoidal rule #228-#231).
+set(MILCA_FORTFEM_REVISION "f692b9c5f571fa45d7c30ff60250a4a1a0446793")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -377,7 +376,8 @@ add_library(milca_spatial ${MILCA_TRIANGLE_SOURCES}
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_gs_single_layer_shape_products.f90
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_single_layer_shape_2d.f90
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_toroidal_sheet_products.f90
-    ${fortfem_SOURCE_DIR}/src/bem/toroidal_sheet_current_3d.f90
+    ${fortfem_SOURCE_DIR}/src/generated/fortfem_toroidal_sheet_trapezoid_products.f90
+    ${fortfem_SOURCE_DIR}/src/bem/toroidal_sheet_trapezoid.f90
     ${fortfem_SOURCE_DIR}/src/estimators/bem_residual_energy.f90
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_nurbs_geometry_products.f90
     ${fortfem_SOURCE_DIR}/src/elements/bspline_feec.f90)

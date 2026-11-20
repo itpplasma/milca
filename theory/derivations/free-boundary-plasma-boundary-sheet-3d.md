@@ -67,22 +67,23 @@ valued φ, with (X_u·∇A·X_v − X_v·∇A·X_u) = (∇×A)·(X_u × X_v),
 \iint A\cdot(\phi_u X_v - \phi_v X_u)\,du\,dv = -\iint \phi\, B\cdot N\,du\,dv . \tag{4a}
 \]
 
-The ramps of Φ = φ + I_t u + I_p' v/2π on the torus cut at u = 0 and v = 0 give in addition the
-boundary terms of the same integration by parts, so that
+The ramps of Φ = φ + I_t u + I_p' v/2π are not integrated by parts: Φ_u = φ_u + I_t and
+Φ_v = φ_v + I_p'/2π are periodic, and directly
 
 \[
-\oint \kappa\cdot A_c\,dA = -\iint_{[0,1)\times[0,2\pi)} \Phi\, B_c\cdot N\,du\,dv
-  + I_t\,\Psi_t - I_p'\,\Psi_p , \tag{4}
+\oint \kappa\cdot A_c\,dA = -\iint \phi\, B_c\cdot N\,du\,dv
+  + I_t \int_0^1 \Psi_t(u)\,du - \frac{I_p'}{2\pi}\int_0^{2\pi} \Psi_p(v)\,dv , \tag{4}
 \]
 
-with Ψ_t = ∮ A_c·dl along the loop u = 0 in the direction of increasing v and Ψ_p = ∮ A_c·dl
-along the loop v = 0 in the direction of increasing u. Both are coil fluxes through spanning
-surfaces, which can lie in D, which is coil-free:
+with Ψ_t(u) = ∮ A_c·X_v dv the flux through the toroidal loop at u and Ψ_p(v) = ∮ A_c·X_u du the
+flux through the section at v. Integrating by parts instead moves the ramps to a cut, where they
+jump; on a spectral grid that jump spreads into oscillating node forces. Both fluxes are coil fluxes
+through spanning surfaces in D, which is coil-free:
 
-- Ψ_p: the fan P(s, u) = c + s(X(u, 0) − c) from a point c of D in the plane v = 0, with
-  Ψ_p = ∫∫ B_c·(P_s × P_u) ds du = ∫∫ s B_φ (ΔZ R_u − ΔR Z_u) ds du;
-- Ψ_t: the flux through a fixed loop L inside D (the initial magnetic axis) plus the ribbon
-  P(s, v) = L(v) + s(X(0, v) − L(v)), ∫∫ B_c·(P_s × P_v) ds dv. The flux through L is constant
+- Ψ_p(v): the fan P(s, u) = L(v) + s(X(u, v) − L(v)) in the meridional plane at v,
+  Ψ_p = ∫∫ s B_φ (ΔZ R_u − ΔR Z_u) ds du;
+- Ψ_t(u): the flux through a fixed loop L inside D (the initial magnetic axis) plus the ribbon
+  P(s, v) = L(v) + s(X(u, v) − L(v)), ∫∫ B_c·(P_s × P_v) ds dv. The flux through L is constant
   and drops out with the fixed I_t.
 
 The net currents follow from Ampère's law in D: I_t = μ0 I_φ along +v (κ units) and, for a
@@ -94,25 +95,29 @@ supplies.
 
 ## 4. Discrete energy
 
-- Geometry: X(u, v) = H(q(u, v)) with q the plasma map on its boundary chain (P_k panels in u,
-  real Fourier modes in v); in the position gauge q3 = v, so X is linear in the boundary
-  coefficients for the cylindrical chart.
-- φ: continuous P_k in u on the same chain, real Fourier modes in v (n ∈ nfp ℤ, |n| ≤ n_φ).
-- Self term: Galerkin double integral of (2)·(2)/|X − Y| over pairs of patches (u-panel ×
-  v-interval). At fixed quadrature points in the patch parameters every input is linear in the
-  coefficients; near coincidence X − Y = ρ Q with Q a divided difference, so the integrand is
-  κ_x·κ_y/|Q| with ρ absorbed in the singular rule. The value, gradient and Hessian of this leaf
-  are generated with FortSym; the derivatives of the discrete energy are exact.
-- Coil term: (4) with Φ B_c·N on the same surface quadrature (Gauss per patch), Ψ_p on the fan
-  and Ψ_t on the ribbon (Gauss in s and along u or v), all with B_c jets; the integrands and their
-  derivatives in the boundary inputs are generated with FortSym (gen/gen_sheet_flux.f90).
-- Gauge: K vanishes for constant φ, so φ of mode 1 at chain node 1 is fixed.
+- Grid: the boundary is sampled at n_u = 2 n_b + 1 equidistant points of the chain parameter (odd,
+  so no Nyquist mode) and n_v per field period, from the P_k chain and the map's Fourier modes, and
+  taken as its trigonometric interpolant: u derivatives spectral, v derivatives from the modes. All
+  grid values are linear in the boundary coefficients. The cells are at most twice as long
+  toroidally as poloidally.
+- Self term: the corrected trapezoidal rule (FortFEM `fortfem_toroidal_sheet_trapezoid`): the
+  punctured double sum minus Z_i|k_i|² per point, Z_i the Epstein zeta function at s = 1/2 of the
+  local lattice form |m h_u X_u + n h_v X_v|²; O(h³) for the singular inner sum, spectral outer sum.
+- Coil term: (4) by the trapezoidal rule on the same grid, Gauss in s along fans and ribbons; the
+  integrands and their derivatives are generated with FortSym (gen/gen_sheet_flux.f90).
+- φ: Fourier modes in u up to n_u/4 and the map's toroidal modes in v; the constant is the gauge.
+  The rule is accurate only for densities the grid resolves: with φ nodal on the grid its block is
+  indefinite (eigenvalues down to −0.3 of the largest on the NCSX boundary). e is quadratic in φ; its
+  φ block is assembled in this basis and φ is eliminated exactly with its Cholesky factor at every
+  state.
 
 ## 5. Newton system
 
-Unknowns: plasma map (position gauge) and φ. The vacuum block in φ is −(1/μ0) times the Galerkin
-inductance matrix, negative definite. Target inertia with k unstable directions: positive
-n_p − k, negative n_φ + n_slide + k.
+Unknowns: the plasma map (position gauge). The reduced vacuum Hessian H_xx − H_xφ M⁻¹ H_φx enters
+as a product (two Hessian-vector products of the trapezoidal energy and one Cholesky solve). The
+Newton step solves the bordered system by GMRES, right-preconditioned by the factor of the plasma
+block, whose inertia control sets the shift; target inertia with k unstable directions: positive
+n_p − k, negative n_slide + k.
 
 ## 6. Checks
 
@@ -120,13 +125,14 @@ Test `ideal_fb_sheet_vacuum` (P2 chain around an ellipse):
 
 | check | result |
 |---|---|
-| F alone: L_v = πF²∫∫dR dZ/R/μ0, the toroidal-field term of the axisymmetric form | 1.8e-6 |
-| axisymmetric limit (PF rings, F = 0): L_v − I_t Ψ(L)/μ0 against the single layer | 4.3e-7 (24 nodes), 2.3e-7 (48) |
-| node gradient against the single layer (different discretisations, O(h²)) | 2.7e-3, 6.9e-4 |
-| 3D surface (nfp = 3, one toroidal mode) in a fitted window-coil field: gradient, Hessian vs central differences | 4.9e-10, 7.4e-10 |
+| F alone: L_v = πF²∫∫dR dZ/R/μ0, the toroidal-field term of the axisymmetric form | 6.2e-7 |
+| axisymmetric limit (PF rings, F = 0): L_v − I_t Ψ(L)/μ0 against the single layer | 8.3e-6 (24 nodes), 8.7e-7 (48) |
+| shape derivative along smooth displacements against the single layer | 1.3e-4, 1.2e-5 |
+| 3D surface (nfp = 3) in the window-coil mgrid field: gradient, Hessian-vector product, reduced product vs central differences | 1.8e-9, 3.9e-10, 3.9e-10 |
 
-The toroidal intervals are at most three poloidal panel lengths long; the energy error decays
-exponentially with nv (2.4e-2, 2.4e-3, 1.6e-4, 2.0e-6, 2.4e-9 for nv = 4 … 64 on the ellipse).
+On a toroidal-field coil the rule converges at third order (4.9e-3, 6.1e-4, 7.6e-5, 9.5e-6,
+1.2e-6 for 8 … 128 poloidal points); on cells of aspect 4 the error is 1.3e-3 against 3e-5 at
+aspect 2.
 
 ## 7. Sources
 

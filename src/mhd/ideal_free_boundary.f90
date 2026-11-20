@@ -86,9 +86,10 @@ module milca_ideal_free_boundary
         FORTSPARSE_SYM_INDEFINITE, sparse_inertia, FORTSPARSE_INERTIA_RELIABLE
     use milca_ideal_fb_bem, only: fb_bem_t, fb_coil_flux_t, fb_bem_setup, &
         fb_bem_replan, fb_bem_terms, fb_bem_exact
-    use milca_ideal_fb_sheet, only: fb_sheet_t, fb_sheet_setup, fb_sheet_size, &
-        fb_sheet_terms, fb_sheet_exact, fb_sheet_geometry_index, fb_sheet_phi_index
+    use milca_ideal_fb_sheet, only: fb_sheet_t, fb_sheet_setup, fb_sheet_terms, &
+        fb_sheet_exact, fb_sheet_reduced_hvp, fb_sheet_fourier
     use milca_ideal_fb_coil_field, only: fb_field_jets_t
+    use fortnum_krylov, only: real_gmres_operator
     use milca_inertia_newton, only: inertia_newton_t, inertia_newton_factor, &
         inertia_newton_solve, inertia_newton_accept, INERTIA_NEWTON_OK
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t, gamma_c_3d_energy, &
@@ -284,10 +285,21 @@ module milca_ideal_free_boundary
         ! the plasma unknowns (layout: plasma, tau, psi_hat).
         type(fb_bem_t), allocatable :: bem
         ! Vacuum on Gamma_p in 3D (ideal_fb_init_sheet): the current potential
-        ! of a surface current with the fitted coil field (layout: plasma,
-        ! phi without its gauge).
+        ! of a surface current, eliminated exactly at every state; the
+        ! unknowns are the plasma alone.
         type(fb_sheet_t), allocatable :: sheet
         class(fb_field_jets_t), allocatable :: coil_field
+        ! the preconditioner of GMRES on the sheet: the reduced Hessian of the
+        ! axisymmetric single layer on the n = 0 boundary, per toroidal mode
+        ! (pc_rows the plasma unknowns), which enters the factored Newton matrix
+        type(fb_bem_t), allocatable :: bem_pc
+        ! the boundary nodes on a Fourier curve: bq(b, k) an orthonormal basis
+        ! of the node vectors orthogonal to it; the rows bq' x(c, m, :) = 0 for
+        ! every component and mode border the Newton system with the slide
+        ! gauge (node-scale boundary wiggles are not unknowns)
+        real(dp), allocatable :: bq(:, :)
+        real(dp), allocatable :: vac_pc(:, :)
+        integer, allocatable :: pc_rows(:)
     end type
 
     type :: ideal_fb_report_t
@@ -2213,8 +2225,6 @@ contains
             fb%bem%tau = fb%bem%tau + alpha*du(fb%np + 1:fb%np + fb%bem%nt)
             fb%bem%psi_hat = fb%bem%psi_hat + alpha*du(fb%np + fb%bem%nt + 1)
         end if
-        if (allocated(fb%sheet)) call set_sheet_phi(fb, sheet_phi(fb) &
-            + alpha*du(fb%np + 1:fb%n))
     end subroutine
 
     subroutine slide_directions(fb)
@@ -2279,9 +2289,11 @@ contains
         real(dp), allocatable, intent(out) :: matrix(:)
         integer, allocatable :: ci(:), cj(:)
         real(dp), allocatable :: cv(:)
-        integer :: i, p, k, a, c, m, nl
+        integer :: i, p, k, a, c, m, nl, nr, mm, r, b
         nl = size(fb%slide, 3)
+        nr = boundary_rows(fb)
         m = size(val) + 2*count(abs(fb%slide) > 0)
+        if (nr > 0) m = m + 2*nr*size(fb%bq, 1)
         allocate (ci(m), cj(m), cv(m))
         m = 0
         do i = 1, fb%n
@@ -2301,7 +2313,22 @@ contains
                 end do
             end do
         end do
-        call coo_to_csr(fb%n + nl, ci(:m), cj(:m), cv(:m), rows, cols, matrix)
+        ! the boundary curve rows
+        r = fb%n + nl
+        do mm = 1, merge(fb%nmode, 0, nr > 0)
+            do c = 1, 2
+                do k = 1, size(fb%bq, 2)
+                    r = r + 1
+                    do b = 1, size(fb%bq, 1)
+                        ci(m + 1:m + 2) = [r, pidx(fb, c, mm, fb%sheet%node(b))]
+                        cj(m + 1:m + 2) = [pidx(fb, c, mm, fb%sheet%node(b)), r]
+                        cv(m + 1:m + 2) = scale*fb%bq(b, k)
+                        m = m + 2
+                    end do
+                end do
+            end do
+        end do
+        call coo_to_csr(fb%n + nl + nr, ci(:m), cj(:m), cv(:m), rows, cols, matrix)
     end subroutine
 
     subroutine project_slide(fb, w, g, multiplier)
@@ -2317,6 +2344,10 @@ contains
         real(dp), intent(out), optional :: multiplier(:)
         real(dp) :: a(size(fb%slide, 3), size(fb%slide, 3)), b(size(fb%slide, 3))
         integer :: i, j, k, n, c, nl
+        if (boundary_rows(fb) > 0) then
+            call project_constraints(fb, w, g, multiplier)
+            return
+        end if
         nl = size(fb%slide, 3)
         a = 0; b = 0
         do n = 1, fb%plasma%nodes
@@ -2349,6 +2380,52 @@ contains
         end do
         if (present(multiplier)) multiplier = b
     end subroutine
+
+    subroutine project_constraints(fb, w, g, multiplier)
+        ! project_slide with the boundary curve rows as well: g <- g - G' mu,
+        ! mu minimising sum w (g - G' mu)^2 over the slide and boundary rows.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(in) :: w(:)
+        real(dp), intent(inout) :: g(:)
+        real(dp), intent(out), optional :: multiplier(:)
+        real(dp), allocatable :: gm(:, :), a(:, :), b(:)
+        integer :: nl, nr, r, k, c, mm, n, bb, info
+        interface
+            subroutine dposv(uplo, n, nrhs, a, lda, b, ldb, info)
+                import :: dp
+                character, intent(in) :: uplo
+                integer, intent(in) :: n, nrhs, lda, ldb
+                real(dp), intent(inout) :: a(lda, *), b(ldb, *)
+                integer, intent(out) :: info
+            end subroutine dposv
+        end interface
+        nl = size(fb%slide, 3)
+        nr = boundary_rows(fb)
+        allocate (gm(fb%n, nl + nr), source=0.0_dp)
+        do k = 1, nl
+            do n = 1, fb%plasma%nodes
+                do c = 1, 2
+                    gm(pidx(fb, c, 1, n), k) = fb%slide(c, n, k)
+                end do
+            end do
+        end do
+        r = nl
+        do mm = 1, fb%nmode
+            do c = 1, 2
+                do k = 1, size(fb%bq, 2)
+                    r = r + 1
+                    do bb = 1, size(fb%bq, 1)
+                        gm(pidx(fb, c, mm, fb%sheet%node(bb)), r) = fb%bq(bb, k)
+                    end do
+                end do
+            end do
+        end do
+        a = matmul(transpose(gm), gm*spread(w(:fb%n), 2, nl + nr))
+        b = matmul(transpose(gm), w(:fb%n)*g(:fb%n))
+        call dposv('L', nl + nr, 1, a, nl + nr, b, nl + nr, info)
+        g(:fb%n) = g(:fb%n) - matmul(gm, b)
+        if (present(multiplier)) multiplier = b(:size(multiplier))
+    end subroutine project_constraints
 
     subroutine ideal_fb_solve(fb, tolerance, max_iterations, report, status, verbose, &
                               step_tolerance, residual_tolerance)
@@ -5681,6 +5758,7 @@ contains
         integer :: st
         ! fb%circulation is counterclockwise in (R, Z): -mu0 I_phi.
         if (allocated(fb%sheet)) then
+            call project_boundary(fb, fb%sheet%node)
             call fb_sheet_exact(fb%sheet, sheet_coords(fb), coil_jets, -fb%circulation, &
                 fb%coil_field%f_vac, fb%mu0, st)
             status = IDEAL_FB_OK
@@ -5699,7 +5777,7 @@ contains
     end subroutine ideal_fb_bem_settle
 
     subroutine ideal_fb_init_sheet(fb, mesh, chart, field, nfp, ntor, coil, &
-            circulation, status, mu0, nphi, quadrature_order)
+            circulation, kb, status, mu0, nphi, quadrature_order)
         ! Plasma with ntor toroidal modes and the vacuum as a surface current
         ! on its boundary (theory/derivations/free-boundary-plasma-boundary-
         ! sheet-3d.md): mesh is the plasma region alone, coil the coil field
@@ -5713,11 +5791,13 @@ contains
         integer, intent(in) :: nfp, ntor
         class(fb_field_jets_t), intent(in) :: coil
         real(dp), intent(in) :: circulation
+        ! kb: poloidal harmonics of the boundary curve
+        integer, intent(in) :: kb
         integer, intent(out) :: status
         real(dp), intent(in), optional :: mu0
         integer, intent(in), optional :: nphi, quadrature_order
         integer, allocatable :: chain(:)
-        integer :: st
+        integer :: st, k, nb, kq
         status = IDEAL_FB_BAD_INPUT
         fb%nloc = size(mesh%triangles, 1)
         if (fb%nloc /= 6 .and. fb%nloc /= 10) return
@@ -5739,13 +5819,42 @@ contains
         allocate (fb%sheet)
         allocate (fb%coil_field, source=coil)
         ! L: the axis curve of the initial map, fixed from here on
+        ! the boundary on a Fourier curve of kb harmonics, the complement of
+        ! its node vectors in bq (the higher harmonics of the nodes)
+        nb = size(chain)
+        kq = 2*(nb/2 - min(kb, (nb - 1)/2)) - merge(1, 0, mod(nb, 2) == 0)
+        allocate (fb%bq(nb, kq))
+        do k = 1, kq
+            block
+                integer :: h, b
+                h = min(kb, (nb - 1)/2) + 1 + (k - 1)/2
+                do b = 1, nb
+                    if (mod(k, 2) == 1) then
+                        fb%bq(b, k) = cos(2*pi*h*(b - 1)/nb)
+                    else
+                        fb%bq(b, k) = sin(2*pi*h*(b - 1)/nb)
+                    end if
+                end do
+                fb%bq(:, k) = fb%bq(:, k)/norm2(fb%bq(:, k))
+            end block
+        end do
+        call project_boundary(fb, chain)
         call fb_sheet_setup(fb%sheet, chain, sheet_chain_coords(fb, chain), &
-            fb%plasma%x(1:2, :, fb%plasma%axis_node), fb%order, nfp, ntor, st)
+            fb%plasma%x(1:2, :, fb%plasma%axis_node), nfp, ntor, min(kb, (nb - 1)/2), st)
+        if (st /= 0) return
+        ! preconditioner: the axisymmetric single layer of the plasma current
+        ! on the n = 0 boundary (no coil flux)
+        allocate (fb%bem_pc)
+        fb%bem_pc%coil%source = reshape([10*maxval(fb%plasma%x(1, 1, chain)), 0.0_dp], &
+            [2, 1])
+        fb%bem_pc%coil%coef = [0.0_dp]
+        call fb_bem_setup(fb%bem_pc, chain, fb%plasma%x(1:2, 1, chain), fb%order, &
+            fb%order - 1, st)
         if (st /= 0) return
         fb%ns = 0; fb%ncell = 0; fb%nt = 0
         fb%np = 2*fb%plasma%nodes*fb%nmode; fb%nx = 0
-        fb%nf = fb_sheet_size(fb%sheet) - 2*fb%sheet%nb*fb%nmode
-        fb%n = fb%np + fb%nf
+        fb%nf = 0
+        fb%n = fb%np
         allocate (fb%xs(3, fb%nmode, 0), fb%phi(fb%nmode, 0), fb%lam(3, fb%nmode, 0), &
             fb%drive(0, fb%nmode), fb%load(0, fb%nmode), fb%reference(2, 0), &
             fb%conn(fb%nloc, 0), fb%role(0), fb%det(fb%plasma%nq, 0))
@@ -5763,70 +5872,44 @@ contains
         end do
     end function sheet_chain_coords
 
+    subroutine project_boundary(fb, chain)
+        ! The boundary nodes onto the Fourier curve: x <- x - bq bq' x.
+        type(ideal_fb_t), intent(inout) :: fb
+        integer, intent(in) :: chain(:)
+        integer :: c, m
+        if (.not. allocated(fb%bq)) return
+        do m = 1, fb%nmode
+            do c = 1, 2
+                fb%plasma%x(c, m, chain) = fb%plasma%x(c, m, chain) &
+                    - matmul(fb%bq, matmul(fb%plasma%x(c, m, chain), fb%bq))
+            end do
+        end do
+    end subroutine project_boundary
+
+    pure integer function boundary_rows(fb) result(n)
+        type(ideal_fb_t), intent(in) :: fb
+        n = 0
+        if (allocated(fb%bq)) n = 2*fb%nmode*size(fb%bq, 2)
+    end function boundary_rows
+
     function sheet_coords(fb) result(x)
         type(ideal_fb_t), intent(in) :: fb
         real(dp) :: x(2, fb%sheet%nb, fb%nmode)
         x = sheet_chain_coords(fb, fb%sheet%node)
     end function sheet_coords
 
-    function sheet_phi(fb) result(u)
-        ! phi of the sheet without its gauge, in the unknown order.
-        type(ideal_fb_t), intent(in) :: fb
-        real(dp) :: u(fb%nf)
-        integer :: b, m, k, ng
-        ng = 2*fb%sheet%nb*fb%nmode
-        do m = 1, fb%sheet%surface%nmode_phi
-            do b = 1, fb%sheet%nb
-                k = fb_sheet_phi_index(fb%sheet, m, b)
-                if (k > 0) u(k - ng) = fb%sheet%surface%phi(b, m)
-            end do
-        end do
-    end function sheet_phi
-
-    subroutine set_sheet_phi(fb, u)
-        type(ideal_fb_t), intent(inout) :: fb
-        real(dp), intent(in) :: u(:)
-        integer :: b, m, k, ng
-        ng = 2*fb%sheet%nb*fb%nmode
-        do m = 1, fb%sheet%surface%nmode_phi
-            do b = 1, fb%sheet%nb
-                k = fb_sheet_phi_index(fb%sheet, m, b)
-                if (k > 0) fb%sheet%surface%phi(b, m) = u(k - ng)
-            end do
-        end do
-    end subroutine set_sheet_phi
-
-    function sheet_rows(fb) result(rows)
-        ! Unknown of each entry of the sheet's (geometry, phi) vector.
-        type(ideal_fb_t), intent(in) :: fb
-        integer :: rows(fb_sheet_size(fb%sheet))
-        integer :: b, m, c, ng, k
-        ng = 2*fb%sheet%nb*fb%nmode
-        do b = 1, fb%sheet%nb
-            do m = 1, fb%nmode
-                do c = 1, 2
-                    rows(fb_sheet_geometry_index(fb%sheet, c, m, b)) = &
-                        pidx(fb, c, m, fb%sheet%node(b))
-                end do
-            end do
-        end do
-        do k = ng + 1, size(rows)
-            rows(k) = fb%np + k - ng
-        end do
-    end function sheet_rows
-
     subroutine sheet_gradient(fb, grad, status, lagrangian, min_jacobian)
-        ! L = W_p + L_v/nfp and its gradient in the layout (plasma, phi); the
-        ! coil toroidal field is part of L_v.
+        ! L = W_p + L_v/nfp at the eliminated current potential and its
+        ! gradient in the plasma unknowns; the coil toroidal field is part of
+        ! L_v.
         type(ideal_fb_t), intent(in) :: fb
         real(dp), intent(out) :: grad(:)
         integer, intent(out) :: status
         real(dp), intent(out), optional :: lagrangian, min_jacobian
-        real(dp), allocatable :: gfull(:), g(:)
-        integer, allocatable :: rows(:)
-        real(dp) :: wp, ev, minp
-        integer :: st, a, m, c
-        allocate (gfull(fb%plasma%ndof), g(fb_sheet_size(fb%sheet)))
+        real(dp), allocatable :: gfull(:), gx(:, :, :)
+        real(dp) :: wp, ev, minp, et
+        integer :: st, a, m, c, b
+        allocate (gfull(fb%plasma%ndof), gx(2, fb%sheet%nb, fb%nmode))
         status = IDEAL_FB_OK
         call ideal_map_energy(fb%plasma, fb%plasma%x, wp, st, gfull, minp)
         if (st /= IDEAL_MAP_OK) status = IDEAL_FB_FOLDED
@@ -5838,13 +5921,20 @@ contains
                 end do
             end do
         end do
+        call toroidal_energy(fb, et, grad)
         call fb_sheet_terms(fb%sheet, sheet_coords(fb), coil_jets, -fb%circulation, &
-            fb%coil_field%f_vac, fb%mu0, ev, g)
-        rows = sheet_rows(fb)
-        grad(rows) = grad(rows) + g/fb%nfp
+            fb%coil_field%f_vac, fb%mu0, ev, gx)
+        do b = 1, fb%sheet%nb
+            do m = 1, fb%nmode
+                do c = 1, 2
+                    a = pidx(fb, c, m, fb%sheet%node(b))
+                    grad(a) = grad(a) + gx(c, b, m)/fb%nfp
+                end do
+            end do
+        end do
         if (.not. ieee_is_finite(ev)) status = IDEAL_FB_BEM_FAILED
         if (allocated(fb%shift)) grad = grad - fb%shift
-        if (present(lagrangian)) lagrangian = wp + ev/fb%nfp
+        if (present(lagrangian)) lagrangian = wp + et + ev/fb%nfp
         if (present(min_jacobian)) min_jacobian = minp
     contains
         subroutine coil_jets(r, z, v, b, db, d2b)
@@ -5855,46 +5945,137 @@ contains
     end subroutine sheet_gradient
 
     subroutine sheet_hessian(fb, rowptr, colidx, val)
-        ! Newton matrix of sheet_gradient: the sparse plasma block with the
-        ! dense boundary-geometry and phi blocks.
+        ! Sparse plasma block of the Newton matrix; the vacuum enters the
+        ! Newton solve through sheet_vacuum_apply.
         type(ideal_fb_t), intent(in) :: fb
         integer, allocatable, intent(out) :: rowptr(:), colidx(:)
         real(dp), allocatable, intent(out) :: val(:)
-        type(csr_matrix_t) :: hp
-        real(dp), allocatable :: g(:), h(:, :), cv(:)
-        integer, allocatable :: rows(:), ci(:), cj(:)
-        real(dp) :: ev
-        integer :: i, j, p, cnt, ns
-        ns = fb_sheet_size(fb%sheet)
+        type(csr_matrix_t) :: hp, ht
+        integer, allocatable :: ci(:), cj(:), rows(:)
+        real(dp), allocatable :: cv(:)
+        integer :: i, j, p, cnt, nx
         call plasma_hessian(fb, hp)
-        allocate (g(ns), h(ns, ns))
-        call fb_sheet_terms(fb%sheet, sheet_coords(fb), coil_jets, -fb%circulation, &
-            fb%coil_field%f_vac, fb%mu0, ev, g, h)
-        rows = sheet_rows(fb)
-        allocate (ci(size(hp%val) + ns*ns), cj(size(hp%val) + ns*ns), &
-            cv(size(hp%val) + ns*ns))
+        call toroidal_hessian(fb, ht)
+        nx = 0
+        if (allocated(fb%vac_pc)) then
+            rows = fb%pc_rows
+            nx = size(rows)
+        end if
+        allocate (ci(size(hp%val) + size(ht%val) + nx*nx), &
+            cj(size(hp%val) + size(ht%val) + nx*nx), cv(size(hp%val) + size(ht%val) + nx*nx))
         cnt = 0
         do i = 1, fb%np
             do p = hp%rowptr(i), hp%rowptr(i + 1) - 1
                 cnt = cnt + 1
                 ci(cnt) = i; cj(cnt) = hp%colidx(p); cv(cnt) = hp%val(p)
             end do
-        end do
-        do j = 1, ns
-            do i = 1, ns
+            do p = ht%rowptr(i), ht%rowptr(i + 1) - 1
                 cnt = cnt + 1
-                ci(cnt) = rows(i); cj(cnt) = rows(j); cv(cnt) = h(i, j)/fb%nfp
+                ci(cnt) = i; cj(cnt) = ht%colidx(p); cv(cnt) = ht%val(p)
+            end do
+        end do
+        do j = 1, nx
+            do i = 1, nx
+                cnt = cnt + 1
+                ci(cnt) = rows(i); cj(cnt) = rows(j); cv(cnt) = fb%vac_pc(i, j)
             end do
         end do
         call coo_to_csr(fb%n, ci(:cnt), cj(:cnt), cv(:cnt), rowptr, colidx, val)
         call symmetrize_csr(rowptr, colidx, val)
+    end subroutine sheet_hessian
+
+
+    subroutine sheet_prepare(fb)
+        ! Preconditioner of the sheet vacuum at the present state: the
+        ! axisymmetric single layer of the plasma current on the n = 0
+        ! boundary with tau and psi_hat eliminated, V2 = H_xx - K_xt K_tt^-1
+        ! K_tx, applied to every toroidal mode m with the weight of T_m^2 over
+        ! the turn (1 for m = 1, 1/2 else) and divided by nfp. It matches the
+        ! P2 chain node by node, which a grid vacuum cannot do cheaply.
+        type(ideal_fb_t), intent(inout) :: fb
+        real(dp), allocatable :: x(:, :), gx(:), gt(:), hxx(:, :), hxt(:, :), hxp(:), &
+            htt(:, :), htp(:), ktt(:, :), kxt(:, :), sol(:, :)
+        integer, allocatable :: ipiv(:)
+        real(dp) :: ev, gp, wm
+        integer :: nb, nt, b, c, m, info, k, nx
+        interface
+            subroutine dgesv(n, nrhs, a, lda, ipiv, b, ldb, info)
+                import :: dp
+                integer, intent(in) :: n, nrhs, lda, ldb
+                real(dp), intent(inout) :: a(lda, *), b(ldb, *)
+                integer, intent(out) :: ipiv(*), info
+            end subroutine dgesv
+        end interface
+        nb = fb%bem_pc%nb; nt = fb%bem_pc%nt
+        x = fb%plasma%x(1:2, 1, fb%bem_pc%node)
+        call fb_bem_replan(fb%bem_pc, x, info)
+        call fb_bem_exact(fb%bem_pc, x, -fb%circulation, info)
+        allocate (gx(2*nb), gt(nt), hxx(2*nb, 2*nb), hxt(2*nb, nt), hxp(2*nb), &
+            htt(nt, nt), htp(nt))
+        call fb_bem_terms(fb%bem_pc, x, fb%mu0, -fb%circulation, ev, gx, gt, gp, hxx, hxt, &
+            hxp, htt, htp)
+        allocate (ktt(nt + 1, nt + 1), kxt(2*nb, nt + 1), ipiv(nt + 1))
+        ktt = 0
+        ktt(:nt, :nt) = htt; ktt(:nt, nt + 1) = htp; ktt(nt + 1, :nt) = htp
+        kxt(:, :nt) = hxt; kxt(:, nt + 1) = hxp
+        sol = transpose(kxt)
+        call dgesv(nt + 1, 2*nb, ktt, nt + 1, ipiv, sol, nt + 1, info)
+        hxx = hxx - matmul(kxt, sol)
+        hxx = 0.5_dp*(hxx + transpose(hxx))
+        nx = 2*nb*fb%nmode
+        if (.not. allocated(fb%vac_pc)) allocate (fb%vac_pc(nx, nx), fb%pc_rows(nx))
+        fb%vac_pc = 0
+        do m = 1, fb%nmode
+            wm = merge(1.0_dp, 0.5_dp, m == 1)/fb%nfp
+            k = 2*nb*(m - 1)
+            fb%vac_pc(k + 1:k + 2*nb, k + 1:k + 2*nb) = wm*hxx
+            do b = 1, nb
+                do c = 1, 2
+                    fb%pc_rows(k + 2*(b - 1) + c) = pidx(fb, c, m, fb%bem_pc%node(b))
+                end do
+            end do
+        end do
+        if (info /= 0) fb%vac_pc = 0
+    end subroutine sheet_prepare
+
+    subroutine sheet_vacuum_apply(fb, x, y)
+        ! y = (reduced vacuum Hessian/nfp) x on the plasma unknowns, the
+        ! current potential eliminated at the present state, minus the coarse
+        ! Hessian that the factored Newton matrix already holds.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(in) :: x(:)
+        real(dp), intent(out) :: y(:)
+        real(dp) :: dx(2, fb%sheet%nb, fb%nmode), hx(2, fb%sheet%nb, fb%nmode)
+        integer, allocatable :: rows(:)
+        integer :: b, m, c
+        do b = 1, fb%sheet%nb
+            do m = 1, fb%nmode
+                do c = 1, 2
+                    dx(c, b, m) = x(pidx(fb, c, m, fb%sheet%node(b)))
+                end do
+            end do
+        end do
+        call fb_sheet_reduced_hvp(fb%sheet, sheet_coords(fb), coil_jets, -fb%circulation, &
+            fb%coil_field%f_vac, fb%mu0, dx, hx)
+        y = 0
+        do b = 1, fb%sheet%nb
+            do m = 1, fb%nmode
+                do c = 1, 2
+                    y(pidx(fb, c, m, fb%sheet%node(b))) = hx(c, b, m)/fb%nfp
+                end do
+            end do
+        end do
+        if (allocated(fb%vac_pc)) then
+            rows = fb%pc_rows
+            y(rows) = y(rows) - matmul(fb%vac_pc, x(rows))
+        end if
     contains
         subroutine coil_jets(r, z, v, b, db, d2b)
             real(dp), intent(in) :: r, z, v
             real(dp), intent(out) :: b(3), db(3, 2), d2b(3, 3)
             call fb%coil_field%eval(r, z, v, b, db, d2b)
         end subroutine coil_jets
-    end subroutine sheet_hessian
+    end subroutine sheet_vacuum_apply
 
     function bem_coords(fb) result(x)
         ! (R, Z) of the boundary chain nodes (cylindrical chart, n = 0).
@@ -6220,7 +6401,7 @@ contains
             status = IDEAL_FB_BAD_INPUT; return
         end if
         last_ratio = 0; growths = 0; gnorm0 = huge(1.0_dp)
-        nslide = size(fb%slide, 3)
+        nslide = size(fb%slide, 3) + boundary_rows(fb)
         if (allocated(fb%bem)) then
             n_pos = fb%np + 1 - fb%unstable
             n_neg = fb%bem%nt + nslide + fb%unstable
@@ -6229,9 +6410,10 @@ contains
                 status = IDEAL_FB_BEM_FAILED; return
             end if
         else
-            ! 3D sheet (free-boundary-plasma-boundary-sheet-3d.md, section 5)
+            ! 3D sheet (free-boundary-plasma-boundary-sheet-3d.md, section 5):
+            ! the plasma block preconditions GMRES on the full operator
             n_pos = fb%np - fb%unstable
-            n_neg = fb%n - fb%np + nslide + fb%unstable
+            n_neg = nslide + fb%unstable
         end if
         cap = 0.02_dp*maxval(maxval(fb%plasma%reference, dim=2) &
             - minval(fb%plasma%reference, dim=2))
@@ -6244,6 +6426,7 @@ contains
             status = IDEAL_FB_FOLDED; return
         end if
         do it = 0, max_iterations
+            if (allocated(fb%sheet)) call sheet_prepare(fb)
             call ideal_fb_hessian(fb, rowptr, colidx, val)
             do i = 1, fb%n
                 diag(i) = 0
@@ -6280,6 +6463,11 @@ contains
             do tries = 1, 30
                 near = tries == 1 .and. growths < 2 .and. gnorm < 1.0e-3_dp*gnorm0 &
                     .and. last_ratio > 0.5_dp
+                ! sheet: the factor is only the preconditioner (its vacuum block
+                ! lacks the coil curvature), so its inertia does not decide the
+                ! shift; GMRES solves the exact operator, and the undamped step
+                ! is tried first and kept when the stationarity norm drops
+                if (allocated(fb%sheet)) near = tries == 1 .and. growths < 2
                 call inertia_newton_factor(opt, srows, scols, smat, shift, n_pos, n_neg, &
                     solver, delta, st, minimum=dmin, any_inertia=near)
                 factored = st == INERTIA_NEWTON_OK
@@ -6293,10 +6481,22 @@ contains
                 if (st /= INERTIA_NEWTON_OK) then
                     status = IDEAL_FB_SOLVE_FAILED; exit
                 end if
+                if (allocated(fb%sheet)) then
+                    ! GMRES on the full operator, right-preconditioned by the
+                    ! factor of the plasma block (sol is its solution)
+                    call sheet_krylov([-grad, (0.0_dp, i = 1, nslide)], sol, st)
+                    if (st /= 0) then
+                        status = IDEAL_FB_SOLVE_FAILED; exit
+                    end if
+                end if
                 s = sol(:fb%n)
                 call map_steps(fb, s, disp, rot)
                 if (disp > cap) s = s*(cap/disp)
                 hs = csr_apply(s)
+                if (allocated(fb%sheet)) then
+                    call sheet_vacuum_apply(fb, s, gp)
+                    hs = hs + gp
+                end if
                 predicted = -(dot_product(grad, s) + 0.5_dp*dot_product(s, hs))
                 call ideal_fb_step(fb, s, 1.0_dp)
                 call exact_blocks(fb, st)
@@ -6333,6 +6533,42 @@ contains
         end do
         if (factored) call sparse_destroy(solver)
     contains
+        subroutine sheet_krylov(rhs, x, info)
+            ! Solve (K + delta diag(shift) + V) x = rhs, K the bordered plasma
+            ! matrix and V the reduced vacuum Hessian, by GMRES on K_V P^-1 y =
+            ! rhs with P the factored plasma block; x = P^-1 y.
+            real(dp), intent(in) :: rhs(:)
+            real(dp), intent(inout) :: x(:)
+            integer, intent(out) :: info
+            real(dp) :: y(size(rhs)), res
+            integer :: its
+            y = rhs
+            call real_gmres_operator(preconditioned, rhs, y, 1.0e-10_dp, 300, 60, info, &
+                its, res)
+            if (talk) print '(a,i4,a,es9.2)', '   gmres', its, ' residual', res
+            if (info /= 0 .and. res > 1.0e-6_dp*norm2(rhs)) return
+            info = 0
+            call inertia_newton_solve(opt, solver, y, x, st)
+            if (st /= INERTIA_NEWTON_OK) info = 1
+        end subroutine sheet_krylov
+
+        subroutine preconditioned(y, out)
+            real(dp), intent(in) :: y(:)
+            real(dp), intent(out) :: out(:)
+            real(dp) :: z(size(y)), v(fb%n)
+            integer :: r, q, stl
+            call inertia_newton_solve(opt, solver, y, z, stl)
+            do r = 1, size(y)
+                out(r) = 0
+                do q = srows(r), srows(r + 1) - 1
+                    out(r) = out(r) + smat(q)*z(scols(q))
+                end do
+            end do
+            out(:fb%n) = out(:fb%n) + delta*shift(:fb%n)*z(:fb%n)
+            call sheet_vacuum_apply(fb, z(:fb%n), v)
+            out(:fb%n) = out(:fb%n) + v
+        end subroutine preconditioned
+
         function csr_apply(x) result(y)
             real(dp), intent(in) :: x(:)
             real(dp) :: y(size(x))
@@ -6351,7 +6587,7 @@ contains
         type(ideal_fb_t), intent(in) :: fb
         real(dp), allocatable :: u(:)
         if (allocated(fb%sheet)) then
-            u = [reshape(fb%plasma%x, [size(fb%plasma%x)]), sheet_phi(fb)]
+            u = reshape(fb%plasma%x, [size(fb%plasma%x)])
             return
         end if
         u = [reshape(fb%plasma%x, [size(fb%plasma%x)]), fb%bem%tau, fb%bem%psi_hat]
@@ -6363,10 +6599,7 @@ contains
         integer :: n
         n = size(fb%plasma%x)
         fb%plasma%x = reshape(u(:n), shape(fb%plasma%x))
-        if (allocated(fb%sheet)) then
-            call set_sheet_phi(fb, u(n + 1:))
-            return
-        end if
+        if (allocated(fb%sheet)) return
         fb%bem%tau = u(n + 1:n + fb%bem%nt)
         fb%bem%psi_hat = u(n + fb%bem%nt + 1)
     end subroutine set_state_vector
