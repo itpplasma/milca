@@ -17,7 +17,8 @@ module milca_gs_readback
 contains
     subroutine read_gs_equilibrium(state, f_edge, ffprime, radial_points, &
                                    angular_points, result, status, law, &
-                                   psi_bound, plasma_cell, rho_grid, bulk_quantities)
+                                   psi_bound, plasma_cell, rho_grid, bulk_quantities, &
+                                   boundary_inset)
         !! Flux-surface readback: q, normalised toroidal flux, volume and edge
         !! toroidal flux on rho = sqrt((psi - psi_a)/(psi_b - psi_a)) levels.
         !!
@@ -43,13 +44,16 @@ contains
         real(dp), intent(in), optional :: psi_bound
         logical, intent(in), optional :: plasma_cell(:), bulk_quantities
         real(dp), intent(in), optional :: rho_grid(:)
+        !> Read the boundary level this fraction of the flux depth inside
+        !> (a separatrix, where q diverges); default 0.
+        real(dp), intent(in), optional :: boundary_inset
         type(equilibrium_state_t) :: eq
         status = 1
         if (present(plasma_cell) .and. .not. present(psi_bound)) return
         if (.not. all(ieee_is_finite([f_edge, ffprime]))) return
         if (abs(f_edge) <= tiny(1.0_dp)) return
         call gs_equilibrium(state, eq, status, f_edge, ffprime, law=law, &
-            psi_bound=psi_bound, plasma_cell=plasma_cell)
+            psi_bound=psi_bound, plasma_cell=plasma_cell, boundary_inset=boundary_inset)
         if (status /= 0) then
             status = 1
             return

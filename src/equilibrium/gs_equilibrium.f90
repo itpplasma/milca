@@ -34,6 +34,10 @@ module milca_gs_equilibrium
     type, extends(labelled_field_t) :: gs_field_t
         type(gs_state_t) :: view
         real(dp) :: orientation = 1, psi_bound = 0
+        ! Fraction of the flux depth by which contour levels stay inside
+        ! psi_bound (a separatrix, where q diverges and the contour meets
+        ! the X-point); 0 reads the boundary level itself.
+        real(dp) :: boundary_inset = 0
         real(dp) :: f_edge = 0, ffprime = 0, pprime = 0
         ! The view is the whole mesh: its boundary is the plasma boundary.
         logical :: whole = .true.
@@ -92,9 +96,11 @@ contains
         real(dp), intent(out) :: coarea(:)
         integer, intent(out) :: status
         integer, intent(out), optional :: work(:)
-        real(dp) :: axis(2)
-        call gs_level_coarea(field%view, field%orientation*(levels - field%psi_bound), &
-            angular_points, coarea, axis, status, work=work)
+        real(dp) :: axis(2), u(size(levels)), inside
+        u = field%orientation*(levels - field%psi_bound)
+        inside = field%boundary_inset*abs(minval(u))
+        where (u > -inside) u = -inside
+        call gs_level_coarea(field%view, u, angular_points, coarea, axis, status, work=work)
     end subroutine
 
     subroutine gs_field_region_integrals(field, volume, phi_tor, status)
@@ -224,7 +230,7 @@ contains
     end subroutine
 
     subroutine gs_equilibrium(state, eq, status, f_edge, ffprime, pprime, law, mu0, &
-                              psi_bound, plasma_cell, gauge)
+                              psi_bound, plasma_cell, gauge, boundary_inset)
         ! Without psi_bound the state is a fixed-boundary solution and its
         ! boundary flux must be 0 (to 1e-12); with it, the boundary flux of
         ! the whole-mesh view must equal psi_bound. gauge defaults to the
@@ -237,6 +243,7 @@ contains
         type(gs_profile_law_t), intent(in), optional :: law
         logical, intent(in), optional :: plasma_cell(:)
         integer, intent(in), optional :: gauge
+        real(dp), intent(in), optional :: boundary_inset
         type(gs_field_t), allocatable :: field
         status = 1
         if (.not. state%ready .or. state%element_order < 2) return
@@ -244,6 +251,7 @@ contains
         allocate (field)
         field%f_edge = f_edge; field%ffprime = ffprime
         if (present(pprime)) field%pprime = pprime
+        if (present(boundary_inset)) field%boundary_inset = boundary_inset
         if (present(law)) field%law = law
         if (present(psi_bound)) then
             if (.not. ieee_is_finite(psi_bound)) return

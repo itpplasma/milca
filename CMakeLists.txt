@@ -2431,6 +2431,12 @@ add_test(NAME gs_free_app_contract COMMAND ${CMAKE_COMMAND}
     -P ${CMAKE_SOURCE_DIR}/test/gs_free_app.cmake)
 set_tests_properties(gs_free_app_contract PROPERTIES TIMEOUT 900
     ENVIRONMENT "OMP_NUM_THREADS=4")
+add_test(NAME gs_free_xpoint_refit COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:gs_free> -DFIXTURES=${CMAKE_SOURCE_DIR}/test/fixtures/gs_free_xpoint
+    -DWORK=${CMAKE_BINARY_DIR}/gs_free_xpoint
+    -P ${CMAKE_SOURCE_DIR}/test/gs_free_xpoint.cmake)
+set_tests_properties(gs_free_xpoint_refit PROPERTIES TIMEOUT 900
+    ENVIRONMENT "OMP_NUM_THREADS=4")
 # The comparison producer is optional; the native solver needs no Python.
 
 add_executable(test_gs_readback_order test/test_gs_readback_order.f90)
