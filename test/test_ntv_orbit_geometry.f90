@@ -79,6 +79,7 @@ program test_ntv_orbit_geometry
     case ('energy_lorentz'); ok = energy_lorentz()
     case ('energy_conservation'); ok = energy_conservation()
     case ('energy_manufactured'); ok = energy_manufactured()
+    case ('energy_floor'); ok = energy_floor()
     case ('energy_electrons'); ok = energy_electrons()
     case default; error stop 'unknown check'
     end select
@@ -438,6 +439,35 @@ contains
             /norm2(re*abs(b)), 1e-7_dp) .and. ok
         call hp_energy_free(c%sys)
     end function energy_manufactured
+
+    !> Pitch-angle scattering on orbit geometries, whose node factors make the
+    !> preconditioner exact, solved to a tolerance below the rounding floor of
+    !> the operator: GMRES stops on the floor instead of running out of
+    !> iterations and returns the solution as converged. The error bound is
+    !> that of energy_manufactured.
+    logical function energy_floor() result(ok)
+        type(coupled_t) :: c
+        complex(dp), allocatable :: h(:), b(:), u(:)
+        real(dp), allocatable :: re(:), im(:)
+        integer :: its, status
+        call build([md], [1.0_dp], 1e-2_dp, .false., COLLOP_LORENTZ, c, status)
+        if (status /= HP_OK) error stop 'hp_energy_setup failed'
+        call smooth_vector(c, h)
+        allocate (b(size(h)), u(size(h)), re(size(h)), im(size(h)))
+        call random_number(re)
+        call random_number(im)
+        h = h + cmplx(re - 0.5_dp, im - 0.5_dp, dp)
+        call hp_energy_apply(c%sys, h, b)
+        call hp_energy_solve(c%sys, b, u, its, status, tolerance=1e-16_dp)
+        print '(a,i0,a,i0)', 'status ', status, ', GMRES iterations ', its
+        ok = status == HP_OK
+        ok = below('GMRES iterations', real(its, dp), 399.0_dp) .and. ok
+        if (status /= HP_OK) return
+        call speed_mass(c, re)
+        ok = below('solution error in the speed-mass norm, relative', norm2(re*abs(u - h)) &
+            /norm2(re*abs(h)), 1e-3_dp) .and. ok
+        call hp_energy_free(c%sys)
+    end function energy_floor
 
     !> Electrons at their own mass and 10 keV, full operator: the orbit
     !> width is a sixtieth of that of deuterium, and the finite-width kernel

@@ -76,6 +76,10 @@ module milca_dk_hp_energy
 
     real(dp), parameter :: pi = 4*atan(1.0_dp)
     real(dp), parameter :: gmres_tolerance = 1e-8_dp
+    ! Rounding in the weighted operator sets a residual floor that rises with
+    ! the mesh order (3e-8 on a 4x32x8 orbit mesh). A solve that stalls on
+    ! it is accepted up to this residual.
+    real(dp), parameter :: gmres_floor = 1e-6_dp
     integer, parameter :: gmres_restart = 40, default_iterations = 400
     ! Coarse space per node: P_l(xi) cos/sin(m theta), l < n_pitch, m <=
     ! n_mode and within n_side of each perturbation harmonic; Chebyshev
@@ -1462,18 +1466,22 @@ contains
         call full_apply(sys, h, y)
     end subroutine hp_energy_apply
 
-    !> h with N h = b by GMRES to relative tolerance 1e-8 (at most
-    !> max_iterations, default 400, else HP_NO_CONVERGENCE), iterations its.
-    subroutine hp_energy_solve(sys, b, h, its, status, max_iterations)
+    !> h with N h = b by GMRES to relative tolerance (default 1e-8), at most
+    !> max_iterations (default 400), iterations its. Restart cycles also stop
+    !> when the residual falls by less than 1 % in one; short of the
+    !> tolerance the solution is accepted up to residual gmres_floor, else
+    !> HP_NO_CONVERGENCE.
+    subroutine hp_energy_solve(sys, b, h, its, status, max_iterations, tolerance)
         type(hp_energy_system_t), intent(inout) :: sys
         complex(dp), intent(in) :: b(:)
         complex(dp), intent(out) :: h(:)
         integer, intent(out) :: its, status
         integer, intent(in), optional :: max_iterations
+        real(dp), intent(in), optional :: tolerance
         complex(dp), allocatable :: r(:), u(:)
         real(dp), allocatable :: wt(:)
-        real(dp) :: scale, residual
-        integer :: a, kk, info, max_its, st
+        real(dp) :: scale, residual, previous, tol
+        integer :: a, kk, info, max_its, st, cycle_its, n
 
         status = HP_BAD_INPUT
         its = 0
@@ -1501,12 +1509,22 @@ contains
         r = r/scale
         u = 0
         st = HP_OK
-        call complex_gmres_operator(operator, r, u, gmres_tolerance, max_its, &
-            min(gmres_restart, max_its), info, its, residual)
+        tol = gmres_tolerance
+        if (present(tolerance)) tol = tolerance
+        previous = 1
+        do
+            n = min(gmres_restart, max_its - its)
+            call complex_gmres_operator(operator, r, u, tol, n, n, info, cycle_its, &
+                residual)
+            its = its + cycle_its
+            if (st /= HP_OK .or. info == KRYLOV_OK .or. its >= max_its) exit
+            if (residual > 0.99_dp*previous) exit
+            previous = residual
+        end do
         status = st
         if (status /= HP_OK) return
         status = HP_NO_CONVERGENCE
-        if (info /= KRYLOV_OK) return
+        if (info /= KRYLOV_OK .and. residual > gmres_floor) return
         call precondition(sys, u/wt, h, status)
         if (status /= HP_OK) return
         h = scale*h
