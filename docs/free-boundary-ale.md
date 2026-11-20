@@ -1,17 +1,20 @@
-# Free boundary on a moving spline mesh with Eulerian fields
+# Free boundary on a moving mesh for both equilibrium lanes
 
 Plan of 2026-11-20 for the free-boundary gates E4, E5 and E8 of roadmap item
-P1b (3D equilibrium, [procedure](../ROADMAP.md#p1b-procedure)). It makes the
-non-nested field of [NN2](equilibrium-nonnested-nn2.md) the free-boundary
-path for nested and island cases. NN2 solves for a vector potential, the
-pressure, an electric potential and the loop voltage on a mesh that is fixed
-in space, with pressure transport and Ohm's law as closure.
+P1b (3D equilibrium, [procedure](../ROADMAP.md#p1b-procedure)). MILCA has two
+equilibrium lanes, and both get the same free boundary: a fixed outer
+surface Γ_c with an exact exterior, the coil field split off, and a mesh
+whose tangential motion is a gauge.
 
-The frozen-flux map ([ideal-map-3d.md](ideal-map-3d.md)) stays the path for
-fixed-boundary nested cases and for ideal stability (P1e). The free-boundary
-version of that map ([ideal-free-boundary.md](ideal-free-boundary.md),
-[free-boundary-nested-map-3d.md](free-boundary-nested-map-3d.md)) is no
-longer developed.
+| Lane | Model | Topology | Comparators |
+|---|---|---|---|
+| Frozen lane ([ideal-map-3d.md](ideal-map-3d.md)) | ideal MHD, unknown the map of a reference mesh, fluxes given as functions of a label per region | nested, or islands whose topology the reference fixes | VMEC family, GVEC, DESC (nested), SIESTA ideal steps and SPEC with prescribed current (fixed-topology islands) |
+| NN lane ([NN2](equilibrium-nonnested-nn2.md)) | vector potential, pressure, electric potential and loop voltage on a mesh fixed in space, closed by pressure transport and Ohm's law (or Taylor regions) | any, including islands that form and stochastic regions | SPEC and SPECTRE (Taylor regions), HINT and PIES (published results), SIESTA resistive steps |
+
+VMEC is a comparator only for nested states of the frozen lane, because only
+there both solve the same model. In 3D, nested surfaces with a smooth
+pressure are not a generic solution of ideal MHD, and VMEC imposes them
+through its coordinates. NN2 at finite resistivity opens islands there.
 
 ## 1. Reason
 
@@ -43,10 +46,10 @@ with h a scalar density on ∂Ω. A tangential motion of boundary nodes is
 therefore free unless the mesh carries physical data, as the frozen-flux map
 does. CEDRES++ and FEEQS.m avoid this by storing no physics in the mesh
 motion: the flux ψ lives on a fixed mesh, the boundary is a level set of ψ,
-and the exterior couples on a fixed curve. The plan below follows the same
-principle with NN2's fields, which also admit islands.
+and the exterior couples on a fixed curve. Sections 2 and 3 apply this to the
+NN lane, section 4 to the frozen lane.
 
-## 2. Formulation
+## 2. NN lane: formulation
 
 Every field is Eulerian, i.e. a function of position. The mesh may move, but
 by its own equation, and a tangential mesh motion changes no physical
@@ -108,7 +111,7 @@ conductivities are fitted on the seed so that target profiles of p and of
 μ₀J·B/B² are reproduced, then frozen, and the target and fit defects are
 reported.
 
-## 3. Gates
+## 3. NN lane: gates
 
 A1 to A3 run locally in seconds. A4 and A5 are single cluster jobs. G7 and G8
 are the island and free-boundary gates of
@@ -124,7 +127,61 @@ are the island and free-boundary gates of
 
 E4 and E5 follow A4 and A5. E8 also needs G7 on the island cases of E6.
 
-## 4. Work by repository
+## 4. Frozen lane
+
+The frozen lane stores b as a closed 2-form on the reference mesh,
+b = (−∂₂χ, ∂₁χ, b₃) in master coordinates, with χ the reference label
+(poloidal flux) and b₃ the toroidal-flux density. Today b₃ is sampled from
+the seed point by point, so it is frozen per material element. Ideal motion
+conserves only the toroidal flux between two χ surfaces,
+
+$$
+\Phi'(\chi) = \frac{d}{d\chi}\int_{\chi' < \chi} b_3 \, d^2s , \tag{5}
+$$
+
+for nested surfaces and irrational transform (Kruskal and Kulsrud). Every
+other feature of b₃ along a surface is a relabelling. The equilibrium must
+therefore slide material along the surfaces until b₃ is consistent with
+the new geometry. That slide is the near-null of section 1.
+
+The change is to keep only (5) frozen. The relabelling
+
+$$
+b \;\to\; b + \nabla_s f \times \nabla_s \chi \tag{6}
+$$
+
+with any scalar f(s₁, s₂, s₃) keeps χ and every flux (5), because
+∇f × ∇χ is divergence-free and tangent to the χ surfaces. In axisymmetry
+(6) changes only b₃, by −b_pol·∇f. With f a further unknown of the map,
+a tangential node slide combined with the matching f leaves B unchanged.
+The slide becomes an exact null, and a gauge fixes it: the transversal
+gauge of [ideal-map-3d.md](ideal-map-3d.md) (each node moves along a fixed
+direction across the surfaces), or the mesh equation (4) once the
+transversals become too skewed, after which the map is frozen again on the
+solved geometry. In 3D, f is the counterpart of VMEC's stream function λ
+and of the toroidal displacement ω of the transversal gauge.
+
+With islands the same holds per region, with χ the label of that region
+and (5) per region. The separatrices are region boundaries of the mesh.
+Regions without surfaces (stochastic) have no label and belong to the NN
+lane.
+
+The vacuum and the exterior are those of the NN lane: shell cells between
+Γ_p and Γ_c with a harmonic mesh, the coil field split off as in (2), and
+the map 𝒮 of (3) on Γ_c. With B_coil split off, Γ_c may cross coils and
+vessel.
+
+Gates of the frozen lane:
+
+| Gate | Case | Compared | Passed when |
+|---|---|---|---|
+| B1 relabelling null | 2D free-boundary fixture `gs_free` (seconds) | b₃ frozen per element against (5) with f free | smallest eigenvalue of the gauged Newton matrix at least 10⁻³ of the largest at fixed mesh, Newton converges quadratically with no refused full step |
+| B2 coil split | B1 with Γ_c crossing a coil | Γ_c inside the coils | same solution within the discretisation error |
+| B3 DIII-D coarse | 48 boundary nodes, one level | 65 iterations with the watchdog today | at most 10 Newton steps, same energy |
+| B4 3D nested | Landreman–Paul QA free boundary, coarse | VMEC++ on the same coils and profiles | E4 observables within the error estimate |
+| B5 fixed-topology islands | classical stellarator with 1/2 islands | SIESTA ideal steps, SPEC with prescribed current | E7 observables |
+
+## 5. Work by repository
 
 | Item | Repository | Exists | To do |
 |---|---|---|---|
@@ -140,12 +197,20 @@ E4 and E5 follow A4 and A5. E8 also needs G7 on the island cases of E6.
 | M1 NN2 on F1 spaces with (2) and (3) | MILCA | NN2 on Lagrange triangles times Fourier | residuals on the new spaces, field split, exterior coupling |
 | M2 alternating mesh loop | MILCA | boundary refit loop of `gs_free` | loop for spline maps and NN2 fields |
 | M3 profile mode B | MILCA | design | fit, freeze, defect report |
+| R1 flux-function form (5) with relabelling (6) in the frozen map, 2D then 3D | MILCA, kernels by fortsym | b per element, toroidal displacement ω, slide gauge | f as unknown, gauge, refreezing on the solved geometry |
+| R2 coil split and fixed Γ_c in the frozen-lane free boundary | MILCA | shell and per-mode exterior on Γ_c | B_coil from C, Γ_c free of the coils |
 
-## 5. Order
+## 6. Order
 
-1. A1 and A2 on the existing rectangular-patch complex and `gs_free`. P only
+Every step iterates on cases that run in seconds and at most two minutes.
+Larger cases follow only once the step is complete, in rising size, up to
+the decks of the [equilibrium benchmark](https://github.com/itpplasma/benchmark_vmec).
+
+1. B1 with R1 in 2D. Then B2 with R2 and B3.
+2. A1 and A2 on the existing rectangular-patch complex and `gs_free`. P only
    if A2 fails.
-2. F1, K and F4, then M2 and A3. F5 only if A3 fails.
-3. C, F2, S and M1, with F3 for the axisymmetric Γ_c, then A4.
-4. F3 for a shaped Γ_c, then A5.
-5. M3, then E4, E5 and, after G7, E8.
+3. F1, K and F4, then M2 and A3. F5 only if A3 fails.
+4. R1 in 3D, then B4. C, F2, S and M1, with F3 for the axisymmetric Γ_c,
+   then A4.
+5. F3 for a shaped Γ_c, then A5.
+6. B5 and M3, then E4, E5 and, after G7, E8.
