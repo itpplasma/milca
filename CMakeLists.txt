@@ -2023,6 +2023,10 @@ add_test(NAME dk_surface_device_sfincs_phi1 COMMAND test_dk_surface_device sfinc
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_ephi1_sfincs.txt)
 milca_test_labels(dk_surface_device_sfincs_phi1 fast CLASSES apps
     TARGETS test_dk_surface_device)
+add_test(NAME dk_surface_device_sfincs_quasineutral COMMAND test_dk_surface_device
+    sfincs_quasineutral ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_qn_sfincs.txt)
+milca_test_labels(dk_surface_device_sfincs_quasineutral fast CLASSES apps
+    TARGETS test_dk_surface_device)
 foreach(check geometry helical)
     add_test(NAME dk_surface_device_${check} COMMAND test_dk_surface_device ${check})
     milca_test_labels(dk_surface_device_${check} fast CLASSES apps

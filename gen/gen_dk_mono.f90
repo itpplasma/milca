@@ -1,5 +1,5 @@
 program gen_dk_mono
-    use fortsym_expr, only: expr_t, sym, num, operator(+), operator(-), &
+    use fortsym_expr, only: expr_t, sym, num, pi_expr, sqrt, operator(+), operator(-), &
         operator(*), operator(/), operator(**)
     use fortsym_diff, only: diff
     use fortsym_engine, only: engine_result_t, VERDICT_TRUE
@@ -99,7 +99,8 @@ contains
     subroutine surface_observables()
         type(expr_t) :: q, ig, density, temperature, elementary, z, phi_prime, &
             e_parallel, ln_n_prime, ln_t_prime, f1, f2, f3, scale, &
-            d(3, 3), particle, energy, flow, charge, gamma
+            d(3, 3), particle, energy, flow, charge, gamma, d3, x, vt, n1, n2, n3, &
+            delta_n, shielding
         integer :: i, j
         character(3) :: name
         call verify_surface_moments()
@@ -134,6 +135,33 @@ contains
         call writer%emit('dk_surface_torque_point', &
             [character(10) :: 'particle', 'q', 'z', 'elementary'], &
             [character(7) :: 'current', 'torque'], [charge*gamma, charge*gamma/q], ad=.true.)
+        ! Speed-node weights of the local density and flow of the solver
+        ! unknown h (f_1 = f_M sum_l h_l P_l, d3 = w x^3 exp(-x^2)): the
+        ! density 4/sqrt(pi) int x^2 exp(-x^2) h_0 and the flow (4/(3 sqrt(pi)))
+        ! v_t int x^3 exp(-x^2) h_1, both halved like the transport matrix.
+        d3 = sym('d3'); x = sym('x'); vt = sym('vt')
+        call writer%emit('dk_surface_moment_weights', &
+            [character(2) :: 'd3', 'x', 'vt'], &
+            [character(14) :: 'density_weight', 'flow_weight'], &
+            [2*d3/(sqrt(pi_expr())*x), 2*vt*d3/(3*sqrt(pi_expr()))], ad=.true.)
+        ! Local density of a species from its density moments n1, n2, n3 of the
+        ! three drives, combined like the flow of dk_surface_flux_point.
+        n1 = sym('n1'); n2 = sym('n2'); n3 = sym('n3')
+        delta_n = 2*density*(scale*(n1*f1+n2*f2)+n3*f3)
+        call writer%emit('dk_surface_density_point', &
+            [character(11) :: 'q', 'i_over_g', 'density', 'n1', 'n2', 'n3', 'f1', 'f2', 'f3'], &
+            [character(7) :: 'delta_n'], [delta_n], ad=.true.)
+        ! Linear quasineutrality: sum Z e delta_n = Phi_1 sum Z^2 e^2 n/T over
+        ! the species, the right side from the Boltzmann factor of F (kinetic)
+        ! or of the whole density (adiabatic).
+        delta_n = sym('delta_n')
+        shielding = z*z*elementary*elementary*density/temperature
+        call writer%emit('dk_surface_quasineutral_point', &
+            [character(11) :: 'z', 'density', 'temperature', 'elementary', 'delta_n'], &
+            [character(9) :: 'charge', 'shielding'], [charge*delta_n, shielding], ad=.true.)
+        call writer%emit('dk_surface_potential_point', &
+            [character(9) :: 'charge', 'shielding'], [character(4) :: 'phi1'], &
+            [sym('charge')/sym('shielding')], ad=.true.)
     end subroutine surface_observables
 
     subroutine verify_surface_moments()

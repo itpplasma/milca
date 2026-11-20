@@ -15,14 +15,20 @@
 !!   sfincs_phi1  the part of <B u_par> and of the local u_par that is linear
 !!             in a prescribed Phi_1, for the inductive drive, relative to
 !!             <B u_par> of that drive, against SFINCS
-!!             (test/data/dk_surface_helical_ephi1_sfincs.md).
+!!             (test/data/dk_surface_helical_ephi1_sfincs.md);
+!!   sfincs_quasineutral  the local density perturbation of the first-order
+!!             response and the linear quasineutral Phi_1 (adiabatic
+!!             electrons) for the density, temperature and inductive drives
+!!             against SFINCS (test/data/dk_surface_helical_qn_sfincs.md); the
+!!             density has zero surface average.
 program test_dk_surface_device
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, boozer_surface_t, load_boozer_file, &
         boozer_surface, BOOZER_OK
     use milca_dk_surface_device, only: dk_surface_input_t, dk_surface_result_t, &
         dk_surface_harmonic_t, dk_surface_geometry, dk_surface_profile, DKS_OK
-    use milca_dk_surface, only: surface_transport, surface_fluxes, SURFACE_OK
+    use milca_dk_surface, only: surface_transport, surface_fluxes, surface_density, &
+        surface_quasineutral_phi1, SURFACE_OK
     use milca_dk_collop, only: collop_species_t, collop_grid_t, collop_make_grid, COLLOP_OK
     implicit none
     real(dp), parameter :: twopi = 8*atan(1.0_dp), mu0 = 2*twopi*1e-7_dp
@@ -43,6 +49,9 @@ program test_dk_surface_device
     case ('sfincs_phi1')
         call get_command_argument(2, path)
         ok = sfincs_phi1(trim(path))
+    case ('sfincs_quasineutral')
+        call get_command_argument(2, path)
+        ok = sfincs_quasineutral(trim(path))
     case default
         print '(a)', 'unknown check '//trim(check)
         ok = .false.
@@ -228,6 +237,73 @@ contains
         end do
         close (unit)
     end function sfincs_phi1
+
+    !> Deuterium at 2 keV and 3e19 m^-3, adiabatic electrons of the same
+    !> density and temperature. Drive 1: dn/ds = -n, drive 2: dT/ds = -T,
+    !> drive 3: inductive field, its delta n/n and Phi_1 divided by its
+    !> <B u_par> [T m/s] so that the force normalisation cancels.
+    logical function sfincs_quasineutral(path) result(pass)
+        character(*), intent(in) :: path
+        integer, parameter :: nt = 11, nz = 7, np = nt*nz
+        type(boozer_file_t) :: bf
+        type(boozer_surface_t) :: surf
+        type(collop_species_t) :: sp(1), electrons(1)
+        type(collop_grid_t) :: grid
+        real(dp), allocatable :: b(:, :)
+        real(dp) :: bb0, q, ig, kappa, d(1, 1, 3, 3), lnl(1, 1), dl(np, 1, 1, 3), &
+            delta_n(np, 1), phi1(nt, nz), particle(1), energy(1), flow(1), ln_n, ln_t, &
+            e_par, expected_n(np), expected_phi(np), computed_n(np), computed_phi(np), &
+            err_n, err_phi, mean, w(np)
+        integer :: st, its, unit, cases, c, model, drive
+        call write_file('dk_surface_qn.bc', 0.03_dp)
+        call load_boozer_file('dk_surface_qn.bc', bf, st)
+        pass = st == BOOZER_OK
+        if (.not. pass) return
+        call boozer_surface(bf, s_eval, surf, st)
+        call dk_surface_geometry(surf, nt, nz, b, bb0, q, ig, kappa, st)
+        pass = st == DKS_OK
+        if (.not. pass) return
+        w = reshape(1/b**2, [np])
+        sp(1) = collop_species_t(3.3435837768e-27_dp, 1.0_dp, 3e19_dp, 2000*elementary)
+        electrons(1) = collop_species_t(9.1093837015e-31_dp, -1.0_dp, 3e19_dp, &
+            2000*elementary)
+        call collop_make_grid(6.0_dp, 12, 6, grid, st)
+        lnl = 136.0478_dp
+        open (newunit=unit, file=path, status='old')
+        read (unit, *) cases
+        do c = 1, cases
+            read (unit, *) model, drive
+            read (unit, *) expected_n
+            read (unit, *) expected_phi
+            call surface_transport(b, surf%nper, q, ig, kappa, sp, lnl, grid, model, 24, d, &
+                its, st, density_local=dl)
+            pass = pass .and. st == SURFACE_OK
+            ln_n = merge(-1/surf%psi_prime, 0.0_dp, drive == 1)
+            ln_t = merge(-1/surf%psi_prime, 0.0_dp, drive == 2)
+            e_par = merge(1.0_dp, 0.0_dp, drive == 3)
+            call surface_density(dl, q, ig, sp, [ln_n], [ln_t], 0.0_dp, e_par, delta_n, st)
+            pass = pass .and. st == SURFACE_OK
+            call surface_quasineutral_phi1(b, sp, delta_n, phi1, st, electrons)
+            pass = pass .and. st == SURFACE_OK
+            computed_n = delta_n(:, 1)/sp(1)%n
+            computed_phi = reshape(phi1, [np])
+            if (drive == 3) then
+                call surface_fluxes(d, q, ig, sp, [0.0_dp], [0.0_dp], 0.0_dp, e_par, &
+                    particle, energy, flow, st)
+                computed_n = computed_n/(bb0*flow(1))
+                computed_phi = computed_phi/(bb0*flow(1))
+            end if
+            mean = abs(sum(w*computed_n))/(sum(w)*maxval(abs(computed_n)))
+            err_n = maxval(abs(computed_n - expected_n))/maxval(abs(expected_n))
+            err_phi = maxval(abs(computed_phi - expected_phi))/maxval(abs(expected_phi))
+            print '(a,i0,a,i0,a,2es12.4,a,3es10.2)', 'SFINCS collision ', model, ', drive ', &
+                drive, ': max |delta n/n|, max |Phi_1| ', maxval(abs(computed_n)), &
+                maxval(abs(computed_phi)), ', errors density, potential, mean ', err_n, &
+                err_phi, mean
+            pass = pass .and. max(err_n, err_phi) < 2e-3_dp .and. mean < 1e-12_dp
+        end do
+        close (unit)
+    end function sfincs_quasineutral
 
     subroutine solve(delta, r, pass)
         real(dp), intent(in) :: delta

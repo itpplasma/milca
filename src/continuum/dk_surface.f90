@@ -27,10 +27,11 @@ module milca_dk_surface
     use milca_dk_ntv, only: ntv_collision_rows, NTV_OK
     use milca_dk_collop, only: collop_species_t, collop_grid_t, collop_moments
     use milca_dk_mono_leaves, only: dk_surface_electric_scale, dk_surface_force_point, &
-        dk_surface_flux_point, dk_surface_torque_point
+        dk_surface_flux_point, dk_surface_torque_point, dk_surface_moment_weights, &
+        dk_surface_density_point, dk_surface_quasineutral_point, dk_surface_potential_point
     implicit none
     private
-    public :: surface_transport, surface_fluxes
+    public :: surface_transport, surface_fluxes, surface_density, surface_quasineutral_phi1
     public :: surface_full_exb_t, surface_full_exb_setup, surface_full_exb_apply
     integer, parameter, public :: SURFACE_OK = 0, SURFACE_BAD_INPUT = 1, &
         SURFACE_SINGULAR = 2, SURFACE_NO_CONVERGENCE = 3
@@ -233,6 +234,99 @@ contains
         status = SURFACE_OK
     end subroutine surface_fluxes
 
+    !> Local density perturbation delta_n(i, a) [m^-3] of each species at the
+    !> points i of the grid, from density_local of surface_transport and the
+    !> gradients and fields of surface_fluxes.
+    subroutine surface_density(density_local, q, i_over_g, species, ln_n_prime, &
+            ln_t_prime, phi_prime, parallel_field, delta_n, status)
+        real(dp), intent(in) :: density_local(:, :, :, :), q, i_over_g, ln_n_prime(:), &
+            ln_t_prime(:), phi_prime, parallel_field
+        type(collop_species_t), intent(in) :: species(:)
+        real(dp), intent(out) :: delta_n(:, :)
+        integer, intent(out) :: status
+        real(dp), parameter :: elementary = 1.602176634e-19_dp
+        real(dp) :: forces(3, size(species))
+        real(dp), allocatable :: contribution(:)
+        integer :: ns, n, a, sb
+        status = SURFACE_BAD_INPUT
+        ns = size(species)
+        n = size(density_local, 1)
+        delta_n = 0
+        if (ns < 1 .or. any(shape(density_local) /= [n, ns, ns, 3])) return
+        if (any(shape(delta_n) /= [n, ns])) return
+        if (size(ln_n_prime) /= ns .or. size(ln_t_prime) /= ns) return
+        if (.not. all(ieee_is_finite([q, i_over_g, phi_prime, parallel_field]))) return
+        if (q == 0 .or. q+i_over_g == 0) return
+        if (.not. all(ieee_is_finite(density_local))) return
+        do a = 1, ns
+            if (species(a)%n <= 0 .or. species(a)%t <= 0 .or. species(a)%z == 0) return
+            call dk_surface_force_point(ln_n_prime(a), ln_t_prime(a), phi_prime, &
+                parallel_field, species(a)%z, elementary, species(a)%t, &
+                forces(1, a), forces(2, a), forces(3, a))
+        end do
+        allocate (contribution(n))
+        do a = 1, ns
+            do sb = 1, ns
+                call dk_surface_density_point(q, i_over_g, species(a)%n, &
+                    density_local(:, a, sb, 1), density_local(:, a, sb, 2), &
+                    density_local(:, a, sb, 3), forces(1, sb), forces(2, sb), forces(3, sb), &
+                    contribution)
+                delta_n(:, a) = delta_n(:, a)+contribution
+            end do
+        end do
+        if (.not. all(ieee_is_finite(delta_n))) return
+        status = SURFACE_OK
+    end subroutine surface_density
+
+    !> Linear quasineutral potential phi1 [V] on the grid of b: the charge
+    !> sum_a Z_a e delta_n_a of the kinetic species equals Phi_1 sum Z^2 e^2 n/T
+    !> over the kinetic species (Boltzmann factor of F) and the adiabatic
+    !> ones, in the gauge <Phi_1> = 0 with the surface measure 1/b^2.
+    !> delta_n(i, a) [m^-3] as from surface_density, point i = i_theta +
+    !> n_theta (i_zeta - 1).
+    subroutine surface_quasineutral_phi1(b, species, delta_n, phi1, status, adiabatic)
+        real(dp), intent(in) :: b(:, :), delta_n(:, :)
+        type(collop_species_t), intent(in) :: species(:)
+        real(dp), intent(out) :: phi1(:, :)
+        integer, intent(out) :: status
+        type(collop_species_t), intent(in), optional :: adiabatic(:)
+        real(dp), parameter :: elementary = 1.602176634e-19_dp
+        real(dp), allocatable :: charge(:), contribution(:), parts(:), weight(:), potential(:)
+        real(dp) :: shielding, part, unused
+        integer :: n, a
+        status = SURFACE_BAD_INPUT
+        n = size(b)
+        phi1 = 0
+        if (size(species) < 1 .or. any(shape(delta_n) /= [n, size(species)])) return
+        if (any(shape(phi1) /= shape(b)) .or. any(b <= 0)) return
+        if (.not. all(ieee_is_finite(delta_n))) return
+        allocate (charge(n), contribution(n), parts(n), potential(n))
+        charge = 0
+        shielding = 0
+        do a = 1, size(species)
+            if (species(a)%n <= 0 .or. species(a)%t <= 0 .or. species(a)%z == 0) return
+            call dk_surface_quasineutral_point(species(a)%z, species(a)%n, species(a)%t, &
+                elementary, delta_n(:, a), contribution, parts)
+            charge = charge+contribution
+            shielding = shielding+parts(1)
+        end do
+        if (present(adiabatic)) then
+            do a = 1, size(adiabatic)
+                if (adiabatic(a)%n <= 0 .or. adiabatic(a)%t <= 0) return
+                if (adiabatic(a)%z == 0) return
+                call dk_surface_quasineutral_point(adiabatic(a)%z, adiabatic(a)%n, &
+                    adiabatic(a)%t, elementary, 0.0_dp, unused, part)
+                shielding = shielding+part
+            end do
+        end if
+        weight = reshape(1/b**2, [n])
+        charge = charge-sum(weight*charge)/sum(weight)
+        call dk_surface_potential_point(charge, shielding, potential)
+        phi1 = reshape(potential, shape(b))
+        if (.not. all(ieee_is_finite(phi1))) return
+        status = SURFACE_OK
+    end subroutine surface_quasineutral_phi1
+
     !> Arguments and d as in ntv_surface_coefficients; iterations the FGMRES
     !> iterations summed over the 3 n_s drives and requested tangents.
     !> electric_rate = Phi'_t G/(G+iota I) in 1/s selects incompressible
@@ -264,10 +358,12 @@ contains
     !> n_theta (i_zeta - 1). condense_isotropic (default true) condenses the
     !> isotropic x = 0 node of the collision rows, which makes the collisions
     !> conserve density exactly; false sets h_0(0) = 0 as the NTV energy
-    !> solvers do.
+    !> solvers do. density_local(i, a, sb, jf) is the local density moment
+    !> N of the response to drive jf, delta n/n = 2 (s (N_1 f_1 + N_2 f_2) +
+    !> N_3 f_3) (surface_density); its average with weight 1/b^2 is zero.
     subroutine surface_transport(b, nper, q, i_over_g, kappa, species, lnlambda, grid, &
             model, n_leg, d, iterations, status, electric_rate, d_drate, full_local_electric, &
-            phi1, d_phi, flow_local, flow_local_phi, condense_isotropic)
+            phi1, d_phi, flow_local, flow_local_phi, condense_isotropic, density_local)
         real(dp), intent(in) :: b(:, :), q, i_over_g, kappa
         integer, intent(in) :: nper, n_leg
         type(collop_species_t), intent(in) :: species(:)
@@ -283,6 +379,7 @@ contains
         real(dp), intent(out), optional :: d_phi(:, :, :, :), flow_local(:, :, :, :), &
             flow_local_phi(:, :, :, :)
         logical, intent(in), optional :: condense_isotropic
+        real(dp), intent(out), optional :: density_local(:, :, :, :)
         type(mono_factor_t) :: geo
         type(mono_factor_t), allocatable :: modes(:)
         type(surface_full_exb_t) :: full_exb
@@ -320,6 +417,10 @@ contains
         if (present(flow_local_phi)) then
             if (any(shape(flow_local_phi) /= [size(b), ns, ns, 3])) return
             flow_local_phi = 0
+        end if
+        if (present(density_local)) then
+            if (any(shape(density_local) /= [size(b), ns, ns, 3])) return
+            density_local = 0
         end if
         rate = 0
         full = .false.
@@ -402,6 +503,8 @@ contains
                 do a = 1, ns
                     d(a, sb, :, jf) = moments(x, a)
                     if (present(flow_local)) flow_local(:, a, sb, jf) = local_flow(x, a)
+                    if (present(density_local)) density_local(:, a, sb, jf) = &
+                        local_density(x, a)
                 end do
                 if (allocated(xg)) xg(:, :, :, sb, jf) = x
                 if (.not. present(d_drate)) cycle
@@ -535,15 +638,32 @@ contains
         function local_flow(h, species_index) result(value)
             real(dp), intent(in) :: h(:, 0:, :)
             integer, intent(in) :: species_index
-            real(dp) :: value(n)
+            real(dp) :: value(n), density_weight, flow_weight
             integer :: k, m
             value = 0
             do k = 1, nx
                 m = (species_index - 1)*nx + k
-                value = value + d3(k)*h(:, 1, m)
+                call dk_surface_moment_weights(d3(k), grid%x(k + 1), vt(species_index), &
+                    density_weight, flow_weight)
+                value = value + flow_weight*h(:, 1, m)
             end do
-            value = vt(species_index)/sqrt(pi)*2/3.0_dp*value
         end function local_flow
+
+        !> Local density of h, normalised like local_flow: delta n/n =
+        !> 2 (s (N_1 f_1 + N_2 f_2) + N_3 f_3), see dk_surface_density_point.
+        function local_density(h, species_index) result(value)
+            real(dp), intent(in) :: h(:, 0:, :)
+            integer, intent(in) :: species_index
+            real(dp) :: value(n), density_weight, flow_weight
+            integer :: k, m
+            value = 0
+            do k = 1, nx
+                m = (species_index - 1)*nx + k
+                call dk_surface_moment_weights(d3(k), grid%x(k + 1), vt(species_index), &
+                    density_weight, flow_weight)
+                value = value + density_weight*h(:, 0, m)
+            end do
+        end function local_density
 
         function moments(h, species_index) result(value)
             real(dp), intent(in) :: h(:, 0:, :)
