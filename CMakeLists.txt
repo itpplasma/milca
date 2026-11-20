@@ -372,6 +372,8 @@ add_library(milca_spatial ${MILCA_TRIANGLE_SOURCES}
     ${fortfem_SOURCE_DIR}/src/quadrature/triangle_level_quadrature.f90
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_kernel.f90
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_boundary_operators_2d.f90
+    ${fortfem_SOURCE_DIR}/src/generated/fortfem_gs_single_layer_shape_products.f90
+    ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_single_layer_shape_2d.f90
     ${fortfem_SOURCE_DIR}/src/estimators/bem_residual_energy.f90
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_nurbs_geometry_products.f90
     ${fortfem_SOURCE_DIR}/src/elements/bspline_feec.f90)
@@ -513,7 +515,8 @@ set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
 target_sources(milca_mhd PRIVATE src/generated/milca_vacuum_shell_leaves.f90
-    src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90)
+    src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90
+    src/mhd/ideal_fb_bem.f90 src/mhd/inertia_newton.f90)
 set_source_files_properties(src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
@@ -594,6 +597,9 @@ add_test(NAME ideal_fb_external_kink COMMAND test_ideal_free_boundary kink)
 set_tests_properties(ideal_fb_external_kink PROPERTIES ENVIRONMENT
     "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4 TIMEOUT 120)
 add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
+add_test(NAME ideal_fb_bem_derivatives COMMAND test_ideal_free_boundary bem)
+milca_test_labels(ideal_fb_bem_derivatives fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_vertical_newton COMMAND test_ideal_free_boundary vertical)
 add_executable(test_field_shell test/test_field_shell.f90)
 target_link_libraries(test_field_shell PRIVATE milca_field)
@@ -3471,6 +3477,20 @@ add_test(NAME equilibrium_nested_free-boundary-tokamak COMMAND ${CMAKE_COMMAND}
 set_tests_properties(equilibrium_nested_free-boundary-tokamak PROPERTIES
     TIMEOUT 600 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 milca_test_labels(equilibrium_nested_free-boundary-tokamak fast CLASSES mhd
+    TARGETS nested_equilibrium test_nested_equilibrium_app test_mgrid_field)
+# The same deck with the vacuum on Gamma_p and with the shell to Gamma_c:
+# two discretisations of one exterior give one equilibrium.
+add_test(NAME equilibrium_nested_free-boundary-tokamak-vacua COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:nested_equilibrium>
+    -DCHECK=$<TARGET_FILE:test_nested_equilibrium_app>
+    -DMGRID=$<TARGET_FILE:test_mgrid_field>
+    -DCONFIG=${CMAKE_SOURCE_DIR}/examples/nested-equilibrium/free-boundary-tokamak.nml
+    -DWORK=${CMAKE_BINARY_DIR}/nested-equilibrium-free-boundary-tokamak-vacua
+    "-DVACUA=bem;shell"
+    -P ${CMAKE_SOURCE_DIR}/test/check_nested_free_boundary.cmake)
+set_tests_properties(equilibrium_nested_free-boundary-tokamak-vacua PROPERTIES
+    TIMEOUT 900 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+milca_test_labels(equilibrium_nested_free-boundary-tokamak-vacua fast CLASSES mhd
     TARGETS nested_equilibrium test_nested_equilibrium_app test_mgrid_field)
 add_executable(test_ideal_fb_circuits test/test_ideal_fb_circuits.f90)
 target_link_libraries(test_ideal_fb_circuits PRIVATE milca)

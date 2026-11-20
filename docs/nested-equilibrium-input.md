@@ -36,6 +36,7 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `mgrid_file`, `extcur(k)` | MAKEGRID mgrid file of the coil groups and the current of group k (VMEC's EXTCUR) | none, 0 |
 | `mgrid_degree` | interpolation degree of the mgrid in (R, Z), 1, 3 or 5 | 5 |
 | `coupling_margin` | clearance of the coupling surface around the guess, in units of the minor radius | 0.5 |
+| `vacuum` | `auto`: `bem` for an axisymmetric deck, otherwise `shell`; `bem`: sheet current on the plasma boundary, no vacuum mesh (axisymmetric decks only); `shell`: vacuum shell between the plasma and the coupling surface | `auto` |
 
 A `hermite` profile is C1 and cubic on each knot interval; the iota integral
 from the axis is exact on it. Any other profile form (VMEC's splines, sums of
@@ -154,6 +155,15 @@ interpolated in (R, Z) by the tensor Lagrange polynomial of degree
 `mgrid_degree` (error O(h^(degree + 1))), and across its planes by the exact
 discrete Fourier series. The toroidal flux is positive: a deck with a negative
 toroidal field reverses the signs of all `extcur` and of the current.
+
+An axisymmetric deck takes `vacuum = 'bem'` by default: the vacuum is the
+coil field plus a sheet current on the plasma boundary, whose energy is a
+boundary integral of the Grad-Shafranov single layer
+(theory/derivations/free-boundary-plasma-boundary-bem.md), solved by the
+inertia-controlled Newton. The coil flux is fitted by ring sources to the
+grid nodes inside Gamma_c, which only selects those nodes; the misfit is
+printed. An up-down symmetric deck holds the vertical position. The result
+records the vacuum used in the attribute `vacuum`.
 
 The coupling surface Gamma_c is an axisymmetric curve that keeps
 `coupling_margin` times the minor radius from every cross-section of the guess
