@@ -45,7 +45,7 @@ module milca_ntv_device
     !$ use omp_lib, only: omp_get_max_threads
     use fortnum_quadrature, only: gauss_gen_laguerre, gauss_legendre
     use milca_boozer_file, only: boozer_file_t, boozer_surface_t, boozer_surface, &
-        boozer_average, BOOZER_OK
+        boozer_average, boozer_adopt_chart, BOOZER_OK
     use milca_ntv_boozer_line, only: ntv_boozer_line_t, ntv_boozer_line, NTV_LINE_OK
     use milca_dk_ntv, only: ntv_surface_t, ntv_kernel_t, ntv_factor_t, ntv_kernel, &
         ntv_f10, ntv_energy_coefficients, ntv_axisymmetric_coefficients, NTV_OK, &
@@ -269,9 +269,12 @@ contains
         k = min(max(k, 1), nband)
     end function band_of
 
-    subroutine ntv_device_profile(eq, pert, n_tor, species, prof, res, result, status)
-        type(boozer_file_t), target, intent(in) :: eq, pert
-        integer, intent(in) :: n_tor
+    subroutine ntv_device_profile(eq, pert_file, n_file, species, prof, res, result, status)
+        type(boozer_file_t), target, intent(in) :: eq
+        type(boozer_file_t), intent(in) :: pert_file
+        integer, intent(in) :: n_file
+        type(boozer_file_t), target :: pert
+        integer :: n_tor, st_chart
         type(ntv_species_t), intent(in) :: species(:)
         type(ntv_profile_t), intent(in) :: prof
         type(ntv_resolution_t), intent(in) :: res
@@ -304,6 +307,12 @@ contains
         nsp = size(species)
         status = DEVICE_BAD_INPUT
         if (ns < 1 .or. nsp < 1 .or. res%n_x < 1 .or. res%chunk < 1) return
+        ! The perturbation file and n_tor are in the file's chart (as for
+        ! NEO-2); the solvers work in the right-handed chart of eq.
+        pert = pert_file
+        call boozer_adopt_chart(pert, eq, st_chart)
+        if (st_chart /= BOOZER_OK) return
+        n_tor = nint(eq%chart)*n_file
         ! The thin coupled hp kernel takes no quasilinear sources yet.
         if (res%hp_energy .and. res%sources .and. .not. res%orbit_width .and. &
             res%collisions /= 0) return
@@ -1495,9 +1504,11 @@ contains
     !> the collision model res%collisions (nonzero) on the speed grid of res;
     !> the perturbation file only completes the surface geometry. One OpenMP
     !> unit per surface; a failed surface keeps its status and the others.
-    subroutine ntv_device_axisymmetric(eq, pert, n_tor, species, prof, res, result, status)
-        type(boozer_file_t), intent(in) :: eq, pert
-        integer, intent(in) :: n_tor
+    subroutine ntv_device_axisymmetric(eq, pert_file, n_file, species, prof, res, result, status)
+        type(boozer_file_t), intent(in) :: eq, pert_file
+        integer, intent(in) :: n_file
+        type(boozer_file_t) :: pert
+        integer :: n_tor, st_chart
         type(ntv_species_t), intent(in) :: species(:)
         type(ntv_profile_t), intent(in) :: prof
         type(ntv_resolution_t), intent(in) :: res
@@ -1510,6 +1521,12 @@ contains
         ns = size(prof%s)
         nsp = size(species)
         status = DEVICE_BAD_INPUT
+        ! The perturbation file and n_tor are in the file's chart (as for
+        ! NEO-2); the solvers work in the right-handed chart of eq.
+        pert = pert_file
+        call boozer_adopt_chart(pert, eq, st_chart)
+        if (st_chart /= BOOZER_OK) return
+        n_tor = nint(eq%chart)*n_file
         if (ns < 1 .or. nsp < 1 .or. res%collisions == 0) return
         call collop_make_grid(res%x_max, res%nelem, res%order, grid, st)
         if (st /= COLLOP_OK) return
@@ -1579,9 +1596,9 @@ contains
     end subroutine ntv_device_axisymmetric
 
     !> Orbit-width indicators (ntv_indicator_t) on every surface of the profile.
-    subroutine ntv_device_indicators(eq, pert, n_tor, species, prof, res, ind, status)
-        type(boozer_file_t), intent(in) :: eq, pert
-        integer, intent(in) :: n_tor
+    subroutine ntv_device_indicators(eq, pert_file, n_file, species, prof, res, ind, status)
+        type(boozer_file_t), intent(in) :: eq, pert_file
+        integer, intent(in) :: n_file
         type(ntv_species_t), intent(in) :: species(:)
         type(ntv_profile_t), intent(in) :: prof
         type(ntv_resolution_t), intent(in) :: res
@@ -1589,8 +1606,14 @@ contains
         integer, intent(out) :: status
         type(ntv_surface_t) :: sf
         real(dp) :: j0, dpsi_dr, psi_pol_s, g_cov, b2, ds_dr, ln, lt, va
-        integer :: i, a, nsp
+        type(boozer_file_t) :: pert
+        integer :: i, a, nsp, n_tor
         nsp = size(species)
+        status = DEVICE_BAD_INPUT
+        pert = pert_file
+        call boozer_adopt_chart(pert, eq, i)
+        if (i /= BOOZER_OK) return
+        n_tor = nint(eq%chart)*n_file
         allocate (ind(size(prof%s)))
         do i = 1, size(prof%s)
             call surface(eq, pert, n_tor, prof%s(i), res, sf, j0, dpsi_dr, psi_pol_s, status, &
@@ -1893,9 +1916,9 @@ contains
         call boozer_average(es, 2*res%n_theta, 1, grad_s, b2)
         dpsi_dr = psi_pol_s*grad_s
         if (present(g_cov)) g_cov = es%g_cov
-        ! NEO-2 counts Omega_tE and V_phi along the toroidal direction in which
-        ! the covariant field is -G of the file (ITER TC24 and AUG 30835).
-        if (present(g_phi)) g_phi = -es%g_cov
+        ! NEO-2 counts Omega_tE and V_phi along phi_B of the file (ITER TC24 and
+        ! AUG 30835), where the covariant field is chart G.
+        if (present(g_phi)) g_phi = es%chart*es%g_cov
         if (present(b2_avg)) b2_avg = b2
         if (present(b_ref)) b_ref = line%bref
         if (present(vprime)) vprime = abs(es%psi_prime*(es%g_cov + es%iota*es%i_cov)) &

@@ -7,12 +7,17 @@
 !!   R = sum rmnc cos(a) + rmns sin(a), Z = sum zmns sin(a) + zmnc cos(a),
 !!   B = sum bmnc cos(a) + bmns sin(a),
 !!   phi = phi_B - (2 pi/N_p) sum (vmns sin(a) + vmnc cos(a)),
-!!   a = m theta - n N_p phi_B,
+!!   a = m theta - n N_p phi_B, in the file's chart;
 !! as in NEO-2 (`neo_sub.f90`). The radial factor s^p uses
 !! p = min(|m|, 12 + modulo(|m|, 2))/2, matching NEO-2's bounded regularity
 !! normalization. The cap limits roundoff amplification near the axis while
 !! preserving even/odd parity. Normalized coefficients and iota use not-a-knot
 !! cubic splines; surfaces outside the tabulated range are refused.
+!! The currents with Ampere's law of the chart orientation and iota fix the
+!! field; the flux takes the sign the Boozer form then requires, and a
+!! left-handed chart is turned right-handed by phi_B -> -phi_B (orient_chart):
+!! every surface and point is in the right-handed chart, with n, iota, G, I
+!! and psi of that chart and phi = chart phi_B - ...
 !! Lengths in m, |B| in T, |grad s| in 1/m.
 module milca_boozer_file
     use, intrinsic :: iso_fortran_env, only: dp => real64
@@ -24,10 +29,10 @@ module milca_boozer_file
     private
     public :: boozer_file_t, boozer_surface_t, boozer_point_t
     public :: load_boozer_file, boozer_surface, boozer_point, boozer_average
-    public :: boozer_jacobian_ratio
+    public :: boozer_jacobian_ratio, boozer_adopt_chart
     public :: boozer_field_t, boozer_field, boozer_field_eval, boozer_iota, &
         boozer_iota_integral, boozer_harmonics, spline_value
-    integer, parameter, public :: BOOZER_OK = 0, BOOZER_OUTSIDE = 1
+    integer, parameter, public :: BOOZER_OK = 0, BOOZER_OUTSIDE = 1, BOOZER_ORIENTATION = 2
 
     real(dp), parameter :: twopi = 8*atan(1.0_dp)
     real(dp), parameter :: mu0 = 2*twopi*1e-7_dp
@@ -55,6 +60,10 @@ module milca_boozer_file
 
     type :: boozer_file_t
         type(bc_data_t) :: d
+        ! -1 when the file's chart was left-handed: phi_c = chart phi_B - ...
+        real(dp) :: chart = 1
+        ! False for a file without geometry or currents, whose chart is unknown.
+        logical :: oriented = .false.
         ! Columns: iota, then rmnc, zmns, vmns, bmnc, rmns, zmnc, vmnc, bmns
         ! divided by s^radial_power(m), then the poloidal and toroidal currents.
         type(cubic_spline_t) :: spline
@@ -67,6 +76,7 @@ module milca_boozer_file
         ! Covariant Boozer components G, I [T m], their s derivatives and
         ! dpsi_tor/ds [T m^2].
         real(dp) :: g_cov = 0, i_cov = 0, g_cov_s = 0, i_cov_s = 0, psi_prime = 0
+        real(dp) :: chart = 1
         integer :: nper = 1
         integer, allocatable :: m(:), n(:)
         ! Symmetric parts (rmnc, zmns, vmns, bmnc) and their s derivatives,
@@ -126,8 +136,87 @@ contains
             status = BOOZER_OUTSIDE
             return
         end if
+        call orient_chart(bf, status)
+        if (status /= BOOZER_OK) return
         call boozer_field(bf, 0, bf%axi)
     end subroutine load_boozer_file
+
+    !> The file has no handedness flag, and producers differ in the sign of
+    !> the flux. The currents, with Ampere's law in the orientation of the
+    !> chart, and iota fix B; the Boozer form 1/sqrt(g) = B^2/(psi' (G + iota I))
+    !> then needs sign(psi' (G + iota I)) = sign(J), J = X_s . (X_theta x X_phiB)
+    !> in the right-handed cylinder:
+    !>   G = sign(J) mu0 N curr_pol/(2 pi), I = sign(J) mu0 curr_tor/(2 pi),
+    !>   psi' = sign(J (G + iota I)) |flux|/(2 pi).
+    !> A left-handed chart is then turned right-handed by phi_B -> -phi_B:
+    !> n -> -n, iota -> -iota, G -> -G, with I and psi unchanged, so the
+    !> consumers' right-handed Boozer formulas hold. A chart whose J changes
+    !> sign on the middle surface is refused; a file without geometry or
+    !> currents is kept and can follow another file (boozer_adopt_chart).
+    subroutine orient_chart(bf, status)
+        type(boozer_file_t), intent(inout) :: bf
+        integer, intent(out) :: status
+        type(boozer_surface_t) :: surf
+        type(boozer_point_t) :: p
+        real(dp) :: jac(4), g_cov, i_cov
+        integer :: k
+        call boozer_surface(bf, bf%d%s((bf%d%nsurf + 1)/2), surf, status)
+        if (status /= BOOZER_OK) return
+        status = BOOZER_ORIENTATION
+        do k = 1, 4
+            p = boozer_point(surf, twopi*(k - 0.5_dp)/4, twopi*(k - 1)/(4*bf%d%nper))
+            jac(k) = p%jacobian
+        end do
+        ! Without geometry or currents the file carries no orientation.
+        if (all(jac == 0) .or. (surf%g_cov == 0 .and. surf%i_cov == 0)) then
+            status = BOOZER_OK
+            return
+        end if
+        if (.not. (all(jac > 0) .or. all(jac < 0))) return
+        bf%oriented = .true.
+        g_cov = sign(1.0_dp, jac(1))*surf%g_cov
+        i_cov = sign(1.0_dp, jac(1))*surf%i_cov
+        if (g_cov + surf%iota*i_cov == 0) return
+        bf%d%flux = sign(abs(bf%d%flux), jac(1)*(g_cov + surf%iota*i_cov))
+        if (jac(1) < 0) then
+            ! Left-handed Ampere law (G, I negated), then phi_B -> -phi_B
+            ! (n, iota, G negated): G keeps the file's sign, I and iota flip.
+            bf%chart = -1
+            call reverse_phi(bf)
+        end if
+        status = BOOZER_OK
+    end subroutine orient_chart
+
+    !> A perturbation file without geometry, written in the chart of its
+    !> equilibrium file ref, takes the chart ref was turned to: for chart -1,
+    !> n, iota and I change sign as in orient_chart, the coefficients do not.
+    !> Files of different oriented charts are refused.
+    subroutine boozer_adopt_chart(bf, ref, status)
+        type(boozer_file_t), intent(inout) :: bf
+        type(boozer_file_t), intent(in) :: ref
+        integer, intent(out) :: status
+        status = BOOZER_OK
+        if (bf%oriented) then
+            if (bf%chart /= ref%chart) status = BOOZER_ORIENTATION
+            return
+        end if
+        if (bf%chart == ref%chart) return
+        bf%chart = ref%chart
+        call reverse_phi(bf)
+        call boozer_field(bf, 0, bf%axi)
+    end subroutine boozer_adopt_chart
+
+    !> n, iota and I of the file read with phi_B -> -phi_B.
+    subroutine reverse_phi(bf)
+        type(boozer_file_t), intent(inout) :: bf
+        integer :: nm
+        nm = bf%d%nmode
+        bf%d%n = -bf%d%n
+        bf%spline%y(:, 1) = -bf%spline%y(:, 1)
+        bf%spline%slope(:, 1) = -bf%spline%slope(:, 1)
+        bf%spline%y(:, 3 + 8*nm) = -bf%spline%y(:, 3 + 8*nm)
+        bf%spline%slope(:, 3 + 8*nm) = -bf%spline%slope(:, 3 + 8*nm)
+    end subroutine reverse_phi
 
     !> The field of the modes with n nper = n_tor of a loaded file.
     subroutine boozer_field(bf, n_tor, fld)
@@ -352,6 +441,7 @@ contains
         call cubic_spline_eval(bf%spline, s, g, g_s)
         surf%s = s
         surf%nper = bf%d%nper
+        surf%chart = bf%chart
         surf%m = bf%d%m
         surf%n = bf%d%n
         surf%iota = g(1)
@@ -418,9 +508,9 @@ contains
             v_p = v_p + nn*(surf%vma(i)*sn - surf%vmn(i)*c)
         end do
         shift = twopi/surf%nper
-        p%phi = phi_b - shift*v
+        p%phi = surf%chart*phi_b - shift*v
         call boozer_metric(p%r, r_s, r_t, r_p, z_s, z_t, z_p, &
-            -shift*v_s, -shift*v_t, 1 - shift*v_p, &
+            -shift*v_s, -shift*v_t, surf%chart - shift*v_p, &
             p%jacobian, p%grad_s)
     end function boozer_point
 

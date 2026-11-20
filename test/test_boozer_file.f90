@@ -241,11 +241,17 @@ contains
         call boozer_surface(bf, ref(1), surf, status)
         call check('NEO-2 surface status', status == BOOZER_OK)
         call boozer_average(surf, 128, 1, grad_s, b2)
+        ! NEO-2 reports iota in the file's left-handed chart; MILCA turns it
+        ! right-handed (phi_B -> -phi_B), which negates iota.
+        call check('left-handed file turned right-handed', bf%chart < 0)
         print '(a,4es10.2)', 'relative deviation from NEO-2 (iota, diota/ds, <|grad s|>, <B^2>):', &
-            surf%iota/ref(2) - 1, surf%diota_ds/ref(3) - 1, &
+            -surf%iota/ref(2) - 1, -surf%diota_ds/ref(3) - 1, &
             grad_s*boozer_jacobian_ratio(surf, 128)/(100*ref(4)) - 1, b2/ref(5) - 1
-        call close_to('NEO-2 iota', surf%iota, ref(2), 1e-6_dp)
-        call close_to('NEO-2 diota/ds', surf%diota_ds, ref(3), 1e-4_dp)
+        call close_to('NEO-2 iota', -surf%iota, ref(2), 1e-6_dp)
+        call close_to('NEO-2 diota/ds', -surf%diota_ds, ref(3), 1e-4_dp)
+        ! Rule (3a) on this equilibrium file: G of the right-handed chart equals
+        ! the covariant B_phi of the field fixed by geometry, flux and iota.
+        call close_to('equilibrium G', surf%g_cov, -3.4875_dp, 1e-3_dp)
         ! NEO-2 divides by the flux-function Jacobian; this file's geometric
         ! Jacobian is smaller by about 1.5e-4, so compare through the ratio.
         call close_to('NEO-2 <|grad s|>', grad_s*boozer_jacobian_ratio(surf, 128)/100, &

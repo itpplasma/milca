@@ -197,13 +197,25 @@ reads a Boozer `.bc` file through libneo's `bc_file`, in the six-column
 equilibria such as AUG 30835,
 interpolates c_mn/s^(m/2), iota and the currents in s with FortNum's
 not-a-knot cubic splines (as NEO-2 splines c_mn/s^(m/2)), and returns R, Z,
-phi, |B|, the Jacobian and |grad s| at Boozer angles with NEO-2's sign
-conventions, plus Jacobian-weighted averages. A surface outside the tabulated
-range is refused. `boozer_jacobian_ratio` compares the geometric Jacobian with
+phi, |B|, the Jacobian and |grad s| at Boozer angles, plus Jacobian-weighted
+averages. A surface outside the tabulated range is refused.
+
+The file has no handedness flag, and producers differ in the sign of the flux.
+With J the signed geometric Jacobian of (s, theta, phi_B), the reader takes
+G = sign(J) mu0 N curr_pol/(2 pi) and I = sign(J) mu0 curr_tor/(2 pi) (Ampère's
+law in the orientation of the chart) and psi' = sign(J (G + iota I)) |flux|/(2 pi),
+which follows from 1/sqrt(g) = B^2/(psi'(G + iota I)). A left-handed file
+(J < 0, all files seen so far) is converted to the right-handed chart
+phi_B -> -phi_B: n, iota and G change sign, psi' and I do not, and the
+cylindrical angle is phi = -phi_B + (2 pi/N) sum v. On tok02 this gives
+G = +3.4882 T m against +3.4875 T m from geometry, flux and iota. A Jacobian of
+mixed sign is refused. A perturbation file without geometry follows its equilibrium
+file into that chart (`boozer_adopt_chart`: n, iota and I change sign), and
+the NTV device takes the toroidal mode number in the file's chart, as NEO-2. `boozer_jacobian_ratio` compares the geometric Jacobian with
 the flux-function form psi'(G + iota I)/B^2 that NEO-2 uses; on libneo's tok02
 file they differ by 1.5e-4, and with that ratio <|grad s|> agrees with NEO-2
 to 1e-10. On the AUG 30835 `axi.bc` of the NEO-2 NTV runs (ten columns,
-s = 0.4886) iota agrees with NEO-2 to 1e-16 and <|grad s|> through that ratio to 4e-8; <B^2>
+s = 0.4886) -iota agrees with NEO-2 (left-handed chart) to 1e-16 and <|grad s|> through that ratio to 4e-8; <B^2>
 with the geometric Jacobian is 8e-4 below NEO-2's flux-Jacobian average,
 which an independent 1/<1/B^2> on the same file reproduces to 3e-5. The
 metric and the axis factor s^(m/2) are FortSym leaves with JVP/VJP

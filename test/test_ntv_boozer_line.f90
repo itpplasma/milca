@@ -119,9 +119,10 @@ contains
         call check('line', status == NTV_LINE_OK)
         theta = [(0.3_dp + 1.1_dp*k, k=1, 5)]
         call line%sample(theta, stream, mirror, drift, drift2, source, measure)
-        iota = 0.9_dp - 0.3_dp*s
+        ! right-handed chart of the left-handed file: iota and I_cov change sign
+        iota = -(0.9_dp - 0.3_dp*s)
         g = mu0*jpol/twopi
-        i = mu0*itor_s*s/twopi
+        i = -mu0*itor_s*s/twopi
         psi = flux/twopi
         bmod = b0*(1 - eps*sqrt(s)*cos(theta))
         do k = 1, 5
@@ -131,7 +132,7 @@ contains
             ! dB/ds = -eps b0 cos(theta)/(2 sqrt(s))
             want = eps*b0*cos(theta(k))/(2*sqrt(s))/(iota*psi*bmod(k))
             call close_to('drift', drift(k), want, 1e-12_dp)
-            want = 2*(mu0*itor_s/twopi - g*(-0.3_dp)/iota**2)/(psi*(g + iota*i))
+            want = 2*(-mu0*itor_s/twopi - g*0.3_dp/iota**2)/(psi*(g + iota*i))
             call close_to('drift2', drift2(k), want, 1e-12_dp)
             call close_to('source', source(k), 2*b0/(3*bmod(k)), 1e-13_dp)
             call close_to('measure', measure(k), 2*(b0/bmod(k))**3, 1e-13_dp)

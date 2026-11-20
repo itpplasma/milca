@@ -98,12 +98,12 @@ contains
                 th = twopi*(i - 1)/9
                 ph = twopi*(j - 1)/7
                 exact = 1 - eps*sqrt(s_eval)*cos(th) &
-                    + delta*sqrt(s_eval)*(cos(th - ph) + 0.5_dp*sin(th - ph))
+                    + delta*sqrt(s_eval)*(cos(th + ph) + 0.5_dp*sin(th + ph))
                 err = max(err, abs(b(i, j) - exact))
             end do
         end do
-        err = max(err, abs(bb0/b0 - 1), abs(q*iota - 1), abs(ig), &
-            abs(kappa*g_cov/(iota*b0) - 1))
+        err = max(err, abs(bb0/b0 - 1), abs(q*iota + 1), abs(ig), &
+            abs(kappa*g_cov/(iota*b0) + 1))
         print '(a,es10.2)', 'helical-core geometry error ', err
         pass = err < 1e-12_dp
     end function geometry
@@ -170,7 +170,7 @@ contains
         close (unit)
     end function sfincs
 
-    !> eps = Z e Phi_1/T = 1e-4 [0.4 + cos th + 0.6 sin th + 0.5 cos(2 th - ze
+    !> eps = Z e Phi_1/T = 1e-4 [0.4 + cos th + 0.6 sin th + 0.5 cos(2 th + ze
     !> + 0.3)] on the delta = 0.03 file, deuterium at 2 keV; the force
     !> normalisation of the inductive drive cancels in both ratios. The mean
     !> of eps carries the Boltzmann factor of the drive: the varying part of
@@ -202,7 +202,7 @@ contains
                 th = twopi*(i - 1)/nt
                 ze = twopi*(j - 1)/nz
                 phi1(i, j) = 2000*1e-4_dp*(0.4_dp + cos(th) + 0.6_dp*sin(th) &
-                    + 0.5_dp*cos(2*th - ze + 0.3_dp))
+                    + 0.5_dp*cos(2*th + ze + 0.3_dp))
             end do
         end do
         open (newunit=unit, file=path, status='old')

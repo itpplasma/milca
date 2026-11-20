@@ -2,10 +2,11 @@
 
 `dk_surface_helical_sfincs.txt` holds SI fluxes for a density gradient on the
 synthetic one-period file of `test_dk_surface_device` with helical amplitude
-\(\delta = 0.03\), computed with
-[SFINCS](https://github.com/landreman/sfincs/tree/8df5453472e982df0f6ae005243ce38d57a83711)
-at 8df5453 (BSD 2-Clause), `geometryScheme=12`, PETSc 3.18 with MUMPS and
-`-mat_mumps_cntl_1 0.01` (relative residuals \(10^{-10}\) to \(10^{-14}\)).
+\(\delta = 0.03\), computed with SFINCS of
+[itpplasma/sfincs](https://github.com/itpplasma/sfincs/tree/5af5bd2dc8671f24e0f0761d0983a8dd0fe64697)
+at 5af5bd2 (BSD 2-Clause; upstream 8df5453 with the sign of \(\psi_a\) for
+`geometryScheme=12` taken from the currents), PETSc 3.23.4 with MUMPS and
+`-mat_mumps_cntl_1 0.01` (residual norms \(10^{-11}\) to \(10^{-14}\)).
 
 ## File and case
 
@@ -14,10 +15,10 @@ at 8df5453 (BSD 2-Clause), `geometryScheme=12`, PETSc 3.18 with MUMPS and
 \(\iota = 1.2\), \(G = 3.4\) T m, \(I = 0\), toroidal flux 0.785 Wb, one field
 period, surface \(s = 0.5\) (`psiN_wish=0.5`). SFINCS reads lines into a
 200-character buffer, so the file for SFINCS uses 19-character fields; the
-values are those the test writes. SFINCS converts the file to a right-handed
-system and reads it as its mirror image (\(\psi_a = -0.1249\), \(\iota = -1.2\));
-the fluxes per \(\psi\) and \(\langle Bu_\parallel\rangle\) below agree in sign
-with MILCA's reading.
+values are those the test writes. Both codes read the left-handed file in the
+right-handed chart \(\zeta=-\varphi_B\) (\(\psi_a = +0.1249\), \(\iota = -1.2\)).
+Upstream 8df5453 sets \(\psi_a = -0.1249\), which reverses
+\(\langle Bu_\parallel\rangle\) and leaves the fluxes unchanged to \(10^{-10}\).
 
 Deuterium at 2 keV and \(3\times10^{19}\,\mathrm m^{-3}\), `dNHatdpsiNs=-1`
 (\(dn/ds = -n\)), no temperature gradient or radial electric field,

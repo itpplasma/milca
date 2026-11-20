@@ -540,7 +540,8 @@ runs `surface_transport` on the surfaces of a `.bc` file, six- or ten-column
 including one period with a helical axis. Per surface it samples \(|B|\) on
 \(n_\theta\times n_\zeta\) Boozer points of one period, sets \(q=1/\iota\),
 \(I/G\) and \(\kappa=\iota B_0/(G+\iota I)\) with \(B_0\) the grid mean of \(|B|\),
-converts \(d/ds\) to \(d/d\psi\) with \(\psi'=\Phi_\mathrm{tor}'/2\pi\), and
+converts \(d/ds\) to \(d/d\psi\) with the signed \(\psi'\) of the reader
+([equilibrium-core.md](equilibrium-core.md)), and
 returns the transport matrix, \(\langle Bu_\parallel\rangle\) per species, the
 bootstrap current \(\langle j_\parallel B\rangle\), the local bootstrap current
 on the grid, and for prescribed harmonics of \(\Phi_1\) its averaged and local

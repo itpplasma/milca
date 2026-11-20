@@ -26,19 +26,19 @@ temperature gradients are zero (`dNHatdpsiNs=0`, `dTHatdpsiNs=0`).
 
 \[
 \varepsilon = \frac{Ze\Phi_1}{T} = 10^{-4}\left[0.4 + \cos\theta + 0.6\sin\theta
-+ 0.5\cos(2\theta-\zeta+0.3)\right].
++ 0.5\cos(2\theta+\zeta+0.3)\right].
 \]
 
-SFINCS reads the file as its mirror image, so `Phi1Hat` is given at
-\((\theta, -\zeta)\). Its `BHat` agrees with MILCA's \(|B|\) at \((\theta,-\zeta)\)
-to \(4\times10^{-14}\).
+Both codes read the left-handed file in the right-handed chart
+\(\zeta = -\phi_B\), so `Phi1Hat` and `flow` are on MILCA's grid. SFINCS's
+`BHat` agrees with MILCA's \(|B|\) to \(4\times10^{-14}\).
 
 The inductive drive is proportional to \(F = f_M(\psi, H)\), so it carries the
 Boltzmann factor \(e^{-\varepsilon}\). SFINCS 8df5453 builds this drive from
 `EParallelHat` without that factor. The runs therefore set `EParallelHat=0`,
 `EParallelHatSpec=1` and pass the profile \(1 - \varepsilon\) through
 `EParallelHatSpec_bcdatFile`. That file has the layout of the `.bc` file, with
-data lines `m n cos sin` in the file's convention, which SFINCS mirrors like
+data lines `m n cos sin` in the file's convention, which SFINCS converts like
 \(|B|\). The profile path with the profile 1 reproduces `EParallelHat=1` exactly.
 
 Each entry is the part linear in \(\Phi_1\) of runs at \(0\), \(\Phi_1\) and

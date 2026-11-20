@@ -716,7 +716,8 @@ contains
             s = 0.05_dp*k
             write (unit, '(a)') ' s iota curr_pol/nper curr_tor pprime sqrt g(0,0)'
             write (unit, '(a)') ' [A] [A] dp/ds,[Pa] (dV/ds)/nper'
-            write (unit, '(6es24.16)') s, 0.765_dp, -1.2e7_dp, 0.0_dp, 0.0_dp, 0.0_dp
+            ! iota = +0.765 in the right-handed chart of this left-handed file
+            write (unit, '(6es24.16)') s, -0.765_dp, -1.2e7_dp, 0.0_dp, 0.0_dp, 0.0_dp
             write (unit, '(a)') ' m n r/[m] z/[m] (phib-phi)*nper/twopi bmn/[T]'
             write (unit, '(2i5,4es24.16)') 0, 0, 1.7_dp, 0.0_dp, 0.0_dp, 2.3_dp
             write (unit, '(2i5,4es24.16)') 1, 0, 0.5_dp*sqrt(s), 0.5_dp*sqrt(s), 0.0_dp, &
