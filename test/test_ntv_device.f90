@@ -43,6 +43,12 @@ program test_ntv_device
         print '(a)', 'All tests passed!'
         stop
     end if
+    if (only == 'chart_invariance') then
+        call chart_invariance()
+        if (failures > 0) error stop 'FAIL'
+        print '(a)', 'All tests passed!'
+        stop
+    end if
     if (only == 'orbit_width_coupled') then
         call orbit_width_coupled()
         if (failures > 0) error stop 'FAIL'
@@ -917,11 +923,59 @@ contains
         call close_to('slow node: K11 against thin', wide(1, 1)%k11, thin(1, 1)%k11, 6e-2_dp)
     end subroutine orbit_width_slow_node
 
-    subroutine write_file(name, perturbation)
+    !> The left-handed file of the same field, with the perturbation and n_tor
+    !> in its chart, gives the same coefficients and torque: the reader turns
+    !> it right-handed and the device follows with the perturbation and n_tor.
+    subroutine chart_invariance()
+        type(boozer_file_t) :: eq, pert
+        type(ntv_species_t) :: sp(1)
+        type(ntv_profile_t) :: prof
+        type(ntv_resolution_t) :: res
+        type(ntv_species_result_t), allocatable :: right(:, :), left(:, :)
+        integer :: status
+        sp(1) = ntv_species_t(1.0_dp, 3.3435837768e-27_dp)
+        prof%s = [0.45_dp]
+        prof%omega_te = [2e3_dp]
+        allocate (prof%density(1, 1), prof%temperature(1, 1), prof%density_s(1, 1), &
+            prof%temperature_s(1, 1), prof%kappa(1, 1))
+        prof%density = 3e19_dp
+        prof%temperature = 2*kev
+        prof%density_s = -1e19_dp
+        prof%temperature_s = -1*kev
+        prof%kappa = 3e-4_dp
+        res%x_tol = 0
+        res%n_theta = 17
+        res%n_leg = 24
+        res%n_x = 4
+        res%thin_legendre = .true.
+        call write_file('ntv_chart_eq.bc', .false.)
+        call write_file('ntv_chart_pert.bc', .true.)
+        call load_boozer_file('ntv_chart_eq.bc', eq, status)
+        call load_boozer_file('ntv_chart_pert.bc', pert, status)
+        call ntv_device_profile(eq, pert, 3, sp, prof, res, right, status)
+        call check('chart: right-handed file', status == DEVICE_OK .and. eq%chart > 0)
+        call write_file('ntv_chart_eq.bc', .false., left=.true.)
+        call write_file('ntv_chart_pert.bc', .true., left=.true.)
+        call load_boozer_file('ntv_chart_eq.bc', eq, status)
+        call load_boozer_file('ntv_chart_pert.bc', pert, status)
+        call ntv_device_profile(eq, pert, -3, sp, prof, res, left, status)
+        call check('chart: left-handed file', status == DEVICE_OK .and. eq%chart < 0)
+        if (failures > 0) return
+        call close_to('chart: K11', left(1, 1)%k11, right(1, 1)%k11, 1e-10_dp)
+        call close_to('chart: K12', left(1, 1)%k12, right(1, 1)%k12, 1e-10_dp)
+        call close_to('chart: torque', left(1, 1)%torque, right(1, 1)%torque, 1e-10_dp)
+    end subroutine chart_invariance
+
+    !> left: the same field written in the left-handed chart phi_L = -phi
+    !> (Z, iota, curr_tor and n negated), as producers write .bc files.
+    subroutine write_file(name, perturbation, left)
         character(*), intent(in) :: name
         logical, intent(in) :: perturbation
-        integer :: unit, k, m
+        logical, intent(in), optional :: left
+        integer :: unit, k, m, h
         real(dp) :: s
+        h = 1
+        if (present(left)) h = merge(-1, 1, left)
         open (newunit=unit, file=name, status='replace', action='write')
         write (unit, '(a)') 'CC synthetic test file'
         write (unit, '(a)') ' m0b n0b nsurf nper flux/[Tm^2] a/[m] R/[m]'
@@ -931,17 +985,19 @@ contains
             s = 0.1_dp*k
             write (unit, '(a)') ' s iota curr_pol/nper curr_tor pprime sqrt g(0,0)'
             write (unit, '(a)') ' [A] [A] dp/ds,[Pa] (dV/ds)/nper'
-            write (unit, '(6es24.16)') s, 0.9_dp - 0.3_dp*s, jpol, itor_s*s, 0.0_dp, 0.0_dp
+            write (unit, '(6es24.16)') s, h*(0.9_dp - 0.3_dp*s), jpol, h*itor_s*s, 0.0_dp, &
+                0.0_dp
             write (unit, '(a)') ' m n r/[m] z/[m] (phib-phi)*nper/twopi bmn/[T]'
             if (perturbation) then
-                write (unit, '(2i5,4es24.16)') 0, 3, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp
+                write (unit, '(2i5,4es24.16)') 0, 3*h, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp
                 do m = 1, 4
-                    write (unit, '(2i5,4es24.16)') m, 3, 0.0_dp, 0.0_dp, 0.0_dp, &
+                    write (unit, '(2i5,4es24.16)') m, 3*h, 0.0_dp, 0.0_dp, 0.0_dp, &
                         1e-3_dp*b0*s**(0.5_dp*m)/m
                 end do
             else
                 write (unit, '(2i5,4es24.16)') 0, 0, r0, 0.0_dp, 0.0_dp, b0
-                write (unit, '(2i5,4es24.16)') 1, 0, a*sqrt(s), a*sqrt(s), 0.0_dp, &
+                ! Z = -a r sin(theta): a right-handed chart, read without conversion.
+                write (unit, '(2i5,4es24.16)') 1, 0, a*sqrt(s), -h*a*sqrt(s), 0.0_dp, &
                     -eps*b0*sqrt(s)
             end if
         end do
