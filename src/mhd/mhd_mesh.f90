@@ -34,7 +34,12 @@ module milca_mhd_mesh
     private
 
     real(dp), parameter :: pi = 3.14159265358979323846_dp
-    real(dp), parameter :: u_curv = 0.3_dp  !! see curvature_weight
+    real(dp), parameter :: u_curv = 0.3_dp !! see curvature_weight
+    !! Highest geometry order, that of FortFEM's triangle FEEC tables.
+    integer, parameter :: max_geo_order = 8
+    integer, parameter :: max_geo_nodes = (max_geo_order + 1)*(max_geo_order + 2)/2
+    !! Highest geometry order that damps the curvature near the axis.
+    integer, parameter :: max_blend_order = 3
 
     abstract interface
         subroutine polar_map_i(u, theta, x)
@@ -49,13 +54,13 @@ module milca_mhd_mesh
     type, public :: flux_mesh_t
         type(meridian_mesh_t) :: mm
         integer :: nring = 0
-        real(dp), allocatable :: u(:)          !! ring labels
-        integer, allocatable :: nth(:)         !! vertices per ring
-        integer, allocatable :: vfirst(:)      !! first vertex of ring j
-        integer, allocatable :: tlast(:)       !! last triangle of strip j
-        integer, allocatable :: roff(:)        !! ring edge offset of ring j
-        integer, allocatable :: ring_tri(:)    !! inner triangle of ring edge
-        type(triangle_lagrange_basis_t) :: gb  !! geometry basis
+        real(dp), allocatable :: u(:) !! ring labels
+        integer, allocatable :: nth(:) !! vertices per ring
+        integer, allocatable :: vfirst(:) !! first vertex of ring j
+        integer, allocatable :: tlast(:) !! last triangle of strip j
+        integer, allocatable :: roff(:) !! ring edge offset of ring j
+        integer, allocatable :: ring_tri(:) !! inner triangle of ring edge
+        type(triangle_lagrange_basis_t) :: gb !! geometry basis
     end type flux_mesh_t
 
     public :: polar_map_i
@@ -81,7 +86,7 @@ contains
 
         status = 1
         nr = size(u)
-        if (nr < 1 .or. n_core < 3 .or. geo < 1 .or. geo > 3) return
+        if (nr < 1 .or. n_core < 3 .or. geo < 1 .or. geo > max_geo_order) return
         if (u(1) <= 0.0_dp) return
         do j = 2, nr
             if (u(j) <= u(j - 1)) return
@@ -229,12 +234,12 @@ contains
             do i = 1, size(lat, 2)
                 l = [1.0_dp - lat(1, i) - lat(2, i), lat(1, i), lat(2, i)]
                 if (topo%triangles(3, t) == 1) then
-                    call fan_node(topo, t, l, up(1), tp(1), tp(2), map, &
+                    call fan_node(topo, t, l, up(1), tp(1), tp(2), geo, map, &
                         fm%mm%nodes(:, i, t))
                 else
                     uu = sum(l*up)
                     call map(uu, sum(l*tp), p)
-                    w = curvature_weight(uu)
+                    w = curvature_weight(uu, geo)
                     if (w < 1.0_dp) then
                         ! straight-sided triangle plus the weighted curvature
                         xs = 0.0_dp
@@ -250,7 +255,7 @@ contains
         status = 0
     end subroutine build_nodes
 
-    pure real(dp) function curvature_weight(u)
+    pure real(dp) function curvature_weight(u, geo)
         !! Weight of the curved (polar-lattice) part of a node at radial label
         !! u; zero at the axis, one for u >= u_curv.  A triangle at ring index
         !! j near the axis has a fixed angular span, so its relative
@@ -258,15 +263,21 @@ contains
         !! P_k interpolant loses order there (global order 3 for P3).  Damping
         !! the curvature as (u/u_curv)^2 makes the non-affinity O(h^2) at every
         !! ring and restores order k + 1; away from the axis the nodes are the
-        !! exact flux-surface images.
+        !! exact flux-surface images.  Above max_blend_order the weight is one:
+        !! the blend is only C1 at u_curv, which caps the interpolation error
+        !! near 1e-6, while the undamped polar lattice converges exponentially
+        !! in k.
         real(dp), intent(in) :: u
+        integer, intent(in) :: geo
         real(dp) :: s
 
+        curvature_weight = 1.0_dp
+        if (geo > max_blend_order) return
         s = min(u/u_curv, 1.0_dp)
         curvature_weight = s*s*(3.0_dp - 2.0_dp*s)
     end function curvature_weight
 
-    subroutine fan_node(topo, t, l, ur, th1, th2, map, x)
+    subroutine fan_node(topo, t, l, ur, th1, th2, geo, map, x)
         !! Node of barycentric coordinates l in the axis fan triangle t.  The
         !! polar parameters collapse at the axis (theta = (l2 th1 + l3 th2)/
         !! (l2 + l3) is direction dependent there), which makes a map through
@@ -279,6 +290,7 @@ contains
         type(mesh_2d_t), intent(in) :: topo
         integer, intent(in) :: t
         real(dp), intent(in) :: l(3), ur, th1, th2
+        integer, intent(in) :: geo
         procedure(polar_map_i) :: map
         real(dp), intent(out) :: x(2)
         real(dp) :: xr(2), d(2), tau
@@ -289,7 +301,7 @@ contains
             if (tau > 0.0_dp .and. tau < 1.0_dp .and. l(1) > 0.0_dp) then
                 call map(ur, th1 + tau*(th2 - th1), xr)
                 d = xr - ((1.0_dp - tau)*v(:, tr(1)) + tau*v(:, tr(2)))
-                x = x + curvature_weight(ur)*l(1)*d/(1.0_dp - tau)
+                x = x + curvature_weight(ur, geo)*l(1)*d/(1.0_dp - tau)
             end if
         end associate
     end subroutine fan_node
@@ -460,10 +472,10 @@ contains
         integer, intent(in) :: t
         real(dp), intent(in) :: xi, eta
         real(dp), intent(out) :: x(2), jac(2, 2)
-        ! Geometry order <= 3 has at most 10 nodes. Fixed-size scratch keeps
-        ! this per-sample kernel off the heap (runtime-sized automatic
-        ! arrays are heap allocated without -fstack-arrays).
-        real(dp) :: gv(10), gg(2, 10)
+        ! Fixed-size scratch for the largest geometry order keeps this
+        ! per-sample kernel off the heap (runtime-sized automatic arrays are
+        ! heap allocated without -fstack-arrays).
+        real(dp) :: gv(max_geo_nodes), gg(2, max_geo_nodes)
         integer :: k, st, n
 
         n = size(fm%mm%nodes, 2)

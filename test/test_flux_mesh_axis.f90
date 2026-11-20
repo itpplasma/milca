@@ -4,15 +4,17 @@ program test_flux_mesh_axis
     !! k + 1 over the whole disk, axis fan included; a non-polynomial element
     !! map in the fan triangles caps it at a lower order.  The domain area
     !! checks the geometry itself (the circle is exact on the outer ring).
+    !! Orders 4 to 8 must converge exponentially in the order instead.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_mhd_mesh, only: flux_mesh_t, flux_mesh_build, flux_mesh_geometry
     use fortfem_triangle_lagrange_arbitrary_order, only: &
         triangle_lagrange_nodes, evaluate_triangle_lagrange_basis
+    use fortnum_quadrature, only: gauss_legendre_ab
     implicit none
 
     real(dp), parameter :: pi = 3.14159265358979323846_dp
     integer, parameter :: nlev = 5
-    real(dp) :: err(nlev), area_(nlev), rate
+    real(dp) :: err(nlev), area_(nlev), rate, prev
     integer :: geo, lev, nr
     logical :: ok
 
@@ -27,6 +29,15 @@ program test_flux_mesh_axis
             ' order', rate
         ok = ok .and. rate > real(geo + 1, dp) - 0.35_dp
         if (geo >= 2) ok = ok .and. abs(area_(nlev) - pi) < 1.0e-4_dp
+    end do
+    call interp_error(4, 3, prev, area_(1))
+    do geo = 4, 8
+        call interp_error(4, geo, err(1), area_(1))
+        print '(a, i0, a, es11.3, a, f6.3)', 'geo ', geo, ' L2 err', err(1), &
+            ' ratio', err(1)/prev
+        ok = ok .and. err(1) < 0.2_dp*prev
+        ok = ok .and. abs(area_(1) - pi) < 1.0e-8_dp
+        prev = err(1)
     end do
     if (.not. ok) error stop 'test_flux_mesh_axis FAILED'
     print '(a)', 'test_flux_mesh_axis passed'
@@ -51,11 +62,9 @@ contains
         real(dp), allocatable :: u(:), lat(:, :), gv(:), gg(:, :), fn(:)
         real(dp) :: jac(2, 2), pos(2), det, w, xi, eta, uh
         integer :: st, t, k, iq, jq, nn, nq
-        real(dp), parameter :: gx(4) = [0.06943184420297371_dp, &
-            0.33000947820757187_dp, 0.66999052179242813_dp, 0.93056815579702629_dp]
-        real(dp), parameter :: gw(4) = [0.17392742256872693_dp, &
-            0.32607257743127307_dp, 0.32607257743127307_dp, 0.17392742256872693_dp]
+        real(dp) :: gx(12), gw(12)
 
+        call gauss_legendre_ab(size(gx), 0.0_dp, 1.0_dp, gx, gw)
         allocate (u(nr))
         do k = 1, nr
             u(k) = real(k, dp)/nr
