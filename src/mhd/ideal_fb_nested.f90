@@ -437,7 +437,15 @@ contains
             do e = 1, old%plasma%cells
                 call triangle_locate(old%plasma%reference(:, old%plasma%conn(:, e)), &
                     fb%plasma%reference(:, a), xi, local)
-                if (local /= 0) cycle
+                ! a point just outside the curved old boundary: the locate
+                ! reports it as outside, but its inverse of the curved cell is
+                ! valid when it maps back onto the point
+                if (local /= 0) then
+                    call triangle_basis_jet(xi, value, gradient)
+                    if (.not. norm2(matmul(old%plasma%reference(:, old%plasma%conn(:, e)), &
+                        value) - fb%plasma%reference(:, a)) < 1e-10_dp*maxval(abs( &
+                        fb%plasma%reference(:, a)))) cycle
+                end if
                 quality = minval([xi, 1 - sum(xi)])
                 if (quality > lowest) then
                     lowest = quality; found = e; best = xi

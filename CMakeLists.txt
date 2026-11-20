@@ -597,6 +597,9 @@ add_test(NAME ideal_fb_external_kink COMMAND test_ideal_free_boundary kink)
 set_tests_properties(ideal_fb_external_kink PROPERTIES ENVIRONMENT
     "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4 TIMEOUT 120)
 add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
+add_test(NAME ideal_fb_level_transfer COMMAND test_ideal_free_boundary transfer)
+milca_test_labels(ideal_fb_level_transfer fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_bem_derivatives COMMAND test_ideal_free_boundary bem)
 milca_test_labels(ideal_fb_bem_derivatives fast CLASSES mhd
     TARGETS test_ideal_free_boundary)

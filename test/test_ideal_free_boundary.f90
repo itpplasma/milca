@@ -137,6 +137,7 @@ program test_ideal_free_boundary
     use milca_ideal_free_boundary, only: ideal_fb_init_fixed, ideal_fb_fixed_mode
     use milca_ideal_free_boundary, only: ideal_fb_init_bem
     use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit, fb_coil_flux_value
+    use milca_ideal_fb_nested, only: fb_nested_plasma_mesh, fb_nested_transfer
     use milca_nested_ring_mesh, only: nested_ring_mesh
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, &
         ideal_fb_set_drive, ideal_fb_gradient, ideal_fb_hessian, ideal_fb_step, &
@@ -198,6 +199,8 @@ program test_ideal_free_boundary
         call vacuum_3d()
     case ('bem')
         call bem_checks()
+    case ('transfer')
+        call transfer_checks()
     case ('slide')
         call slide_checks()
     case ('kink')
@@ -1068,6 +1071,55 @@ contains
         end do
         print '(a)', 'derivatives ok'
     end subroutine
+
+    subroutine transfer_checks()
+        ! Resolution-level transfer of the plasma map between plasma meshes of
+        ! 16 and 32 boundary nodes on an elongated reference ellipse: new
+        ! boundary nodes lie just outside the coarser curved cells, where the
+        ! old map is extrapolated. A smooth map must transfer to the
+        ! interpolation error.
+        type(ideal_fb_t) :: old, new
+        type(gs_state_t) :: mesh
+        type(cylindrical_chart_t) :: chart
+        type(simple_field_t) :: field
+        type(fb_coil_flux_t) :: coil
+        real(dp) :: centre(2), axes(2), err, ref(2)
+        integer :: st, a
+        centre = [3.05_dp, 0.0_dp]; axes = [0.6_dp, 1.1_dp]
+        coil%source = pf(1:2, :)
+        coil%coef = mu0*pf(3, :)
+        call fb_nested_plasma_mesh(mesh, centre, axes, 16, 2, st)
+        if (st /= 0) error stop 'transfer mesh 16'
+        call ideal_fb_init_bem(old, mesh, chart, field, 1, f_vac, circulation, coil, 1, &
+            st, mu0=mu0)
+        if (st /= IDEAL_FB_OK) error stop 'transfer init 16'
+        do a = 1, old%plasma%nodes
+            old%plasma%x(1:2, 1, a) = smooth_map(old%plasma%reference(:, a))
+        end do
+        call fb_nested_plasma_mesh(mesh, centre, axes, 32, 2, st)
+        if (st /= 0) error stop 'transfer mesh 32'
+        call ideal_fb_init_bem(new, mesh, chart, field, 1, f_vac, circulation, coil, 1, &
+            st, mu0=mu0)
+        if (st /= IDEAL_FB_OK) error stop 'transfer init 32'
+        call fb_nested_transfer(new, old, st)
+        print '(a,i0)', 'transfer status ', st
+        if (st /= IDEAL_FB_OK) error stop 'level transfer failed'
+        err = 0
+        do a = 1, new%plasma%nodes
+            ref = new%plasma%reference(:, a)
+            err = max(err, norm2(new%plasma%x(1:2, 1, a) - smooth_map(ref)))
+        end do
+        print '(a,es10.3)', 'transfer: largest map error (m) ', err
+        if (err > 1.0e-3_dp) error stop 'level transfer error'
+        print '(a)', 'transfer ok'
+    end subroutine transfer_checks
+
+    pure function smooth_map(r) result(x)
+        ! a smooth map of the reference for transfer_checks
+        real(dp), intent(in) :: r(2)
+        real(dp) :: x(2)
+        x = r + 0.05_dp*[sin(r(2)), cos(r(1) - 3)]
+    end function smooth_map
 
     subroutine bem_checks()
         ! Vacuum on Gamma_p (free-boundary-plasma-boundary-bem.md): the
