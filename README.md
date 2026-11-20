@@ -21,7 +21,8 @@ Priorities are in [ROADMAP.md](ROADMAP.md), verification cases in
 ## Build
 
 You need GNU Fortran with `real128` support (version 13 or newer recommended),
-a C compiler, CMake 3.22 or newer, Ninja, BLAS/LAPACK and SuiteSparse AMD.
+a C compiler, CMake 3.22 or newer, Ninja and SuiteSparse AMD. BLAS and LAPACK
+come from FortNum.
 The first configure needs network access to fetch pinned dependencies.
 
 ```sh

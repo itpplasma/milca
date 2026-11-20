@@ -222,7 +222,9 @@ contains
                 stiffness, mass, status)
             call spectrum_space(space, stiffness, mass, lam)
             print '(a,f5.2,es18.9)', 'lowest eigenvalue, wall at', walls(j), lam(1)
-            if (lam(1) < previous) error stop 'a closer wall destabilized'
+            ! A marginal mode is zero to roundoff (about 1e-9 here), whose sign
+            ! and order carry no information.
+            if (lam(1) < previous - 1e-8_dp) error stop 'a closer wall destabilized'
             previous = lam(1)
         end do
         if (lam(1) < -1e-4_dp) error stop 'close wall did not stabilize'
