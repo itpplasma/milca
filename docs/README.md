@@ -48,7 +48,8 @@ overview and [scope and design principles](scope.md) for the long-term aims.
 - [Ideal frozen-in map equilibrium](ideal-map-3d.md),
   [boundary and profile initializer](ideal-seed-3d.md),
   [GLL map experiment](ideal-map-gll.md)
-- Free boundary: [formulation and proof obligations](free-boundary-theory.md),
+- Free boundary: [plan on a moving spline mesh](free-boundary-ale.md),
+  [formulation and proof obligations](free-boundary-theory.md),
   [map-lane free boundary](ideal-free-boundary.md),
   [circuit currents as parameters](free-boundary-nested-map-3d.md),
   [chart-backed coupling surface](free-boundary-chart-surface.md)
