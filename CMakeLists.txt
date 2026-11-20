@@ -23,7 +23,7 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
 include_directories(${CMAKE_Fortran_MODULE_DIRECTORY})
 # Dependency pins: one source used by FetchContent and by result provenance.
 set(MILCA_FORTPLOT_REVISION "1645fa41c11b5786c71bc27e5b41dae7c7bbba23")
-set(MILCA_FORTNUM_REVISION "fe1e48772f7a41304d67ad626fa7158a452a8169")
+set(MILCA_FORTNUM_REVISION "9a62001569b30c055634391ffedfec0dd8350b22")
 set(MILCA_FORTIO_REVISION 32a486e1efa507503b456fe49be4b21e32832459)
 set(FORTPLOT_BUILD_FORTARRAY_ADAPTER OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(fortplot
@@ -326,9 +326,8 @@ foreach(quantum_family fermi_gas quantum_fock quantum_evolution quantum_correlat
     set_source_files_properties(src/generated/milca_${quantum_family}_leaves.f90
         PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 endforeach()
-# Q1/Q1b partial-wave encounter: banded symmetric eigensolver from LAPACK,
-# the external numerical dependency FortNum already declares.
-find_package(LAPACK REQUIRED)
+# BLAS and LAPACK under their standard names come from FortNum
+# (fortnum_lapack77), so no system library is needed.
 target_sources(milca_pairs PRIVATE src/generated/milca_coulomb_encounter_leaves.f90
     src/pairs/radial_dvr.f90)
 target_sources(milca_quantum PRIVATE src/generated/milca_pp_fusion_leaves.f90
@@ -337,7 +336,7 @@ target_sources(milca_quantum PRIVATE src/generated/milca_pp_fusion_leaves.f90
     src/quantum/coulomb_encounter.f90 src/quantum/coulomb_kepler.f90)
 set_source_files_properties(src/generated/milca_coulomb_encounter_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
-target_link_libraries(milca_core PUBLIC LAPACK::LAPACK)
+target_link_libraries(milca_core PUBLIC fortnum_lapack77)
 option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experiment" OFF)
 # FortFEM main (block_csc assembly, Hiptmair-Xu, circulant BEM with per-harmonic
 # Steklov form #144, exact FEEC tables, split stretched BEM fans #145,
@@ -2617,7 +2616,7 @@ add_library(milca_feec_n
     ${fortfem_SOURCE_DIR}/src/bem/toroidal_mode_boundary_operators_2d.f90
     ${fortfem_SOURCE_DIR}/src/bem/meridian_magnetic_coupling.f90)
 target_link_libraries(milca_feec_n PUBLIC
-    milca_spatial milca_fft milca_sparse_direct fortsparse LAPACK::LAPACK)
+    milca_spatial milca_fft milca_sparse_direct fortsparse fortnum_lapack77)
 if(MILCA_ENABLE_OPENMP)
     target_link_libraries(milca_feec_n PUBLIC OpenMP::OpenMP_Fortran)
 endif()

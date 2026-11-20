@@ -265,8 +265,8 @@ the claimed strength of a numerical result.
 
 All sparse factorizations use FortSparse's native CPU backend explicitly.
 SuperLU, UMFPACK and MUMPS are disabled in the dependency build; no MPI runtime
-is required for these solves. BLAS/LAPACK and AMD graph ordering remain
-numerical dependencies; METIS nested dissection is optional. SPD, symmetric
+is required for these solves. BLAS and LAPACK are FortNum's, AMD graph
+ordering remains a numerical dependency, and METIS nested dissection is optional. SPD, symmetric
 indefinite and general systems keep
 their existing mathematical symmetry contracts. A native factorization failure
 is reported through the ordinary solver status.
