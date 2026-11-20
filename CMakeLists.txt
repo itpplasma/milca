@@ -2059,7 +2059,7 @@ milca_test_labels(ntv_orbit_geometry_thin_negative fast CLASSES apps
     TARGETS test_ntv_orbit_geometry)
 # The energy-coupled kernel on orbit geometries: a geometry and mesh per
 # speed node, seconds to minutes each.
-foreach(check energy_lorentz energy_manufactured energy_width energy_mixed
+foreach(check energy_lorentz energy_manufactured energy_floor energy_width energy_mixed
         energy_conservation energy_electrons)
     add_test(NAME ntv_orbit_geometry_${check} COMMAND test_ntv_orbit_geometry ${check})
     milca_test_labels(ntv_orbit_geometry_${check} slow CLASSES apps
