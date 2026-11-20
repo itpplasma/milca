@@ -135,6 +135,8 @@ program test_ideal_free_boundary
     use milca_ideal_map, only: ideal_frozen_t
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t
     use milca_ideal_free_boundary, only: ideal_fb_init_fixed, ideal_fb_fixed_mode
+    use milca_ideal_free_boundary, only: ideal_fb_init_bem
+    use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit, fb_coil_flux_value
     use milca_nested_ring_mesh, only: nested_ring_mesh
     use milca_ideal_free_boundary, only: assembly_asymmetry, ideal_fb_boundary_polygon
     use milca_ideal_fb_nested, only: fb_nested_layer_mesh, fb_nested_seed, &
@@ -197,6 +199,8 @@ program test_ideal_free_boundary
         call vacuum_ladder()
     case ('vacuum3d')
         call vacuum_3d()
+    case ('bem')
+        call bem_checks()
     case ('slide')
         call slide_checks()
     case ('kink')
@@ -1183,6 +1187,121 @@ contains
             deallocate (g, gp, gm, v, hv, du)
         end do
         print '(a)', 'derivatives ok'
+    end subroutine
+
+    subroutine bem_checks()
+        ! Vacuum on Gamma_p (free-boundary-plasma-boundary-bem.md): the
+        ! Lagrangian gradient and Newton matrix against central differences
+        ! for every block (plasma, tau, psi_hat), the exact tau and psi_hat
+        ! of the settled state, and the ring-source fit of a coil flux.
+        type(ideal_fb_t) :: fb
+        type(gs_state_t) :: mesh
+        type(cylindrical_chart_t) :: chart
+        type(simple_field_t) :: field
+        type(fb_coil_flux_t) :: coil, fitted
+        integer, allocatable :: rowptr(:), colidx(:)
+        real(dp), allocatable :: contour(:, :), val(:), g(:), gp(:), gm(:), v(:), &
+            hv(:), du(:), points(:, :), bfield(:, :), sources(:, :)
+        real(dp) :: lp, lm, l0, h, fd, an, err, scale, x(2), p0, gr(2), hs(3), q
+        real(dp) :: pe, ge(2), he(3), worst, ref, rr, zz, gg, grad4(4)
+        integer :: i, j, k, p, st, nb, nchain, n
+        nchain = 12
+        allocate (contour(2, nchain))
+        do j = 1, nchain
+            contour(:, j) = [3.05_dp + 0.6_dp*cos(2*pi*(j - 1)/nchain), &
+                0.9_dp*sin(2*pi*(j - 1)/nchain)]
+        end do
+        call initialize_gs(mesh, contour, 0.5_dp*(2*pi*0.6_dp/nchain)**2, st, 3, &
+            curved=.true., geometry_only=.true.)
+        if (st /= 0) error stop 'bem mesh'
+        coil%source = pf(1:2, :)
+        coil%coef = mu0*pf(3, :)
+        call ideal_fb_init_bem(fb, mesh, chart, field, 1, f_vac, circulation, coil, 2, &
+            st, mu0=mu0)
+        if (st /= IDEAL_FB_OK) error stop 'bem init'
+        nb = fb%bem%nt
+        allocate (g(fb%n), gp(fb%n), gm(fb%n), v(fb%n), hv(fb%n), du(fb%n))
+        call ideal_fb_gradient(fb, g, st, l0)
+        err = maxval(abs(g(fb%np + 1:)))/maxval(abs(g(1:fb%np)))
+        print '(a,es9.2)', 'bem settled |g(tau, psi)|/|g(plasma)|', err
+        if (err > 1.0e-10_dp) error stop 'settled sheet current not stationary'
+        do i = 1, fb%n
+            du(i) = 1.0e-3_dp*sin(1.3_dp*i)
+            v(i) = cos(0.71_dp*i)
+        end do
+        du(fb%np + 1:) = 1.0e-1_dp*du(fb%np + 1:)
+        call ideal_fb_step(fb, du, 1.0_dp)
+        call ideal_fb_gradient(fb, g, st, l0)
+        if (st /= IDEAL_FB_OK) error stop 'bem base state'
+        h = 1.0e-6_dp
+        call ideal_fb_step(fb, v, h)
+        call ideal_fb_gradient(fb, gp, st, lp)
+        call ideal_fb_step(fb, v, -2*h)
+        call ideal_fb_gradient(fb, gm, st, lm)
+        call ideal_fb_step(fb, v, h)
+        ! relative to the sum of |g_i v_i|: g.v cancels between the blocks
+        fd = (lp - lm)/(2*h); an = dot_product(g, v)
+        err = abs(fd - an)/max(sum(abs(g*v)), 1.0e-30_dp)
+        print '(a,2es16.8,a,es9.2)', 'bem dL.v fd/an', fd, an, ' rel', err
+        if (err > 1.0e-6_dp) error stop 'bem gradient mismatch'
+        call ideal_fb_hessian(fb, rowptr, colidx, val)
+        hv = 0
+        do i = 1, fb%n
+            do p = rowptr(i), rowptr(i + 1) - 1
+                hv(i) = hv(i) + val(p)*v(colidx(p))
+            end do
+        end do
+        gp = (gp - gm)/(2*h)
+        scale = maxval(abs(hv))
+        err = maxval(abs(gp - hv))/scale
+        print '(a,es9.2)', 'bem |Hv - fd|/|Hv|', err
+        call block_report('plasma', gp(1:fb%np), hv(1:fb%np))
+        call block_report('tau', gp(fb%np + 1:fb%np + nb), hv(fb%np + 1:fb%np + nb))
+        call block_report('psi_hat', gp(fb%n:fb%n), hv(fb%n:fb%n))
+        if (err > 1.0e-5_dp) error stop 'bem Hessian mismatch'
+        call check_symmetry(rowptr, colidx, val)
+
+        ! Fit of the PF filament flux from its field on a grid inside the
+        ! ellipse: psi up to a constant against the exact flux.
+        allocate (points(2, 400), bfield(2, 400), sources(2, 96))
+        n = 0
+        do j = 1, 20
+            do k = 1, 20
+                rr = 2.2_dp + 1.7_dp*(k - 1)/19.0_dp
+                zz = -1.4_dp + 2.8_dp*(j - 1)/19.0_dp
+                if (((rr - 3.05_dp)/0.9_dp)**2 + (zz/1.4_dp)**2 > 1) cycle
+                n = n + 1
+                points(:, n) = [rr, zz]
+                bfield(:, n) = 0
+                do i = 1, 3
+                    call gs_green_gradient(rr, zz, pf(1, i), pf(2, i), gg, grad4)
+                    bfield(:, n) = bfield(:, n) + mu0*pf(3, i)*[-grad4(2), grad4(1)]/rr
+                end do
+            end do
+        end do
+        do j = 1, 96
+            sources(:, j) = [3.05_dp, 0.0_dp] + 1.8_dp*[0.9_dp*cos(2*pi*(j - 1)/96), &
+                1.4_dp*sin(2*pi*(j - 1)/96)]
+        end do
+        call fb_coil_flux_fit(points(:, :n), bfield(:, :n), sources, fitted, st)
+        if (st /= 0) error stop 'coil flux fit'
+        x = [3.05_dp, 0.0_dp]
+        call fb_coil_flux_value(fitted, x, p0, gr, hs)
+        call fb_coil_flux_value(coil, x, pe, ge, he)
+        ref = pe - p0
+        worst = 0
+        do i = 0, 15
+            q = 2*pi*i/16
+            x = [3.05_dp + 0.6_dp*cos(q), 0.9_dp*sin(q)]
+            call fb_coil_flux_value(fitted, x, p0, gr, hs)
+            call fb_coil_flux_value(coil, x, pe, ge, he)
+            worst = max(worst, abs(p0 + ref - pe)/maxval(abs(coil%coef)), &
+                maxval(abs(hs - he))/maxval(abs(he)))
+        end do
+        print '(a,es9.2,a,es9.2)', 'coil flux fit misfit', fitted%misfit, &
+            ', worst flux/Hessian error on Gamma_p', worst
+        if (fitted%misfit > 1.0e-8_dp .or. worst > 1.0e-6_dp) error stop 'coil flux fit'
+        print '(a)', 'bem ok'
     end subroutine
 
     subroutine vertical_checks()

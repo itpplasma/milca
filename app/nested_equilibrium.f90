@@ -27,13 +27,15 @@ program nested_equilibrium
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
         ideal_fb_boundary_polygon, last_jacobian, ideal_fb_worst_shell_cell, &
-        ideal_fb_fix_vertical
+        ideal_fb_fix_vertical, ideal_fb_init_bem, ideal_fb_bem_settle
+    use milca_ideal_fb_bem, only: fb_coil_flux_t
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
     use milca_ideal_fb_nested, only: fb_nested_offset_distance, fb_nested_layer_mesh, &
         fb_nested_section, &
         fb_nested_geometry, fb_nested_mesh, &
-        fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t
+        fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t, &
+        fb_nested_plasma_mesh, fb_nested_coil_flux
     use milca_mgrid_file, only: mgrid_t, mgrid_read
     implicit none
     ! namelist storage: the toroidal modes a boundary and map need follow
@@ -111,6 +113,11 @@ program nested_equilibrium
     integer :: shell_layers
     ! Print every free-boundary Newton step.
     logical :: free_boundary_verbose
+    ! Vacuum of the free boundary: 'shell' (shell to Gamma_c) or 'bem' (sheet
+    ! current on Gamma_p, axisymmetric only; free-boundary-plasma-boundary-bem).
+    character(8) :: vacuum
+    type(fb_coil_flux_t) :: coil_flux
+    real(dp) :: bem_f_vac, bem_f_spread
     real(dp) :: shell_distance
     real(dp), allocatable :: shell_positions(:, :), shell_t(:)
     integer, allocatable :: shell_lines(:, :)
@@ -128,7 +135,7 @@ program nested_equilibrium
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
         iota_nodes, iota_tolerance, free_boundary, mgrid_file, extcur, mgrid_degree, &
-        coupling_margin, shell_layers, free_boundary_verbose
+        coupling_margin, shell_layers, free_boundary_verbose, vacuum
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -141,6 +148,7 @@ program nested_equilibrium
     iota_nodes = -1; iota_tolerance = 1e-4_dp
     free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
     coupling_margin = 0.5_dp; shell_layers = 2; free_boundary_verbose = .false.
+    vacuum = 'shell'
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -170,6 +178,11 @@ program nested_equilibrium
         error stop 'nested_equilibrium: free_boundary needs mgrid_file'
     if (free_boundary .and. .not. coupling_margin > 0) &
         error stop 'nested_equilibrium: coupling_margin must be positive'
+    if (vacuum /= 'shell' .and. vacuum /= 'bem') &
+        error stop 'nested_equilibrium: vacuum is shell or bem'
+    if (free_boundary .and. vacuum == 'bem' .and. (ntor /= 0 .or. map_ntor > 0)) &
+        error stop 'nested_equilibrium: vacuum = bem needs an axisymmetric deck'
+    if (vacuum == 'bem') shell_layers = 0
     call run%open_resolved(unit)
     write (unit, nml=nested_input)
     call run%close_resolved(unit)
@@ -380,6 +393,14 @@ contains
             grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
             fb_curve, margin_used, local, message)
         if (local /= 0) call fail(trim(message))
+        if (vacuum == 'bem') then
+            call fb_nested_coil_flux(coil_basis, extcur(:grid%nextcur), fb_centre, &
+                fb_curve, coil_flux, bem_f_vac, bem_f_spread, local)
+            if (local /= 0) call fail('the coil flux fit inside Gamma_c failed')
+            print '(a,es10.3,a,es12.4,a,es9.2)', 'coil flux fit misfit ', &
+                coil_flux%misfit, ', F_vac (T m) ', bem_f_vac, ', R B_phi spread ', &
+                bem_f_spread
+        end if
         if (shell_layers > 0) then
             call fb_nested_section(boundary_input, fb_centre, fb_axes, shell_section)
             shell_box = [grid%rmin, grid%rmax, grid%zmin, grid%zmax]
@@ -412,7 +433,12 @@ contains
         real(dp) :: closure(1), f(1), spread(1)
         integer :: local
         seed%profile = profile
-        if (shell_layers > 0) then
+        if (vacuum == 'bem') then
+            call fb_nested_plasma_mesh(mesh, fb_centre, fb_axes, nodes, degree, local)
+            if (local /= 0) call fail('the plasma mesh failed')
+            call ideal_fb_init_bem(next, mesh, chart, seed, nfp, bem_f_vac, &
+                circulation, coil_flux, degree - 1, local, nphi=1)
+        else if (shell_layers > 0) then
             call fb_nested_layer_mesh(boundary, fb_centre, fb_axes, nodes, degree, &
                 shell_layers, coupling_margin*sqrt(fb_axes(1)*fb_axes(2)), mesh, chain, &
                 shell_positions, &
@@ -435,21 +461,25 @@ contains
         ! An up-down symmetric boundary (no rbs, zbc) is solved in that
         ! symmetry like VMEC with lasym = F: the vertical position is held.
         if (.not. any(abs(boundary(2:3, :, :)) > 0)) call ideal_fb_fix_vertical(next)
-        call ideal_fb_circuits_build(next, coil_basis, circuits, local)
-        if (local /= IDEAL_FB_OK) &
-            call fail('the coil field grid does not cover the coupling surface')
-        allocate (d(next%nt, next%nmode, 1), l(next%nt, next%nmode, 1))
-        call ideal_fb_drive_traces(next, filament, [1.0_dp], d, l, closure, f, spread, &
-            local)
-        if (local /= IDEAL_FB_OK) call fail('the plasma-current traces failed')
-        filament_drive = d(:, :, 1); filament_load = l(:, :, 1)
-        ! bound of the closure of the summed coil field: a coil inside Gamma_c
-        ! (a toroidal current it encloses) shows as an n = 0 closure
-        coil_closure = sum(abs(extcur(:circuits%ncircuit))*circuits%closure)
-        call install_traces(next)
-        print '(a,es12.4,a,es10.2,a,i0,a,i0)', 'F_vac (T m)', next%f_vac, &
-            ', coil closure', coil_closure, ', unknowns ', next%n, ', modes ', &
-            ntor_level
+        if (vacuum == 'bem') then
+            print '(a,es12.4,a,i0)', 'F_vac (T m)', next%f_vac, ', unknowns ', next%n
+        else
+            call ideal_fb_circuits_build(next, coil_basis, circuits, local)
+            if (local /= IDEAL_FB_OK) &
+                call fail('the coil field grid does not cover the coupling surface')
+            allocate (d(next%nt, next%nmode, 1), l(next%nt, next%nmode, 1))
+            call ideal_fb_drive_traces(next, filament, [1.0_dp], d, l, closure, f, spread, &
+                local)
+            if (local /= IDEAL_FB_OK) call fail('the plasma-current traces failed')
+            filament_drive = d(:, :, 1); filament_load = l(:, :, 1)
+            ! bound of the closure of the summed coil field: a coil inside Gamma_c
+            ! (a toroidal current it encloses) shows as an n = 0 closure
+            coil_closure = sum(abs(extcur(:circuits%ncircuit))*circuits%closure)
+            call install_traces(next)
+            print '(a,es12.4,a,es10.2,a,i0,a,i0)', 'F_vac (T m)', next%f_vac, &
+                ', coil closure', coil_closure, ', unknowns ', next%n, ', modes ', &
+                ntor_level
+        end if
         if (.not. next%f_vac > 0) call fail('the coil toroidal field is not positive;' &
             //' reverse extcur and the current for a negative toroidal flux')
         if (first) then
@@ -578,6 +608,12 @@ contains
         real(dp), allocatable :: d(:, :), l(:, :)
         real(dp) :: f
         integer :: k, local
+        if (vacuum == 'bem') then
+            target%circulation = circulation
+            call ideal_fb_bem_settle(target, local)
+            if (local /= IDEAL_FB_OK) call fail('the sheet current is not finite')
+            return
+        end if
         d = circulation*filament_drive; l = circulation*filament_load; f = 0
         do k = 1, circuits%ncircuit
             d = d + extcur(k)*circuits%drive(:, :, k)
@@ -626,6 +662,15 @@ contains
         type(ideal_fb_t) :: start
         real(dp) :: last
         integer :: restart
+        if (vacuum == 'bem') then
+            fb%inertia_control = .true.
+            call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
+                solve_status, verbose=free_boundary_verbose, residual_tolerance=target)
+            map = fb%plasma
+            print '(a,i0,a,i0,a,es10.3)', 'free-boundary solve: status ', solve_status, &
+                ', iterations ', fb_report%iterations, ', residual ', fb_report%residual
+            return
+        end if
         if (shell_layers > 0) start = fb
         fb%inertia_control = .false.
         last = huge(1.0_dp)

@@ -86,6 +86,8 @@ module milca_ideal_free_boundary
         csc_normalize_symmetric_raw, &
         FORTSPARSE_ORDER_AMD, FORTSPARSE_LU_SUPERNODAL, &
         FORTSPARSE_SYM_INDEFINITE, sparse_inertia, FORTSPARSE_INERTIA_RELIABLE
+    use milca_ideal_fb_bem, only: fb_bem_t, fb_coil_flux_t, fb_bem_setup, &
+        fb_bem_replan, fb_bem_terms, fb_bem_exact
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t, gamma_c_3d_energy, &
         assignment(=)
     implicit none
@@ -99,6 +101,7 @@ module milca_ideal_free_boundary
     public :: ideal_fb_mode_stability, ideal_fb_mode_energies, ideal_fb_stability_t
     public :: ideal_fb_mode_inertia, ideal_fb_mode_lanczos
     public :: ideal_fb_init_fixed, ideal_fb_fixed_mode
+    public :: ideal_fb_init_bem, ideal_fb_bem_settle
     public :: ideal_fb_newton_step, ideal_fb_sensitivity
     public :: ideal_fb_slide_system, ideal_fb_hypotheses_t, ideal_fb_hypotheses
     public :: ideal_fb_hypotheses_print
@@ -287,6 +290,10 @@ module milca_ideal_free_boundary
         ! Newton-homotopy offset: when allocated, the gradient returned is
         ! g(U) - shift (shift = (1 - t) g(U0) solves g = (1 - t) g(U0)).
         real(dp), allocatable :: shift(:)
+        ! Vacuum on Gamma_p (ideal_fb_init_bem, axisymmetric): no shell and
+        ! no Gamma_c; the sheet current tau and the multiplier psi_hat follow
+        ! the plasma unknowns (layout: plasma, tau, psi_hat).
+        type(fb_bem_t), allocatable :: bem
     end type
 
     type :: ideal_fb_report_t
@@ -378,7 +385,8 @@ contains
     pure logical function ideal_fb_exterior_ready(fb) result(ready)
         ! An exterior is attached: the per-n map (cylindrical chart) or R2.
         type(ideal_fb_t), intent(in) :: fb
-        ready = allocated(fb%exterior_3d) .or. allocated(fb%s_trace)
+        ready = allocated(fb%exterior_3d) .or. allocated(fb%s_trace) .or. &
+            allocated(fb%bem)
     end function
 
     pure integer function harmonic(m)
@@ -1874,6 +1882,10 @@ contains
         integer :: st, s, m, c, p, a, k
         status = IDEAL_FB_BAD_INPUT
         if (.not. ideal_fb_exterior_ready(fb)) return
+        if (allocated(fb%bem)) then
+            call bem_gradient(fb, grad, status, lagrangian, min_jacobian)
+            return
+        end if
         allocate (gfull(fb%plasma%ndof), gx(3, fb%nmode, fb%ns), gf(fb%nmode, fb%ns), &
             res(3, fb%nmode, fb%ns), cx(3, fb%nmode, fb%ns))
         status = IDEAL_FB_OK
@@ -1963,6 +1975,10 @@ contains
         real(dp), allocatable :: cv(:)
         real(dp) :: ev, mins, cm
         integer :: e, a, m, c, l, nl, cnt, i, k, p, s, t1, t2, nsb, cap, m2
+        if (allocated(fb%bem)) then
+            call bem_hessian(fb, rowptr, colidx, val)
+            return
+        end if
         nl = 4*fb%nmode*fb%nloc
         call plasma_hessian(fb, hp)
         allocate (blocks(nl, nl, fb%ncell), gx(3, fb%nmode, fb%ns), gf(fb%nmode, fb%ns))
@@ -2284,6 +2300,10 @@ contains
                 fb%phi(m, s) = fb%phi(m, s) + alpha*du(iphi(fb, m, s))
             end do
         end do
+        if (allocated(fb%bem)) then
+            fb%bem%tau = fb%bem%tau + alpha*du(fb%np + 1:fb%np + fb%bem%nt)
+            fb%bem%psi_hat = fb%bem%psi_hat + alpha*du(fb%np + fb%bem%nt + 1)
+        end if
     end subroutine
 
     subroutine slide_directions(fb)
@@ -5362,6 +5382,10 @@ contains
         ! plasma map (each block is linear in its own unknowns).
         type(ideal_fb_t), intent(inout) :: fb
         integer, intent(out) :: status
+        if (allocated(fb%bem)) then
+            call ideal_fb_bem_settle(fb, status)
+            return
+        end if
         call ideal_fb_solve_shell_map(fb, status)
         if (status == IDEAL_FB_OK) call ideal_fb_solve_vacuum(fb, status)
         if (status == IDEAL_FB_OK) call ideal_fb_solve_multipliers(fb, status)
@@ -5888,6 +5912,359 @@ contains
         close (u)
     end subroutine
 
+    subroutine ideal_fb_init_bem(fb, mesh, chart, field, nfp, f_vac, circulation, &
+            coil, flux_degree, status, mu0, nphi, quadrature_order)
+        ! Axisymmetric plasma with the vacuum on its boundary
+        ! (theory/derivations/free-boundary-plasma-boundary-bem.md): mesh is
+        ! the plasma region alone, coil the fitted coil flux, flux_degree the
+        ! degree of the sheet current per boundary panel.  No shell, no
+        ! Gamma_c.  Unknowns: plasma (position gauge), tau, psi_hat.
+        type(ideal_fb_t), intent(out) :: fb
+        type(gs_state_t), intent(in) :: mesh
+        class(ideal_chart_t), intent(in) :: chart
+        class(ideal_frozen_t), intent(in) :: field
+        integer, intent(in) :: nfp, flux_degree
+        real(dp), intent(in) :: f_vac, circulation
+        type(fb_coil_flux_t), intent(in) :: coil
+        integer, intent(out) :: status
+        real(dp), intent(in), optional :: mu0
+        integer, intent(in), optional :: nphi, quadrature_order
+        integer, allocatable :: chain(:)
+        integer :: st
+        status = IDEAL_FB_BAD_INPUT
+        fb%nloc = size(mesh%triangles, 1)
+        if (fb%nloc /= 6 .and. fb%nloc /= 10) return
+        fb%order = merge(2, 3, fb%nloc == 6)
+        fb%nfp = nfp; fb%ntor = 0; fb%nmode = 1
+        fb%f_vac = f_vac; fb%circulation = circulation
+        status = IDEAL_FB_MAP_FAILED
+        call ideal_map_init(fb%plasma, mesh, chart, nfp, 0, st, nphi, &
+            quadrature_order, mu0)
+        if (st /= IDEAL_MAP_OK) return
+        call ideal_map_freeze(fb%plasma, field, st)
+        if (st /= IDEAL_MAP_OK) return
+        call slide_directions(fb)
+        fb%mu0 = fb%plasma%mu0
+        fb%theta_centre = fb%plasma%reference(:, fb%plasma%axis_node)
+        call chain_of_plasma(fb%plasma, fb%order, chain, st)
+        if (st /= 0) return
+        status = IDEAL_FB_BEM_FAILED
+        allocate (fb%bem)
+        fb%bem%coil = coil
+        call fb_bem_setup(fb%bem, chain, fb%plasma%x(1:2, 1, chain), fb%order, &
+            flux_degree, st)
+        if (st /= 0) return
+        fb%ns = 0; fb%ncell = 0; fb%nt = 0
+        fb%np = 2*fb%plasma%nodes; fb%nx = 0; fb%nf = fb%bem%nt
+        fb%n = fb%np + fb%bem%nt + 1
+        allocate (fb%xs(3, 1, 0), fb%phi(1, 0), fb%lam(3, 1, 0), fb%drive(0, 1), &
+            fb%load(0, 1), fb%reference(2, 0), fb%conn(fb%nloc, 0), fb%role(0), &
+            fb%det(fb%plasma%nq, 0))
+        call ideal_fb_bem_settle(fb, status)
+    end subroutine ideal_fb_init_bem
+
+    subroutine ideal_fb_bem_settle(fb, status)
+        ! tau and psi_hat stationary at the present plasma boundary.
+        type(ideal_fb_t), intent(inout) :: fb
+        integer, intent(out) :: status
+        integer :: st
+        ! fb%circulation is counterclockwise in (R, Z): -mu0 I_phi.
+        call fb_bem_exact(fb%bem, bem_coords(fb), -fb%circulation, st)
+        status = IDEAL_FB_OK
+        if (st /= 0) status = IDEAL_FB_BEM_FAILED
+    end subroutine ideal_fb_bem_settle
+
+    function bem_coords(fb) result(x)
+        ! (R, Z) of the boundary chain nodes (cylindrical chart, n = 0).
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp) :: x(2, fb%bem%nb)
+        x = fb%plasma%x(1:2, 1, fb%bem%node)
+    end function bem_coords
+
+    subroutine bem_gradient(fb, grad, status, lagrangian, min_jacobian)
+        ! L = W_p + (F^2/2 mu0) int_D |grad phi|^2 + L_v/nfp and its gradient
+        ! in the layout (plasma, tau, psi_hat).
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(out) :: grad(:)
+        integer, intent(out) :: status
+        real(dp), intent(out), optional :: lagrangian, min_jacobian
+        real(dp), allocatable :: gfull(:), gx(:), gt(:)
+        real(dp) :: wp, et, ev, gp, minp
+        integer :: st, a, m, c, b, nt
+        nt = fb%bem%nt
+        allocate (gfull(fb%plasma%ndof), gx(2*fb%bem%nb), gt(nt))
+        status = IDEAL_FB_OK
+        call ideal_map_energy(fb%plasma, fb%plasma%x, wp, st, gfull, minp)
+        if (st /= IDEAL_MAP_OK) status = IDEAL_FB_FOLDED
+        grad = 0
+        do a = 1, fb%plasma%nodes
+            do m = 1, fb%nmode
+                do c = 1, 2
+                    grad(pidx(fb, c, m, a)) = gfull(ideal_map_dof(fb%plasma, c, m, a))
+                end do
+            end do
+        end do
+        call toroidal_energy(fb, et, grad)
+        call fb_bem_terms(fb%bem, bem_coords(fb), fb%mu0, -fb%circulation, ev, gx, &
+            gt, gp)
+        do b = 1, fb%bem%nb
+            a = fb%bem%node(b)
+            do c = 1, 2
+                grad(pidx(fb, c, 1, a)) = grad(pidx(fb, c, 1, a)) &
+                    + gx(2*(b - 1) + c)/fb%nfp
+            end do
+        end do
+        grad(fb%np + 1:fb%np + nt) = gt/fb%nfp
+        grad(fb%np + nt + 1) = gp/fb%nfp
+        if (.not. ieee_is_finite(ev)) status = IDEAL_FB_BEM_FAILED
+        if (allocated(fb%shift)) grad = grad - fb%shift
+        if (present(lagrangian)) lagrangian = wp + et + ev/fb%nfp
+        if (present(min_jacobian)) min_jacobian = minp
+        last_jacobian = [minp, 1.0_dp]
+    end subroutine bem_gradient
+
+    subroutine bem_hessian(fb, rowptr, colidx, val)
+        ! Newton matrix of bem_gradient: plasma and toroidal-term blocks
+        ! (sparse) with the dense boundary-node, tau and psi_hat blocks.
+        type(ideal_fb_t), intent(in) :: fb
+        integer, allocatable, intent(out) :: rowptr(:), colidx(:)
+        real(dp), allocatable, intent(out) :: val(:)
+        type(csr_matrix_t) :: hp, ht
+        real(dp), allocatable :: gx(:), gt(:), hxx(:, :), hxt(:, :), hxp(:), &
+            htt(:, :), htp(:)
+        integer, allocatable :: ci(:), cj(:), rows(:)
+        real(dp), allocatable :: cv(:)
+        real(dp) :: ev, gp
+        integer :: i, j, p, cnt, cap, nb, nt, b, c
+        nb = fb%bem%nb; nt = fb%bem%nt
+        call plasma_hessian(fb, hp)
+        call toroidal_hessian(fb, ht)
+        allocate (gx(2*nb), gt(nt), hxx(2*nb, 2*nb), hxt(2*nb, nt), hxp(2*nb), &
+            htt(nt, nt), htp(nt), rows(2*nb))
+        call fb_bem_terms(fb%bem, bem_coords(fb), fb%mu0, -fb%circulation, ev, gx, &
+            gt, gp, hxx, hxt, hxp, htt, htp)
+        do b = 1, nb
+            do c = 1, 2
+                rows(2*(b - 1) + c) = pidx(fb, c, 1, fb%bem%node(b))
+            end do
+        end do
+        cap = size(hp%val) + size(ht%val) + (2*nb + nt + 1)**2
+        allocate (ci(cap), cj(cap), cv(cap))
+        cnt = 0
+        do i = 1, fb%np
+            do p = hp%rowptr(i), hp%rowptr(i + 1) - 1
+                call push(i, hp%colidx(p), hp%val(p))
+            end do
+            do p = ht%rowptr(i), ht%rowptr(i + 1) - 1
+                call push(i, ht%colidx(p), ht%val(p))
+            end do
+        end do
+        do j = 1, 2*nb
+            do i = 1, 2*nb
+                call push(rows(i), rows(j), hxx(i, j)/fb%nfp)
+            end do
+            do i = 1, nt
+                call push(fb%np + i, rows(j), hxt(j, i)/fb%nfp)
+                call push(rows(j), fb%np + i, hxt(j, i)/fb%nfp)
+            end do
+            call push(fb%np + nt + 1, rows(j), hxp(j)/fb%nfp)
+            call push(rows(j), fb%np + nt + 1, hxp(j)/fb%nfp)
+        end do
+        do j = 1, nt
+            do i = 1, nt
+                call push(fb%np + i, fb%np + j, htt(i, j)/fb%nfp)
+            end do
+            call push(fb%np + nt + 1, fb%np + j, htp(j)/fb%nfp)
+            call push(fb%np + j, fb%np + nt + 1, htp(j)/fb%nfp)
+        end do
+        call push(fb%np + nt + 1, fb%np + nt + 1, 0.0_dp)
+        call coo_to_csr(fb%n, ci(:cnt), cj(:cnt), cv(:cnt), rowptr, colidx, val)
+        call symmetrize_csr(rowptr, colidx, val)
+    contains
+        subroutine push(r, col, v)
+            integer, intent(in) :: r, col
+            real(dp), intent(in) :: v
+            cnt = cnt + 1
+            ci(cnt) = r; cj(cnt) = col; cv(cnt) = v
+        end subroutine
+    end subroutine bem_hessian
+
+    subroutine toroidal_point(fb, e, g, j, w, gv, hv, want_hessian)
+        ! (F^2/2 mu0) |grad q3|^2 J on a plasma point, the vacuum density of
+        ! the potential F q3 (the shell leaf with gg = F Q(3,:)), and its
+        ! derivatives in v = (q(1:3), Q(k,i) at 3 + k + 3(i-1)).
+        type(ideal_fb_t), intent(in) :: fb
+        integer, intent(in) :: e, g, j
+        real(dp), intent(out) :: w, gv(12), hv(12, 12)
+        logical, intent(in) :: want_hessian
+        real(dp) :: q(3), qd(3, 3), gg(3), pos(3), d1(3, 3), d2(3, 3, 3)
+        real(dp) :: d3(3, 3, 3, 3), dx(3, 3), gd(12), hd(12, 12), dv(12, 12)
+        real(dp) :: hflat(78), gm(3, 3), jac, tt, dt
+        integer :: a, i, k, m, n, r, c, node
+        q = 0; qd = 0
+        do a = 1, fb%nloc
+            node = fb%plasma%conn(a, e)
+            do m = 1, fb%nmode
+                tt = fb%plasma%trig(m, j); dt = fb%plasma%dtrig(m, j)
+                q = q + fb%plasma%x(:, m, node)*fb%plasma%shape(a, g)*tt
+                qd(:, 1) = qd(:, 1) + fb%plasma%x(:, m, node)*fb%plasma%dshape(1, a, g)*tt
+                qd(:, 2) = qd(:, 2) + fb%plasma%x(:, m, node)*fb%plasma%dshape(2, a, g)*tt
+                qd(:, 3) = qd(:, 3) + fb%plasma%x(:, m, node)*fb%plasma%shape(a, g)*dt
+            end do
+        end do
+        q(3) = q(3) + fb%plasma%phi(j); qd(3, 3) = qd(3, 3) + 1
+        call fb%plasma%chart%jet(q, pos, d1, d2, d3)
+        dx = matmul(d1, qd)
+        gg = fb%f_vac*qd(3, :)
+        call vacuum_energy_density(dx(1, 1), dx(2, 1), dx(3, 1), dx(1, 2), &
+            dx(2, 2), dx(3, 2), dx(1, 3), dx(2, 3), dx(3, 3), gg(1), gg(2), gg(3), &
+            fb%mu0, fb%plasma%sigma, w, jac)
+        call vacuum_energy_gradient(dx(1, 1), dx(2, 1), dx(3, 1), dx(1, 2), &
+            dx(2, 2), dx(3, 2), dx(1, 3), dx(2, 3), dx(3, 3), gg(1), gg(2), gg(3), &
+            fb%mu0, fb%plasma%sigma, gd(1), gd(2), gd(3), gd(4), gd(5), gd(6), &
+            gd(7), gd(8), gd(9), gd(10), gd(11), gd(12))
+        dv = 0
+        do i = 1, 3
+            do a = 1, 3
+                r = a + 3*(i - 1)
+                do m = 1, 3
+                    dv(r, m) = dot_product(d2(a, :, m), qd(:, i))
+                end do
+                do k = 1, 3
+                    dv(r, 3 + k + 3*(i - 1)) = d1(a, k)
+                end do
+            end do
+            dv(9 + i, 6 + 3*(i - 1)) = fb%f_vac
+        end do
+        gv = matmul(gd, dv)
+        hv = 0
+        if (.not. want_hessian) return
+        call vacuum_energy_hessian(dx(1, 1), dx(2, 1), dx(3, 1), dx(1, 2), &
+            dx(2, 2), dx(3, 2), dx(1, 3), dx(2, 3), dx(3, 3), gg(1), gg(2), &
+            gg(3), fb%mu0, fb%plasma%sigma, hflat(1), hflat(2), hflat(3), hflat(4), &
+            hflat(5), hflat(6), hflat(7), hflat(8), hflat(9), hflat(10), hflat(11), &
+            hflat(12), hflat(13), hflat(14), hflat(15), hflat(16), hflat(17), &
+            hflat(18), hflat(19), hflat(20), hflat(21), hflat(22), hflat(23), &
+            hflat(24), hflat(25), hflat(26), hflat(27), hflat(28), hflat(29), &
+            hflat(30), hflat(31), hflat(32), hflat(33), hflat(34), hflat(35), &
+            hflat(36), hflat(37), hflat(38), hflat(39), hflat(40), hflat(41), &
+            hflat(42), hflat(43), hflat(44), hflat(45), hflat(46), hflat(47), &
+            hflat(48), hflat(49), hflat(50), hflat(51), hflat(52), hflat(53), &
+            hflat(54), hflat(55), hflat(56), hflat(57), hflat(58), hflat(59), &
+            hflat(60), hflat(61), hflat(62), hflat(63), hflat(64), hflat(65), &
+            hflat(66), hflat(67), hflat(68), hflat(69), hflat(70), hflat(71), &
+            hflat(72), hflat(73), hflat(74), hflat(75), hflat(76), hflat(77), &
+            hflat(78))
+        n = 0
+        do c = 1, 12
+            do r = 1, c
+                n = n + 1
+                hd(r, c) = hflat(n); hd(c, r) = hflat(n)
+            end do
+        end do
+        hv = matmul(transpose(dv), matmul(hd, dv))
+        gm = reshape(gd(1:9), [3, 3])
+        do m = 1, 3
+            do n = 1, 3
+                do i = 1, 3
+                    do a = 1, 3
+                        hv(m, n) = hv(m, n) + gm(a, i)*dot_product(d3(a, :, m, n), &
+                            qd(:, i))
+                    end do
+                end do
+            end do
+            do i = 1, 3
+                do k = 1, 3
+                    r = 3 + k + 3*(i - 1)
+                    hv(m, r) = hv(m, r) + dot_product(gm(:, i), d2(:, k, m))
+                    hv(r, m) = hv(m, r)
+                end do
+            end do
+        end do
+    end subroutine toroidal_point
+
+    subroutine toroidal_energy(fb, energy, grad)
+        ! Toroidal-field term of L over the plasma; its gradient is added to
+        ! the plasma rows of grad.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(out) :: energy
+        real(dp), intent(inout) :: grad(:)
+        real(dp) :: w, gv(12), hv(12, 12), weight, dphi
+        real(dp), allocatable :: basis(:, :)
+        integer :: e, g, j, a, m, c, t, q, var(4, 2)
+        do c = 1, 2
+            var(:, c) = [(c + 3*t, t = 0, 3)]
+        end do
+        allocate (basis(4, fb%nmode*fb%nloc))
+        dphi = 2*pi/(fb%nfp*fb%plasma%nphi)
+        energy = 0
+        do e = 1, fb%plasma%cells
+            do j = 1, fb%plasma%nphi
+                do g = 1, fb%plasma%nq
+                    call toroidal_point(fb, e, g, j, w, gv, hv, .false.)
+                    weight = fb%plasma%weight(g)*dphi
+                    energy = energy + weight*w
+                    call point_basis(fb, g, j, basis)
+                    do a = 1, fb%nloc
+                        do m = 1, fb%nmode
+                            q = m + fb%nmode*(a - 1)
+                            do c = 1, 2
+                                grad(pidx(fb, c, m, fb%plasma%conn(a, e))) = &
+                                    grad(pidx(fb, c, m, fb%plasma%conn(a, e))) &
+                                    + weight*dot_product(gv(var(:, c)), basis(:, q))
+                            end do
+                        end do
+                    end do
+                end do
+            end do
+        end do
+    end subroutine toroidal_energy
+
+    subroutine toroidal_hessian(fb, matrix)
+        ! Hessian of the toroidal-field term (as plasma_hessian).
+        type(ideal_fb_t), intent(in) :: fb
+        type(csr_matrix_t), intent(out) :: matrix
+        real(dp), allocatable :: blocks(:, :, :), basis(:, :)
+        integer, allocatable :: conn(:, :)
+        real(dp) :: w, gv(12), hv(12, 12), weight, dphi
+        integer :: e, g, j, a, m, c, nl, t, var(4, 2)
+        nl = 2*fb%nmode*fb%nloc
+        allocate (blocks(nl, nl, fb%plasma%cells), conn(nl, fb%plasma%cells))
+        dphi = 2*pi/(fb%nfp*fb%plasma%nphi)
+        do c = 1, 2
+            var(:, c) = [(c + 3*t, t = 0, 3)]
+        end do
+        !$omp parallel default(shared) private(e, g, j, w, gv, hv, weight, basis)
+        allocate (basis(4, nl/2))
+        !$omp do schedule(static)
+        do e = 1, fb%plasma%cells
+            blocks(:, :, e) = 0
+            do j = 1, fb%plasma%nphi
+                do g = 1, fb%plasma%nq
+                    call toroidal_point(fb, e, g, j, w, gv, hv, .true.)
+                    weight = fb%plasma%weight(g)*dphi
+                    call point_basis(fb, g, j, basis)
+                    call add_point_hessian(hv, var, basis, weight, blocks(:, :, e))
+                end do
+            end do
+        end do
+        !$omp end do
+        deallocate (basis)
+        !$omp end parallel
+        do e = 1, fb%plasma%cells
+            do a = 1, fb%nloc
+                do m = 1, fb%nmode
+                    do c = 1, 2
+                        conn(c + 2*(m - 1) + 2*fb%nmode*(a - 1), e) = &
+                            pidx(fb, c, m, fb%plasma%conn(a, e))
+                    end do
+                end do
+            end do
+        end do
+        call csr_build_pattern(fb%np, conn, .false., matrix)
+        call csr_assemble_blocks(matrix, conn, blocks)
+    end subroutine toroidal_hessian
+
     subroutine chain_of_plasma(map, order, chain, status)
         ! Plasma boundary nodes in chain order (order per boundary edge).
         type(ideal_map_t), intent(in) :: map
@@ -5988,7 +6365,19 @@ contains
         nslide = size(fb%slide, 3)
         n_pos = fb%np + fb%nx - fb%unstable
         n_neg = fb%nx + nslide + fb%nf + fb%unstable
-        cap = 0.02_dp*maxval(maxval(fb%reference, dim=2) - minval(fb%reference, dim=2))
+        if (allocated(fb%bem)) then
+            ! (8) of free-boundary-plasma-boundary-bem.md: tau negative,
+            ! psi_hat one positive; the quadrature plan is frozen here.
+            n_pos = n_pos + 1
+            call fb_bem_replan(fb%bem, bem_coords(fb), st)
+            if (st /= 0) then
+                status = IDEAL_FB_BEM_FAILED; return
+            end if
+            cap = 0.02_dp*maxval(maxval(fb%plasma%reference, dim=2) &
+                - minval(fb%plasma%reference, dim=2))
+        else
+            cap = 0.02_dp*maxval(maxval(fb%reference, dim=2) - minval(fb%reference, dim=2))
+        end if
         allocate (grad(fb%n), gtrial(fb%n), diag(fb%n), w(fb%n), shift(fb%n + nslide), &
                   sol(fb%n + nslide))
         factored = .false.

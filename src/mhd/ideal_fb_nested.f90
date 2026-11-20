@@ -9,6 +9,7 @@ module milca_ideal_fb_nested
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use milca_grad_shafranov, only: gs_state_t, initialize_gs
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_field_basis_t, &
+        ideal_fb_bem_settle, &
         ideal_fb_solve_shell_map, ideal_fb_solve_vacuum, ideal_fb_solve_multipliers, &
         IDEAL_FB_OK, IDEAL_FB_BAD_INPUT, IDEAL_FB_FOLDED
     use milca_ideal_seed_3d, only: ideal_seed_boundary_coefficients, ideal_seed_disk_mesh
@@ -17,12 +18,15 @@ module milca_ideal_fb_nested
     use milca_curved_triangle, only: triangle_locate
     use milca_triangle_basis, only: triangle_basis_jet
     use fortfem_axisymmetric_gs_kernel, only: gs_green_gradient
+    use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit
+    use milca_ideal_fb_mgrid, only: mgrid_basis_t
     implicit none
     private
     public :: fb_nested_geometry, fb_nested_mesh, fb_nested_seed, fb_nested_transfer
     public :: fb_nested_settle, fb_nested_layer_mesh, fb_nested_offset_distance, &
         fb_nested_section
     public :: filament_basis_t
+    public :: fb_nested_plasma_mesh, fb_nested_coil_flux
     real(dp), parameter :: pi = acos(-1.0_dp)
     ! Gamma_c is a star-shaped curve r(alpha) about the centre, sampled on
     ! rays directions and smoothed over 2 window + 1 of them.
@@ -318,6 +322,79 @@ contains
         end function
     end subroutine
 
+    subroutine fb_nested_plasma_mesh(mesh, centre, axes, nodes, degree, status)
+        !! Reference mesh of the plasma alone: the reference ellipse with nodes
+        !! boundary vertices, cells of at most the boundary spacing.
+        type(gs_state_t), intent(out) :: mesh
+        real(dp), intent(in) :: centre(2), axes(2)
+        integer, intent(in) :: nodes, degree
+        integer, intent(out) :: status
+        real(dp), allocatable :: contour(:, :)
+        real(dp) :: h, alpha
+        integer :: j
+        allocate (contour(2, nodes))
+        h = 0
+        do j = 1, nodes
+            alpha = 2*pi*(j - 1)/nodes
+            contour(:, j) = centre + axes*[cos(alpha), sin(alpha)]
+            h = max(h, norm2(axes*([cos(alpha + 2*pi/nodes), &
+                sin(alpha + 2*pi/nodes)] - [cos(alpha), sin(alpha)])))
+        end do
+        call initialize_gs(mesh, contour, h*h/2, status, degree, curved=.true., &
+            geometry_only=.true.)
+    end subroutine fb_nested_plasma_mesh
+
+    subroutine fb_nested_coil_flux(basis, currents, centre, curve, coil, f_vac, &
+            spread, status, nsource, scale)
+        !! Coil flux psi_c fitted to the grid nodes inside Gamma_c (the
+        !! coil-free region of fb_nested_geometry's curve around centre) by
+        !! nsource ring sources on Gamma_c scaled by scale about centre; f_vac
+        !! the mean R B_phi there and spread its relative range.
+        type(mgrid_basis_t), intent(in) :: basis
+        real(dp), intent(in) :: currents(:), centre(2), curve(:)
+        type(fb_coil_flux_t), intent(out) :: coil
+        real(dp), intent(out) :: f_vac, spread
+        integer, intent(out) :: status
+        integer, intent(in), optional :: nsource
+        real(dp), intent(in), optional :: scale
+        real(dp), allocatable :: points(:, :), field(:, :), sources(:, :), rbphi(:)
+        real(dp) :: x(2), b(3), dr, dz, alpha, s
+        integer :: i, j, g, n, ns
+        ns = 96; s = 1.3_dp
+        if (present(nsource)) ns = nsource
+        if (present(scale)) s = scale
+        dr = (basis%rmax - basis%rmin)/(basis%ir - 1)
+        dz = (basis%zmax - basis%zmin)/(basis%jz - 1)
+        allocate (points(2, basis%ir*basis%jz), field(2, basis%ir*basis%jz), &
+            rbphi(basis%ir*basis%jz))
+        n = 0
+        do j = 1, basis%jz
+            do i = 1, basis%ir
+                x = [basis%rmin + (i - 1)*dr, basis%zmin + (j - 1)*dz]
+                alpha = atan2(x(2) - centre(2), x(1) - centre(1))
+                if (norm2(x - centre) >= curve_radius(curve, alpha)) cycle
+                b = 0
+                do g = 1, min(basis%ngroup, size(currents))
+                    b = b + currents(g)*sum(basis%b(:, i, j, :, g), dim=2)/basis%kp
+                end do
+                n = n + 1
+                points(:, n) = x
+                field(:, n) = [b(1), b(3)]
+                rbphi(n) = x(1)*b(2)
+            end do
+        end do
+        status = 1
+        if (n < 2*ns) return
+        allocate (sources(2, ns))
+        do j = 1, ns
+            alpha = 2*pi*(j - 1)/ns
+            sources(:, j) = centre + s*curve_radius(curve, alpha)*[cos(alpha), sin(alpha)]
+        end do
+        call fb_coil_flux_fit(points(:, :n), field(:, :n), sources, coil, status)
+        f_vac = sum(rbphi(:n))/n
+        spread = (maxval(rbphi(:n)) - minval(rbphi(:n)))/max(abs(f_vac), tiny(1.0_dp))
+    end subroutine fb_nested_coil_flux
+
     subroutine fb_nested_seed(fb, boundary, centre, axes, status)
         !! Plasma map from the boundary guess: harmonic extension on the
         !! reference disc, then the Winslow map of every plane, which is
@@ -384,6 +461,10 @@ contains
         type(ideal_fb_t), intent(inout) :: fb
         integer, intent(out) :: status
         integer :: k
+        if (allocated(fb%bem)) then
+            call ideal_fb_bem_settle(fb, status)
+            return
+        end if
         do k = 1, fb%ns
             if (fb%role(k) == 1) fb%xs(:, :, k) = fb%plasma%x(:, :, fb%plasma_node(k))
         end do

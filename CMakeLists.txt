@@ -23,7 +23,7 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
 include_directories(${CMAKE_Fortran_MODULE_DIRECTORY})
 # Dependency pins: one source used by FetchContent and by result provenance.
 set(MILCA_FORTPLOT_REVISION "1645fa41c11b5786c71bc27e5b41dae7c7bbba23")
-set(MILCA_FORTNUM_REVISION "fe1e48772f7a41304d67ad626fa7158a452a8169")
+set(MILCA_FORTNUM_REVISION "abf066d0f1682ad9fffc23401e1ce9bb98dddacd")
 set(MILCA_FORTIO_REVISION 32a486e1efa507503b456fe49be4b21e32832459)
 set(FORTPLOT_BUILD_FORTARRAY_ADAPTER OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(fortplot
@@ -344,7 +344,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # second-kind Nedelec edges #148, exact moment gradients #149 and the
 # boundary trace projection #152, the toroidal period #154 and its tensor
 # forms #160, factored anisotropic apply).
-set(MILCA_FORTFEM_REVISION "108a5263bee231a66592c4f89906306a2f4a4c56")
+set(MILCA_FORTFEM_REVISION "404f18454f40ba9a5824e18fb833df677dc1e8e0")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -373,6 +373,8 @@ add_library(milca_spatial ${MILCA_TRIANGLE_SOURCES}
     ${fortfem_SOURCE_DIR}/src/quadrature/triangle_level_quadrature.f90
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_kernel.f90
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_boundary_operators_2d.f90
+    ${fortfem_SOURCE_DIR}/src/generated/fortfem_gs_single_layer_shape_products.f90
+    ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_single_layer_shape_2d.f90
     ${fortfem_SOURCE_DIR}/src/estimators/bem_residual_energy.f90
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_nurbs_geometry_products.f90
     ${fortfem_SOURCE_DIR}/src/elements/bspline_feec.f90)
@@ -515,7 +517,7 @@ set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
 target_sources(milca_mhd PRIVATE src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90
-    src/mhd/inertia_newton.f90)
+    src/mhd/ideal_fb_bem.f90 src/mhd/inertia_newton.f90)
 set_source_files_properties(src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
@@ -596,6 +598,9 @@ add_test(NAME ideal_fb_external_kink COMMAND test_ideal_free_boundary kink)
 set_tests_properties(ideal_fb_external_kink PROPERTIES ENVIRONMENT
     "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4 TIMEOUT 120)
 add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
+add_test(NAME ideal_fb_bem_derivatives COMMAND test_ideal_free_boundary bem)
+milca_test_labels(ideal_fb_bem_derivatives fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_hessian_symmetry COMMAND test_ideal_free_boundary symmetry)
 add_test(NAME ideal_fb_replace_coupling COMMAND test_ideal_free_boundary replace)
 milca_test_labels(ideal_fb_replace_coupling fast CLASSES mhd
