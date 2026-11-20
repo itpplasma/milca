@@ -14,13 +14,18 @@ module milca_ideal_fb_mgrid
     !! trigonometric interpolant through the kp planes. Harmonics at or
     !! above the grid's Nyquist index kp/2 are not resolved and are zero.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
     use fortnum_polynomial, only: lagrange_weights
+    use fortnum_bspline, only: bspline_workspace_t, bspline_init, bspline_set_knots, &
+        bspline_eval_deriv, bspline_span_index
+    use fortnum_status, only: fortnum_status_t, FORTNUM_OK
+    use milca_ideal_fb_coil_field, only: fb_field_jets_t
     use milca_ideal_free_boundary, only: ideal_fb_field_basis_t, IDEAL_FB_OK, &
         IDEAL_FB_BAD_INPUT
     implicit none
     private
     public :: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
+    public :: mgrid_jets_t, mgrid_jets_init
     real(dp), parameter :: pi = acos(-1.0_dp)
 
     type, extends(ideal_fb_field_basis_t) :: mgrid_basis_t
@@ -31,6 +36,19 @@ module milca_ideal_fb_mgrid
     contains
         procedure :: nfield => mgrid_nfield
         procedure :: sample => mgrid_sample
+    end type
+
+    !> The summed coil field of an mgrid with its (R, Z) jets: per grid
+    !> harmonic k (n = k nfp of the grid) a tensor quintic spline in (R, Z),
+    !> least-squares fitted to the grid nodes with knots on every second node,
+    !> so B is C^4 in (R, Z) and a trigonometric polynomial in phi.
+    type, extends(fb_field_jets_t) :: mgrid_jets_t
+        integer :: nfp = 1, kmax = 0
+        type(bspline_workspace_t) :: sr, sz
+        !> (3, R coefficient, Z coefficient, k): cos and sin parts
+        real(dp), allocatable :: cc(:, :, :, :), cs(:, :, :, :)
+    contains
+        procedure :: eval => mgrid_jets_eval
     end type
 
 contains
@@ -218,4 +236,140 @@ contains
             end do
         end do
     end subroutine
+    subroutine mgrid_jets_init(basis, currents, centre, jets, status)
+        !! The field of the groups at currents; F = R B_phi of harmonic 0 at
+        !! centre (R, Z), which any point of the coil-free region gives.
+        type(mgrid_basis_t), intent(in) :: basis
+        real(dp), intent(in) :: currents(:), centre(2)
+        type(mgrid_jets_t), intent(out) :: jets
+        integer, intent(out) :: status
+        real(dp), allocatable :: f(:, :, :, :), fc(:, :, :, :), fs(:, :, :, :)
+        real(dp), allocatable :: pr(:, :), pz(:, :), t(:, :)
+        real(dp) :: ang
+        integer :: g, k, l, c
+        status = IDEAL_FB_BAD_INPUT
+        jets%nfp = basis%nfp
+        jets%kmax = (basis%kp - 1)/2
+        allocate (f(3, basis%ir, basis%jz, basis%kp), &
+            fc(3, basis%ir, basis%jz, 0:jets%kmax), fs(3, basis%ir, basis%jz, 0:jets%kmax))
+        f = 0
+        do g = 1, min(basis%ngroup, size(currents))
+            f = f + currents(g)*basis%b(:, :, :, :, g)
+        end do
+        fc = 0; fs = 0
+        do l = 1, basis%kp
+            do k = 0, jets%kmax
+                ang = 2*pi*k*(l - 1)/basis%kp
+                fc(:, :, :, k) = fc(:, :, :, k) + merge(1.0_dp, 2.0_dp, k == 0) &
+                    *f(:, :, :, l)*cos(ang)/basis%kp
+                if (k > 0) fs(:, :, :, k) = fs(:, :, :, k) + 2*f(:, :, :, l)*sin(ang)/basis%kp
+            end do
+        end do
+        call spline_projector(basis%ir, basis%rmin, basis%rmax, jets%sr, pr, status)
+        if (status /= 0) return
+        call spline_projector(basis%jz, basis%zmin, basis%zmax, jets%sz, pz, status)
+        if (status /= 0) return
+        allocate (jets%cc(3, jets%sr%ncoef, jets%sz%ncoef, 0:jets%kmax), &
+            jets%cs(3, jets%sr%ncoef, jets%sz%ncoef, 0:jets%kmax))
+        do k = 0, jets%kmax
+            do c = 1, 3
+                t = matmul(pr, fc(c, :, :, k))
+                jets%cc(c, :, :, k) = matmul(t, transpose(pz))
+                t = matmul(pr, fs(c, :, :, k))
+                jets%cs(c, :, :, k) = matmul(t, transpose(pz))
+            end do
+        end do
+        ! harmonic 0 of R B_phi: the mean over the angle
+        jets%f_vac = centre(1)*sum(jets%cc(2, :, :, 0)*outer_basis(jets, centre))
+        status = IDEAL_FB_OK
+        if (.not. ieee_is_finite(jets%f_vac)) status = IDEAL_FB_BAD_INPUT
+    end subroutine mgrid_jets_init
+
+    function outer_basis(jets, x) result(w)
+        type(mgrid_jets_t), intent(in) :: jets
+        real(dp), intent(in) :: x(2)
+        real(dp) :: w(jets%sr%ncoef, jets%sz%ncoef)
+        real(dp) :: dr(0:0, jets%sr%ncoef), dz(0:0, jets%sz%ncoef)
+        type(fortnum_status_t) :: st
+        integer :: j
+        call bspline_eval_deriv(jets%sr, x(1), 0, dr, st)
+        call bspline_eval_deriv(jets%sz, x(2), 0, dz, st)
+        do j = 1, jets%sz%ncoef
+            w(:, j) = dr(0, :)*dz(0, j)
+        end do
+    end function outer_basis
+
+    subroutine spline_projector(n, lo, hi, ws, p, status)
+        !! Quintic spline on [lo, hi] with breakpoints on every second of the
+        !! n equidistant nodes and the least-squares projector p (ncoef x n)
+        !! from node values to coefficients.
+        integer, intent(in) :: n
+        real(dp), intent(in) :: lo, hi
+        type(bspline_workspace_t), intent(out) :: ws
+        real(dp), allocatable, intent(out) :: p(:, :)
+        integer, intent(out) :: status
+        integer, parameter :: order = 6
+        type(fortnum_status_t) :: st
+        real(dp), allocatable :: a(:, :), nm(:, :), d(:, :)
+        integer, allocatable :: ipiv(:)
+        integer :: nb, i, info
+        interface
+            subroutine dgesv(n, nrhs, a, lda, ipiv, b, ldb, info)
+                import :: dp
+                integer, intent(in) :: n, nrhs, lda, ldb
+                real(dp), intent(inout) :: a(lda, *), b(ldb, *)
+                integer, intent(out) :: ipiv(*), info
+            end subroutine dgesv
+        end interface
+        status = 1
+        nb = (n + 1)/2
+        if (nb < 4) return
+        call bspline_init(ws, order, nb, st)
+        if (st%code /= FORTNUM_OK) return
+        call bspline_set_knots(ws, [(lo + (hi - lo)*(i - 1)/(nb - 1), i=1, nb)], st)
+        if (st%code /= FORTNUM_OK) return
+        allocate (a(n, ws%ncoef), d(0:0, ws%ncoef), ipiv(ws%ncoef))
+        do i = 1, n
+            call bspline_eval_deriv(ws, lo + (hi - lo)*(i - 1)/(n - 1), 0, d, st)
+            a(i, :) = d(0, :)
+        end do
+        nm = matmul(transpose(a), a)
+        p = transpose(a)
+        call dgesv(ws%ncoef, n, nm, ws%ncoef, ipiv, p, ws%ncoef, info)
+        if (info == 0) status = 0
+    end subroutine spline_projector
+
+    subroutine mgrid_jets_eval(self, r, z, v, b, db, d2b)
+        class(mgrid_jets_t), intent(in) :: self
+        real(dp), intent(in) :: r, z, v
+        real(dp), intent(out) :: b(3), db(3, 2), d2b(3, 3)
+        real(dp) :: dr(0:2, self%sr%ncoef), dz(0:2, self%sz%ncoef), g(3), cv, sv
+        type(fortnum_status_t) :: st
+        integer :: i, j, k, i0, j0, i1, j1
+        call bspline_eval_deriv(self%sr, r, 2, dr, st)
+        call bspline_eval_deriv(self%sz, z, 2, dz, st)
+        if (r < self%sr%knots(1) .or. r > self%sr%knots(size(self%sr%knots)) .or. &
+            z < self%sz%knots(1) .or. z > self%sz%knots(size(self%sz%knots))) then
+            b = ieee_value(1.0_dp, ieee_quiet_nan); db = b(1); d2b = b(1)
+            return
+        end if
+        i1 = bspline_span_index(self%sr, r); i0 = i1 - self%sr%order + 1
+        j1 = bspline_span_index(self%sz, z); j0 = j1 - self%sz%order + 1
+        b = 0; db = 0; d2b = 0
+        do k = 0, self%kmax
+            cv = cos(k*self%nfp*v); sv = sin(k*self%nfp*v)
+            do j = j0, j1
+                do i = i0, i1
+                    g = self%cc(:, i, j, k)*cv + self%cs(:, i, j, k)*sv
+                    b = b + g*dr(0, i)*dz(0, j)
+                    db(:, 1) = db(:, 1) + g*dr(1, i)*dz(0, j)
+                    db(:, 2) = db(:, 2) + g*dr(0, i)*dz(1, j)
+                    d2b(:, 1) = d2b(:, 1) + g*dr(2, i)*dz(0, j)
+                    d2b(:, 2) = d2b(:, 2) + g*dr(1, i)*dz(1, j)
+                    d2b(:, 3) = d2b(:, 3) + g*dr(0, i)*dz(2, j)
+                end do
+            end do
+        end do
+    end subroutine mgrid_jets_eval
+
 end module milca_ideal_fb_mgrid

@@ -459,7 +459,7 @@ contains
         type(ideal_fb_t), intent(inout) :: fb
         integer, intent(out) :: status
         integer :: k
-        if (allocated(fb%bem)) then
+        if (allocated(fb%bem) .or. allocated(fb%sheet)) then
             call ideal_fb_bem_settle(fb, status)
             return
         end if

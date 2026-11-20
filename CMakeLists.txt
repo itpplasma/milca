@@ -342,8 +342,10 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # Steklov form #144, exact FEEC tables, split stretched BEM fans #145,
 # second-kind Nedelec edges #148, exact moment gradients #149 and the
 # boundary trace projection #152, the toroidal period #154 and its tensor
-# forms #160, factored anisotropic apply).
-set(MILCA_FORTFEM_REVISION "9ef980ed1d1e83b82e4002ae5b6b2256a5d36298")
+# forms #160, factored anisotropic apply, the toroidal sheet-current energy
+# #224 with its net-current ramps #225, local-block assembly #226 and
+# point-input pair kernels #227).
+set(MILCA_FORTFEM_REVISION "b5a099ff476dfdc7387ee2e6b12cdd31c204992c")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -374,6 +376,8 @@ add_library(milca_spatial ${MILCA_TRIANGLE_SOURCES}
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_boundary_operators_2d.f90
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_gs_single_layer_shape_products.f90
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_single_layer_shape_2d.f90
+    ${fortfem_SOURCE_DIR}/src/generated/fortfem_toroidal_sheet_products.f90
+    ${fortfem_SOURCE_DIR}/src/bem/toroidal_sheet_current_3d.f90
     ${fortfem_SOURCE_DIR}/src/estimators/bem_residual_energy.f90
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_nurbs_geometry_products.f90
     ${fortfem_SOURCE_DIR}/src/elements/bspline_feec.f90)
@@ -517,7 +521,8 @@ set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
 target_sources(milca_mhd PRIVATE src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90
     src/mhd/ideal_fb_bem.f90 src/mhd/inertia_newton.f90
-    src/generated/milca_coil_field_leaves.f90 src/mhd/ideal_fb_coil_field.f90)
+    src/mhd/ideal_fb_coil_field.f90
+    src/generated/milca_sheet_flux_leaves.f90 src/mhd/ideal_fb_sheet.f90)
 set_source_files_properties(src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
@@ -599,8 +604,11 @@ set_tests_properties(ideal_fb_external_kink PROPERTIES ENVIRONMENT
     "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4 TIMEOUT 120)
 add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
 add_test(NAME ideal_fb_bem_derivatives COMMAND test_ideal_free_boundary bem)
-add_test(NAME ideal_fb_coil_field_fit COMMAND test_ideal_free_boundary coilfield)
-milca_test_labels(ideal_fb_coil_field_fit fast CLASSES mhd
+add_test(NAME ideal_fb_coil_field COMMAND test_ideal_free_boundary coilfield)
+milca_test_labels(ideal_fb_coil_field fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
+add_test(NAME ideal_fb_sheet_vacuum COMMAND test_ideal_free_boundary sheet)
+milca_test_labels(ideal_fb_sheet_vacuum fast CLASSES mhd
     TARGETS test_ideal_free_boundary)
 milca_test_labels(ideal_fb_bem_derivatives fast CLASSES mhd
     TARGETS test_ideal_free_boundary)
@@ -1599,7 +1607,7 @@ if(MILCA_FORTSYM_BUILD)
             fermi_gas quantum_fock quantum_evolution quantum_correlations
             quantum_reference_gallery classical_pair coulomb species coulomb_encounter
             pp_fusion pp_fusion_eft
-            jellium_cell ocp island_seed thermal_screening rm_oracles coil_field)
+            jellium_cell ocp island_seed thermal_screening rm_oracles sheet_flux)
         add_executable(gen_${generator} gen/gen_${generator}.f90)
         target_link_libraries(gen_${generator} PRIVATE milca_gen_support)
     endforeach()

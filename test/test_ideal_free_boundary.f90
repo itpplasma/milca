@@ -136,9 +136,12 @@ program test_ideal_free_boundary
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t
     use milca_ideal_free_boundary, only: ideal_fb_init_fixed, ideal_fb_fixed_mode
     use milca_ideal_free_boundary, only: ideal_fb_init_bem
-    use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit, fb_coil_flux_value
-    use milca_ideal_fb_coil_field, only: fb_coil_field_t, fb_coil_field_fit, &
-        fb_coil_field_eval, fb_coil_field_nd
+    use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit, fb_coil_flux_value, &
+        fb_bem_t, fb_bem_setup, fb_bem_exact, fb_bem_terms
+    use milca_ideal_fb_sheet, only: fb_sheet_t, fb_sheet_setup, fb_sheet_size, &
+        fb_sheet_terms, fb_sheet_exact, fb_sheet_geometry_index, fb_sheet_phi_index
+    use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_jets_t, &
+        mgrid_jets_init
     use milca_nested_ring_mesh, only: nested_ring_mesh
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, &
         ideal_fb_set_drive, ideal_fb_gradient, ideal_fb_hessian, ideal_fb_step, &
@@ -178,6 +181,9 @@ program test_ideal_free_boundary
     real(dp) :: circulation = -mu0*1.0e6_dp
     real(dp) :: gamma_scale = 1, area_factor = 0.5_dp, window_current = 1.0e5_dp
     type(coil_set_t) :: windows
+    ! coil fields of sheet_checks for its field callbacks
+    type(fb_coil_flux_t) :: coil
+    type(mgrid_jets_t) :: wfield
     logical :: windows_on = .false.
     character(16) :: mode, argument
     integer :: degree
@@ -203,6 +209,8 @@ program test_ideal_free_boundary
         call bem_checks()
     case ('coilfield')
         call coil_field_checks()
+    case ('sheet')
+        call sheet_checks()
     case ('slide')
         call slide_checks()
     case ('kink')
@@ -1216,62 +1224,29 @@ contains
     end subroutine
 
     subroutine coil_field_checks()
-        ! Harmonic ring-source fit of a 3D coil field (three window coils at
-        ! 1e5 A, nfp = 3, plus F grad(phi)) from its harmonics on a grid inside
-        ! an ellipse: the field at interior points against Biot-Savart, and
-        ! the (R, Z) jets against central differences of the fitted field.
-        integer, parameter :: nphi = 120, kmax = 18, nfp_w = 3
-        type(fb_coil_field_t) :: field
-        real(dp), allocatable :: points(:, :), bcos(:, :, :), bsin(:, :, :), rings(:, :)
-        real(dp) :: rr, zz, phi, bc(3), bcyl(3), b(3), db(3, 2), d2b(3, 3), bp(3), &
+        ! Coil field of an mgrid as a quintic spline per toroidal harmonic
+        ! (three window coils at 1e5 A, nfp = 3, plus F grad(phi), sampled on
+        ! a grid): the field at interior points against Biot-Savart, the
+        ! (R, Z) jets against central differences of the spline, and F.
+        type(mgrid_jets_t) :: field
+        real(dp) :: bc(3), b(3), db(3, 2), d2b(3, 3), bp(3), &
             bm(3), dbp(3, 2), dbm(3, 2), d2(3, 3), h, worst_b, worst_d, worst_d2, &
             scale, x(2), v
-        integer :: i, j, l, k, n, st, nd, np
-        call make_windows(1.0e5_dp)
-        allocate (points(2, 400), bcos(3, 0:kmax, 400), bsin(3, 0:kmax, 400))
-        np = 0
-        do j = 1, 21
-            do i = 1, 15
-                rr = 2.25_dp + 1.6_dp*(i - 1)/14.0_dp
-                zz = -1.3_dp + 2.6_dp*(j - 1)/20.0_dp
-                if (((rr - 3.05_dp)/0.85_dp)**2 + (zz/1.35_dp)**2 > 1) cycle
-                np = np + 1
-                points(:, np) = [rr, zz]
-                bcos(:, :, np) = 0; bsin(:, :, np) = 0
-                do l = 1, nphi
-                    phi = 2*pi*(l - 1)/nphi
-                    bcyl = cylindrical_window_field(rr, zz, phi)
-                    do k = 0, kmax
-                        n = k*nfp_w
-                        bcos(:, k, np) = bcos(:, k, np) + merge(1.0_dp, 2.0_dp, k == 0) &
-                            *bcyl*cos(n*phi)/nphi
-                        bsin(:, k, np) = bsin(:, k, np) + 2*bcyl*sin(n*phi)/nphi
-                    end do
-                end do
-            end do
-        end do
-        allocate (rings(2, 64))
-        do j = 1, 64
-            rings(:, j) = [3.05_dp, 0.0_dp] + 1.45_dp*[0.85_dp*cos(2*pi*(j - 1)/64), &
-                1.35_dp*sin(2*pi*(j - 1)/64)]
-        end do
-        nd = fb_coil_field_nd(rings, points(:, :np), nfp_w)
-        call fb_coil_field_fit(points(:, :np), bcos(:, :, :np), bsin(:, :, :np), nfp_w, &
-            kmax, rings, nd, field, st)
-        if (st /= 0) error stop 'coil field fit'
+        integer :: i, k
+        call window_grid(field)
         worst_b = 0; worst_d = 0; worst_d2 = 0; scale = 0
         h = 1.0e-4_dp
         do i = 1, 12
             x = [3.05_dp + 0.6_dp*cos(1.7_dp*i), 0.9_dp*sin(1.7_dp*i)]
             v = 0.37_dp*i
-            call fb_coil_field_eval(field, x(1), x(2), v, b, db, d2b)
+            call field%eval(x(1), x(2), v, b, db, d2b)
             bc = cylindrical_window_field(x(1), x(2), v)
             scale = max(scale, norm2(bc))
             worst_b = max(worst_b, norm2(b - bc))
             do k = 1, 2
-                call fb_coil_field_eval(field, x(1) + h*merge(1, 0, k == 1), &
+                call field%eval(x(1) + h*merge(1, 0, k == 1), &
                     x(2) + h*merge(1, 0, k == 2), v, bp, dbp, d2)
-                call fb_coil_field_eval(field, x(1) - h*merge(1, 0, k == 1), &
+                call field%eval(x(1) - h*merge(1, 0, k == 1), &
                     x(2) - h*merge(1, 0, k == 2), v, bm, dbm, d2)
                 worst_d = max(worst_d, maxval(abs((bp - bm)/(2*h) - db(:, k))))
                 ! second derivatives RR (k = 1) and RZ, ZZ (k = 2) from db
@@ -1282,14 +1257,265 @@ contains
                     - dbm(:, 2))/(2*h) - d2b(:, 3))))
             end do
         end do
-        print '(a,i0,a,i0,a,es9.2,a,es9.2)', 'coil field: ', np, ' samples, nd ', nd, &
-            ', fit misfit ', field%misfit, ', F ', field%f_vac
+        print '(a,2es12.4)', 'coil field: F, F of the windows ', field%f_vac, f_vac
         print '(a,es9.2,a,es9.2,a,es9.2)', 'coil field: |B - Biot-Savart|/|B| ', &
             worst_b/scale, ', jet errors (1st, 2nd) ', worst_d/scale, ' ', worst_d2/scale
         if (worst_b/scale > 1.0e-6_dp) error stop 'coil field misses Biot-Savart'
         if (worst_d/scale > 1.0e-6_dp .or. worst_d2/scale > 1.0e-5_dp) &
             error stop 'coil field jets'
+        if (abs(field%f_vac - f_vac) > 1.0e-8_dp*f_vac) error stop 'coil field F'
         print '(a)', 'coil field ok'
+    end subroutine
+
+    subroutine sheet_checks()
+        ! Vacuum as a 3D sheet current (free-boundary-plasma-boundary-sheet-3d.md)
+        ! on a P2 chain around an ellipse:
+        !  - F alone (B_c = F/R e_phi, no current): L_v = pi F^2 S/mu0, S =
+        !    int int dR dZ/R = oint ln R dZ, the toroidal-field term that the
+        !    axisymmetric form adds by hand;
+        !  - axisymmetric limit for the PF rings (F = 0): L_v and its node
+        !    gradient equal the axisymmetric single layer's, L_v up to the
+        !    flux c 2 pi psi_c(L)/mu0 through L that the ribbon drops;
+        !  - the gradient and Hessian against central differences on a 3D
+        !    surface (nfp = 3, one toroidal mode) in the fitted window field.
+        type(fb_sheet_t) :: sheet
+        type(fb_bem_t) :: bem
+        real(dp), allocatable :: x(:, :, :), gx(:), gt(:), g(:), h(:, :), gp(:), &
+            gm(:), hp(:, :), u(:), dir(:), x2(:, :)
+        integer, allocatable :: node(:)
+        real(dp) :: axis(2, 3), e, ev, gpsi, ep, em, err, area, c, psi, pg(2), ph(3), step
+        integer :: nb, b, k, st, n, level
+        real(dp) :: gerr(2)
+        nb = 48
+        node = [(b, b=1, nb)]
+        allocate (x(2, nb, 1))
+        do b = 1, nb
+            x(:, b, 1) = [3.05_dp + 0.6_dp*cos(2*pi*(b - 1)/nb), 0.9_dp*sin(2*pi*(b - 1)/nb)]
+        end do
+        axis = 0
+        axis(:, 1) = [3.05_dp, 0.0_dp]
+        call fb_sheet_setup(sheet, node, x, axis(:, :1), 2, 1, 0, st)
+        if (st /= 0) error stop 'sheet setup'
+
+        call fb_sheet_exact(sheet, x, tf_field, 0.0_dp, f_vac, mu0, st)
+        if (st /= 0) error stop 'sheet solve'
+        call fb_sheet_terms(sheet, x, tf_field, 0.0_dp, f_vac, mu0, e)
+        area = chain_log_integral(sheet, x)
+        err = abs(e - pi*f_vac**2*area/mu0)/abs(e)
+        print '(a,2es16.8,a,es9.2)', 'sheet: F alone L_v, pi F^2 S/mu0', e, &
+            pi*f_vac**2*area/mu0, ' rel', err
+        ! the default toroidal quadrature gives about 2e-6 here
+        if (err > 1.0e-5_dp) error stop 'sheet toroidal-field energy'
+
+        coil%source = pf(1:2, :)
+        coil%coef = mu0*pf(3, :)
+        c = -circulation
+        do level = 1, 2
+            ! the node gradients of the two discretizations differ by O(h^2)
+            nb = 24*level
+            node = [(b, b=1, nb)]
+            deallocate (x)
+            allocate (x(2, nb, 1))
+            do b = 1, nb
+                x(:, b, 1) = [3.05_dp + 0.6_dp*cos(2*pi*(b - 1)/nb), &
+                    0.9_dp*sin(2*pi*(b - 1)/nb)]
+            end do
+            call fb_sheet_setup(sheet, node, x, axis(:, :1), 2, 1, 0, st)
+            if (st /= 0) error stop 'sheet setup'
+            bem = fb_bem_t()
+            bem%coil = coil
+            x2 = x(:, :, 1)
+            call fb_bem_setup(bem, node, x2, 2, 1, st)
+            if (st /= 0) error stop 'bem setup'
+            call fb_bem_exact(bem, x2, c, st)
+            if (st /= 0) error stop 'bem solve'
+            if (allocated(gx)) deallocate (gx, gt, g)
+            allocate (gx(2*nb), gt(bem%nt), g(fb_sheet_size(sheet)))
+            call fb_bem_terms(bem, x2, mu0, c, ev, gx, gt, gpsi)
+            call fb_sheet_exact(sheet, x, ring_field, c, 0.0_dp, mu0, st)
+            if (st /= 0) error stop 'sheet solve'
+            call fb_sheet_terms(sheet, x, ring_field, c, 0.0_dp, mu0, e, g)
+            call fb_coil_flux_value(coil, axis(:, 1), psi, pg, ph)
+            e = e - c*2*pi*psi/mu0
+            err = abs(e - ev)/abs(ev)
+            print '(a,i0,a,2es16.8,a,es9.2)', 'sheet: nb ', nb, &
+                ', L_v - c Psi(L)/mu0, axisymmetric L_v', e, ev, ' rel', err
+            if (err > 1.0e-5_dp) error stop 'sheet axisymmetric energy'
+            gerr(level) = 0
+            do b = 1, nb
+                do k = 1, 2
+                    gerr(level) = max(gerr(level), &
+                        abs(g(fb_sheet_geometry_index(sheet, k, 1, b)) - gx(2*(b - 1) + k)))
+                end do
+            end do
+            gerr(level) = gerr(level)/maxval(abs(gx))
+            print '(a,i0,a,es9.2)', 'sheet: nb ', nb, &
+                ', node gradient vs axisymmetric, max rel', gerr(level)
+        end do
+        if (gerr(2) > 1.0e-3_dp .or. gerr(2) > 0.35_dp*gerr(1)) &
+            error stop 'sheet axisymmetric gradient'
+
+        call window_grid(wfield)
+        nb = 12
+        deallocate (x)
+        allocate (x(2, nb, 3))
+        node = [(b, b=1, nb)]
+        x = 0
+        do b = 1, nb
+            x(:, b, 1) = [3.05_dp + 0.6_dp*cos(2*pi*(b - 1)/nb), 0.9_dp*sin(2*pi*(b - 1)/nb)]
+            x(1, b, 2) = 0.05_dp*cos(2*pi*(b - 1)/nb)
+            x(2, b, 3) = 0.05_dp*sin(2*pi*(b - 1)/nb)
+        end do
+        call fb_sheet_setup(sheet, node, x, axis, 2, 3, 1, st)
+        if (st /= 0) error stop 'sheet setup 3d'
+        sheet%plan%nv = 4; sheet%plan%ng_u = 3; sheet%plan%ng_v = 3
+        sheet%plan%ng_far = 3; sheet%ng_s = 4; sheet%ng_line = 4
+        do b = 1, nb
+            sheet%surface%phi(b, :) = [0.2_dp*sin(1.1_dp*b), 0.1_dp*cos(0.7_dp*b), &
+                0.05_dp*sin(0.3_dp*b)]*abs(circulation)
+        end do
+        n = fb_sheet_size(sheet)
+        deallocate (g)
+        allocate (g(n), h(n, n), gp(n), gm(n), hp(n, n), dir(n))
+        do k = 1, n
+            dir(k) = cos(1.9_dp*k + 0.3_dp)
+        end do
+        u = state(sheet, x)
+        dir = dir*abs(u)
+        dir = dir*0.01_dp
+        call fb_sheet_terms(sheet, x, window_jets, c, wfield%f_vac, mu0, e, g, h)
+        step = 1.0e-4_dp
+        call move(sheet, x, u + step*dir)
+        call fb_sheet_terms(sheet, x, window_jets, c, wfield%f_vac, mu0, ep, gp, hp)
+        call move(sheet, x, u - step*dir)
+        call fb_sheet_terms(sheet, x, window_jets, c, wfield%f_vac, mu0, em, gm, hp)
+        call move(sheet, x, u)
+        err = abs((ep - em)/(2*step) - dot_product(g, dir))/sum(abs(g*dir))
+        print '(a,es9.2)', 'sheet 3D: gradient vs central difference', err
+        if (err > 1.0e-7_dp) error stop 'sheet gradient'
+        err = maxval(abs((gp - gm)/(2*step) - matmul(h, dir)))/maxval(abs(matmul(h, dir)))
+        print '(a,es9.2)', 'sheet 3D: Hessian vs central difference', err
+        if (err > 1.0e-6_dp) error stop 'sheet Hessian'
+        print '(a)', 'sheet ok'
+    end subroutine sheet_checks
+
+    subroutine tf_field(r, z, v, bf, db, d2b)
+        real(dp), intent(in) :: r, z, v
+        real(dp), intent(out) :: bf(3), db(3, 2), d2b(3, 3)
+        bf = [0.0_dp, f_vac/r, 0.0_dp]
+        db = 0; d2b = 0
+        db(2, 1) = -f_vac/r**2
+        d2b(2, 1) = 2*f_vac/r**3
+    end subroutine tf_field
+
+    subroutine ring_field(r, z, v, bf, db, d2b)
+        ! B = grad psi_c x grad phi; second derivatives are not needed
+        ! for the comparison of values and gradients.
+        real(dp), intent(in) :: r, z, v
+        real(dp), intent(out) :: bf(3), db(3, 2), d2b(3, 3)
+        real(dp) :: f, fg(2), fh(3)
+        call fb_coil_flux_value(coil, [r, z], f, fg, fh)
+        bf = [-fg(2)/r, 0.0_dp, fg(1)/r]
+        db(:, 1) = [fg(2)/r**2 - fh(2)/r, 0.0_dp, fh(1)/r - fg(1)/r**2]
+        db(:, 2) = [-fh(3)/r, 0.0_dp, fh(2)/r]
+        d2b = 0
+    end subroutine ring_field
+
+    subroutine window_jets(r, z, v, bf, db, d2b)
+        real(dp), intent(in) :: r, z, v
+        real(dp), intent(out) :: bf(3), db(3, 2), d2b(3, 3)
+        call wfield%eval(r, z, v, bf, db, d2b)
+    end subroutine window_jets
+
+    function state(sheet, x) result(u)
+        ! (geometry, phi without the gauge) in the order of fb_sheet_terms.
+        type(fb_sheet_t), intent(in) :: sheet
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp) :: u(fb_sheet_size(sheet))
+        integer :: b, m, k
+        do b = 1, sheet%nb
+            do m = 1, sheet%nmode
+                do k = 1, 2
+                    u(fb_sheet_geometry_index(sheet, k, m, b)) = x(k, b, m)
+                end do
+                if (fb_sheet_phi_index(sheet, m, b) > 0) &
+                    u(fb_sheet_phi_index(sheet, m, b)) = sheet%surface%phi(b, m)
+            end do
+        end do
+    end function state
+
+    subroutine move(sheet, x, u)
+        type(fb_sheet_t), intent(inout) :: sheet
+        real(dp), intent(inout) :: x(:, :, :)
+        real(dp), intent(in) :: u(:)
+        integer :: b, m, k
+        do b = 1, sheet%nb
+            do m = 1, sheet%nmode
+                do k = 1, 2
+                    x(k, b, m) = u(fb_sheet_geometry_index(sheet, k, m, b))
+                end do
+                if (fb_sheet_phi_index(sheet, m, b) > 0) &
+                    sheet%surface%phi(b, m) = u(fb_sheet_phi_index(sheet, m, b))
+            end do
+        end do
+    end subroutine move
+
+    function chain_log_integral(sheet, x) result(total)
+        ! oint ln R dZ along the P_k chain of mode 1, 20 Gauss points per panel.
+        type(fb_sheet_t), intent(in) :: sheet
+        real(dp), intent(in) :: x(:, :, :)
+        real(dp) :: total, gx(20), gw(20), xi, r, dz, nl(4), dn(4)
+        integer :: p, q, i, j, node, deg
+        deg = sheet%surface%degree
+        call gauss_legendre(20, gx, gw)
+        gx = 0.5_dp*(gx + 1); gw = 0.5_dp*gw
+        total = 0
+        do p = 1, sheet%surface%n_panels
+            do q = 1, 20
+                xi = gx(q)
+                nl = 0; dn = 0
+                do i = 1, deg + 1
+                    do j = deg + 1, 1, -1
+                        nl(i) = nl(i)*xi + sheet%surface%lagrange(i, j)
+                        if (j > 1) dn(i) = dn(i)*xi + (j - 1)*sheet%surface%lagrange(i, j)
+                    end do
+                end do
+                r = 0; dz = 0
+                do i = 1, deg + 1
+                    node = (p - 1)*deg + i
+                    if (node > sheet%nb) node = node - sheet%nb
+                    r = r + nl(i)*x(1, node, 1)
+                    dz = dz + dn(i)*x(2, node, 1)
+                end do
+                total = total + gw(q)*log(r)*dz
+            end do
+        end do
+    end function chain_log_integral
+
+    subroutine window_grid(field)
+        ! mgrid of the window coils (1e5 A, nfp = 3) plus F grad(phi) on
+        ! R in [2.2, 3.9], Z in [-1.3, 1.3] (h = 0.025), 48 planes per period,
+        ! and its spline field.
+        type(mgrid_jets_t), intent(out) :: field
+        integer, parameter :: ir = 69, jz = 105, kp = 48
+        type(mgrid_basis_t) :: basis
+        real(dp), allocatable :: b(:, :, :, :, :)
+        integer :: i, j, l, st
+        call make_windows(1.0e5_dp)
+        allocate (b(3, ir, jz, kp, 1))
+        !$omp parallel do private(i, j, l) collapse(2)
+        do l = 1, kp
+            do j = 1, jz
+                do i = 1, ir
+                    b(:, i, j, l, 1) = cylindrical_window_field(2.2_dp + 1.7_dp*(i - 1)/(ir - 1), &
+                        -1.3_dp + 2.6_dp*(j - 1)/(jz - 1), 2*pi*(l - 1)/(3*kp))
+                end do
+            end do
+        end do
+        call mgrid_basis_init(basis, b, 3, 2.2_dp, 3.9_dp, -1.3_dp, 1.3_dp, [1.0_dp], 5, st)
+        if (st /= 0) error stop 'window mgrid'
+        call mgrid_jets_init(basis, [1.0_dp], [3.05_dp, 0.0_dp], field, st)
+        if (st /= 0) error stop 'window spline'
     end subroutine
 
     function cylindrical_window_field(r, z, p) result(bcyl)

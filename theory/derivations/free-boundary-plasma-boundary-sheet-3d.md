@@ -60,20 +60,34 @@ de[ξ] = −½∮|B_+|² ξ·n dA as before (same function of Γ_p).
 The sheet minimises (3) over φ at fixed net currents (the self term is a positive inductance), so
 L is concave in φ and no multiplier is needed.
 
-Coil term without A_c. With Φ = φ + I_t u + I_p' v/2π, integrating ∮∇_sΦ·(A_c × n) by parts on
-the torus cut along u = 0 and v = 0, and using ∇_s·(A_c × n) = B_c·n,
+Coil term without A_c. In the parameters κ dA = (Φ_u X_v − Φ_v X_u) du dv by (2), and for single-
+valued φ, with (X_u·∇A·X_v − X_v·∇A·X_u) = (∇×A)·(X_u × X_v),
 
 \[
-\oint \kappa\cdot A_c\,dA = \mu_0\Big[\oint \phi\, B_c\cdot n\, dA + I_t\,\Psi_t + I_p'\,\Psi_p\Big], \tag{4}
+\iint A\cdot(\phi_u X_v - \phi_v X_u)\,du\,dv = -\iint \phi\, B\cdot N\,du\,dv . \tag{4a}
 \]
 
-with Ψ_t the coil flux through a surface spanning the toroidal loop u = 0 and Ψ_p the coil flux
-through the poloidal cross-section v = 0 (orientation by the cut). Both spanning surfaces can lie
-in D, which is coil-free:
+The ramps of Φ = φ + I_t u + I_p' v/2π on the torus cut at u = 0 and v = 0 give in addition the
+boundary terms of the same integration by parts, so that
 
-- Ψ_p: the cross-section of D at v = 0, the image of the reference disc under the plasma map;
-- Ψ_t: the ribbon from a fixed loop L_0 inside D (the reference axis) to the loop u = 0, plus the
-  flux through L_0, which is constant and drops out with the fixed I_t.
+\[
+\oint \kappa\cdot A_c\,dA = -\iint_{[0,1)\times[0,2\pi)} \Phi\, B_c\cdot N\,du\,dv
+  + I_t\,\Psi_t - I_p'\,\Psi_p , \tag{4}
+\]
+
+with Ψ_t = ∮ A_c·dl along the loop u = 0 in the direction of increasing v and Ψ_p = ∮ A_c·dl
+along the loop v = 0 in the direction of increasing u. Both are coil fluxes through spanning
+surfaces, which can lie in D, which is coil-free:
+
+- Ψ_p: the fan P(s, u) = c + s(X(u, 0) − c) from a point c of D in the plane v = 0, with
+  Ψ_p = ∫∫ B_c·(P_s × P_u) ds du = ∫∫ s B_φ (ΔZ R_u − ΔR Z_u) ds du;
+- Ψ_t: the flux through a fixed loop L inside D (the initial magnetic axis) plus the ribbon
+  P(s, v) = L(v) + s(X(0, v) − L(v)), ∫∫ B_c·(P_s × P_v) ds dv. The flux through L is constant
+  and drops out with the fixed I_t.
+
+The net currents follow from Ampère's law in D: I_t = μ0 I_φ along +v (κ units) and, for a
+counter-clockwise chain in (R, Z), I_p' = −2πF, which cancels the coil circulation 2πF of B_c on a
+toroidal loop in D (o = −1 for a clockwise chain flips the sign).
 
 So the energy needs B_c and its jets only inside D and on Γ_p, which the mgrid interpolant
 supplies.
@@ -89,8 +103,10 @@ supplies.
   coefficients; near coincidence X − Y = ρ Q with Q a divided difference, so the integrand is
   κ_x·κ_y/|Q| with ρ absorbed in the singular rule. The value, gradient and Hessian of this leaf
   are generated with FortSym; the derivatives of the discrete energy are exact.
-- Coil term: (4) with φ B_c·n on the same surface quadrature, Ψ_p on the plasma cross-section
-  quadrature and Ψ_t on a ribbon quadrature, all with B_c jets.
+- Coil term: (4) with Φ B_c·N on the same surface quadrature (Gauss per patch), Ψ_p on the fan
+  and Ψ_t on the ribbon (Gauss in s and along u or v), all with B_c jets; the integrands and their
+  derivatives in the boundary inputs are generated with FortSym (gen/gen_sheet_flux.f90).
+- Gauge: K vanishes for constant φ, so φ of mode 1 at chain node 1 is fixed.
 
 ## 5. Newton system
 
@@ -100,15 +116,34 @@ n_p − k, negative n_φ + n_slide + k.
 
 ## 6. Checks
 
-- Axisymmetric limit: for an axisymmetric Γ_p and coils, (3)–(4) must give the energy, gradient
-  and solution of the axisymmetric single-layer formulation (same equilibrium, the tokamak and
-  D-shape decks).
-- Field inside D: the coils plus the solved sheet give |B| at interior points small against |B_+|.
-- Central differences of the gradient and Hessian for every block.
-- Vacuum oracle: Γ_p a flux surface of a known vacuum field (coils plus a current filament) gives
-  zero pressure-balance defect.
+Test `ideal_fb_sheet_vacuum` (P2 chain around an ellipse):
+
+| check | result |
+|---|---|
+| F alone: L_v = πF²∫∫dR dZ/R/μ0, the toroidal-field term of the axisymmetric form | 1.8e-6 |
+| axisymmetric limit (PF rings, F = 0): L_v − I_t Ψ(L)/μ0 against the single layer | 4.3e-7 (24 nodes), 2.3e-7 (48) |
+| node gradient against the single layer (different discretisations, O(h²)) | 2.7e-3, 6.9e-4 |
+| 3D surface (nfp = 3, one toroidal mode) in a fitted window-coil field: gradient, Hessian vs central differences | 4.9e-10, 7.4e-10 |
+
+The toroidal intervals are at most three poloidal panel lengths long; the energy error decays
+exponentially with nv (2.4e-2, 2.4e-3, 1.6e-4, 2.0e-6, 2.4e-9 for nv = 4 … 64 on the ellipse).
 
 ## 7. Sources
 
-To be completed with the survey of published methods and open-source codes (repository, commit,
-licence) before the first landing.
+Published methods: the relative-coordinate pair rule follows S. A. Sauter and C. Schwab, Numer.
+Math. 78, 211 (1997), doi:10.1007/s002110050311; surface-current potentials on toroidal surfaces as
+in NESCOIL and REGCOIL. No code was copied. Open-source codes read for the survey of vacuum
+treatments (repository, commit, licence):
+
+| code | repository | commit | licence | read for |
+|---|---|---|---|---|
+| BIEST | github.com/dmalhotra/BIEST | 2aeea0d | Apache-2.0 | partition-of-unity singular quadrature |
+| DESC | github.com/PlasmaControl/DESC | d644e62 | MIT | free-boundary objective and quadrature |
+| VMEC++ | github.com/proximafusion/vmecpp | 95ec135 | MIT | NESTOR vacuum |
+| VMEC2000 | github.com/hiddenSymmetries/VMEC2000 | 70c637a | MIT | NESTOR vacuum |
+| SIMSOPT | github.com/hiddenSymmetries/simsopt | 912bdcc | MIT | virtual casing |
+| virtual-casing | github.com/hiddenSymmetries/virtual-casing | 81cf137 | Apache-2.0 | virtual casing |
+| REGCOIL | github.com/landreman/regcoil | 528c5d0 | BSD-2-Clause | current potential on a torus |
+| FreeGS | github.com/freegs-plasma/freegs | 5b41fe5 | LGPL-3.0 | study only |
+| FMM3D | github.com/flatironinstitute/FMM3D | 0e13b3d | Apache-2.0 | licence only |
+| ZetaTrap3D | github.com/bobbielf2/ZetaTrap3D | 26052f4 | MIT | licence only |

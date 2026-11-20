@@ -26,10 +26,11 @@ program nested_equilibrium
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
-        ideal_fb_init_bem, ideal_fb_bem_settle, ideal_fb_fix_vertical
+        ideal_fb_init_bem, ideal_fb_bem_settle, ideal_fb_fix_vertical, ideal_fb_init_sheet
     use milca_ideal_fb_bem, only: fb_coil_flux_t
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
-    use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
+    use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes, &
+        mgrid_jets_t, mgrid_jets_init
     use milca_ideal_fb_nested, only: fb_nested_geometry, fb_nested_mesh, &
         fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t, &
         fb_nested_plasma_mesh, fb_nested_coil_flux
@@ -104,11 +105,12 @@ program nested_equilibrium
     real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
     real(dp), allocatable :: fb_curve(:)
     ! Vacuum of the free boundary: 'bem' (sheet current on Gamma_p, no vacuum
-    ! mesh; axisymmetric decks), 'shell' (shell to Gamma_c) or 'auto' (bem for
-    ! axisymmetric decks, otherwise shell).
+    ! mesh: the axisymmetric single layer, or the 3D current potential with
+    ! toroidal modes), 'shell' (shell to Gamma_c) or 'auto' (bem).
     character(8) :: vacuum
-    logical :: use_bem = .false.
+    logical :: use_bem = .false., sheet_3d = .false.
     type(fb_coil_flux_t) :: coil_flux
+    type(mgrid_jets_t) :: coil_field
     real(dp) :: bem_f_vac, bem_f_spread
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
@@ -161,9 +163,8 @@ program nested_equilibrium
         error stop 'nested_equilibrium: coupling_margin must be positive'
     if (vacuum /= 'auto' .and. vacuum /= 'shell' .and. vacuum /= 'bem') &
         error stop 'nested_equilibrium: vacuum is auto, bem or shell'
-    use_bem = vacuum == 'bem' .or. (vacuum == 'auto' .and. ntor == 0 .and. map_ntor <= 0)
-    if (free_boundary .and. use_bem .and. (ntor /= 0 .or. map_ntor > 0)) &
-        error stop 'nested_equilibrium: vacuum = bem needs an axisymmetric deck'
+    use_bem = vacuum /= 'shell'
+    sheet_3d = use_bem .and. (ntor /= 0 .or. map_ntor > 0)
     call run%open_resolved(unit)
     write (unit, nml=nested_input)
     call run%close_resolved(unit)
@@ -371,11 +372,20 @@ contains
         print '(a,3i5,a,i0,a,i0)', 'mgrid ir jz kp', grid%ir, grid%jz, grid%kp, &
             ', nfp ', grid%nfp, ', coil groups ', grid%nextcur
         call mgrid_current_nodes(coil_basis, extcur(:grid%nextcur), coils_inside)
+        ! the 3D sheet needs no coupling surface: coils near the plasma are
+        ! no obstacle, only the grid box is
+        if (sheet_3d) coils_inside = coils_inside(:, :0)
         call fb_nested_geometry(boundary_input, nfp, coupling_margin, [grid%rmin, &
             grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
             fb_curve, margin_used, local, message)
         if (local /= 0) call fail(trim(message))
-        if (use_bem) then
+        if (sheet_3d) then
+            call mgrid_jets_init(coil_basis, extcur(:grid%nextcur), fb_centre, coil_field, &
+                local)
+            if (local /= 0) call fail('the coil field spline of the mgrid failed')
+            print '(a,es12.4,a,i0)', 'coil field spline: F_vac (T m) ', coil_field%f_vac, &
+                ', grid harmonics ', coil_field%kmax
+        else if (use_bem) then
             ! Gamma_c only selects the coil-free grid nodes of the fit
             call fb_nested_coil_flux(coil_basis, extcur(:grid%nextcur), fb_centre, &
                 fb_curve, coil_flux, bem_f_vac, bem_f_spread, local)
@@ -477,6 +487,14 @@ contains
         integer :: local
         call fb_nested_plasma_mesh(mesh, fb_centre, fb_axes, nodes, degree, local)
         if (local /= 0) call fail('the plasma mesh failed')
+        if (sheet_3d) then
+            call ideal_fb_init_sheet(next, mesh, chart, seed, nfp, ntor_level, &
+                coil_field, circulation, local, nphi=max(1, 4*ntor_level + 1))
+            if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
+            print '(a,es12.4,a,i0,a,i0)', 'F_vac (T m)', next%f_vac, ', unknowns ', &
+                next%n, ', modes ', ntor_level
+            return
+        end if
         call ideal_fb_init_bem(next, mesh, chart, seed, nfp, bem_f_vac, &
             circulation, coil_flux, degree - 1, local, nphi=1)
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
