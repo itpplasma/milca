@@ -4,6 +4,8 @@
 # tolerances of test_nested_equilibrium_app (axis 1.5 mm, wb 2e-5, volume
 # 1e-4, edge iota 1e-3). The exterior Steklov-Poincare coupling is exact,
 # so the equilibrium does not depend on where Gamma_c lies.
+# With VACUA (for example "bem;shell") the solves run at the first margin
+# with each vacuum instead, and must give the same equilibrium.
 file(MAKE_DIRECTORY "${WORK}")
 execute_process(COMMAND "${MGRID}" tokamak "${WORK}/mgrid_tokamak.nc"
     RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE errors)
@@ -12,9 +14,21 @@ if(NOT status EQUAL 0)
 endif()
 file(READ "${CONFIG}" deck)
 set(values "")
-foreach(margin 0.6 0.3)
+if(DEFINED VACUA)
+    set(cases ${VACUA})
+else()
+    set(cases 0.6 0.3)
+endif()
+foreach(case ${cases})
+    if(DEFINED VACUA)
+        set(margin "0.6-${case}")
+        set(setting "coupling_margin = 0.6, vacuum = '${case}'")
+    else()
+        set(margin ${case})
+        set(setting "coupling_margin = ${case}")
+    endif()
     file(MAKE_DIRECTORY "${WORK}/margin-${margin}/output")
-    string(REPLACE "extcur(1)" "coupling_margin = ${margin}, extcur(1)" text "${deck}")
+    string(REPLACE "extcur(1)" "${setting}, extcur(1)" text "${deck}")
     file(WRITE "${WORK}/margin-${margin}/input.nml" "${text}")
     file(CREATE_LINK "${WORK}/mgrid_tokamak.nc" "${WORK}/margin-${margin}/mgrid_tokamak.nc"
         COPY_ON_ERROR)
