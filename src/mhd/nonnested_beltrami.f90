@@ -7,8 +7,8 @@ module milca_nonnested_beltrami
     use fortfem_meridian_feec_n, only: meridian_load
     use fortfem_meridian_fourier_curl, only: meridian_fourier_curl_curl, &
         meridian_fourier_curl, &
-        meridian_fourier_pairing, &
-        meridian_fourier_diagonal_mass
+        meridian_fourier_pairing_curl, &
+        meridian_fourier_identity_curl_curl
     use fortsparse, only: csc_t, csc_matmul, csc_matvec, csc_transpose, &
         csc_from_triplet, csc_normalize_symmetric_raw, &
         sparse_solver_t, &
@@ -188,25 +188,12 @@ contains
             call meridian_fourier_curl_curl(field%fs, system%modes, nphi, metric, &
                 system%energy, st)
         else
-            call meridian_fourier_diagonal_mass(field%fs, 2, system%modes, pair, st)
-            if (st /= 0) return
-            call csc_matmul(pair, system%curl, system%energy, fst)
-            if (.not. status_ok(fst)) return
-            call csc_transpose(system%curl, pair, fst)
-            if (.not. status_ok(fst)) return
-            block
-                type(csc_t) :: product
-                call csc_matmul(pair, system%energy, product, fst)
-                if (.not. status_ok(fst)) return
-                system%energy = product
-            end block
-            st = 0
+            call meridian_fourier_identity_curl_curl(field%fs, system%modes, &
+                system%energy, st)
         end if
         if (st /= 0) return
-        call meridian_fourier_pairing(field%fs, system%modes, pair, st)
+        call meridian_fourier_pairing_curl(field%fs, system%modes, system%helicity, st)
         if (st /= 0) return
-        call csc_matmul(pair, system%curl, system%helicity, fst)
-        if (.not. status_ok(fst)) return
         call csc_matmul(field%fs%mass(1), field%fs%grad%a, system%gauge, fst)
         if (.not. status_ok(fst)) return
         allocate (fixed(n), system%index(n), system%lift(n), &
