@@ -1,5 +1,7 @@
 # 3D free boundary of the nested map with circuit currents as parameters
 
+Superseded for new work by the [free boundary on a moving spline mesh](free-boundary-ale.md) (2026-11-20).
+
 Status: first layer, branch `lane/fb3d-nested-map-20261025`. Module
 `milca_ideal_fb_circuits` (`src/mhd/ideal_fb_circuits.f90`) on top of the N4
 residual in `milca_ideal_free_boundary` ([ideal-free-boundary.md](ideal-free-boundary.md)),

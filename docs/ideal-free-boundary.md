@@ -1,5 +1,7 @@
 # 3D free boundary of the map lane (N4)
 
+Superseded for new work by the [free boundary on a moving spline mesh](free-boundary-ale.md) (2026-11-20).
+
 Status: first implementation on branch `gs-3d-free-boundary` (built on the N1
 map lane and the L4 per-n BEM). Design: milca_3d_tc24 DESIGN §7.3, row N4;
 [equilibrium-core.md](equilibrium-core.md) D3, D6, D8. Module
