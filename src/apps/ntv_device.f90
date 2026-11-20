@@ -163,11 +163,13 @@ module milca_ntv_device
     !> tolerance was met; mesh_unknowns is the largest mesh solved, adapted or
     !> on a fixed band mesh. In the coupled finite-width kernel, thin_weight is
     !> the share of the K_11 weight below the speed up to which the slow nodes
-    !> without a pitch point are solved on thin orbits.
+    !> without a pitch point are solved on thin orbits. residual is the largest
+    !> final GMRES residual of the energy-coupled kernel, above its tolerance
+    !> when a solve stalled on the rounding floor and was accepted.
     type :: ntv_species_result_t
         real(dp) :: k11 = 0, k12 = 0, k21 = 0, k22 = 0, dpsi_dr = 0, gamma_psi = 0, &
             heat_flux = 0, torque = 0, offset_rotation = 0, lost_weight = 0, mesh_error = 0, &
-            thin_weight = 0
+            thin_weight = 0, residual = 0
         integer :: factorisations = 0, iterations = 0, status = DEVICE_OK, unsettled = 0, &
             mesh_unknowns = 0
         ! Finite orbit width with deposit bins: deposit(b) is the part of the
@@ -508,7 +510,7 @@ contains
             integer, allocatable :: mid(:, :)
             logical, allocatable :: lost(:, :), thin(:, :)
             real(dp) :: lnl(nsp, nsp), kk(nsp, nsp, 2), qq(nsp, nsp, 2), x_cut, y_lost, y_ok, &
-                x_thin(nsp)
+                x_thin(nsp), gmres_res
             integer :: aa, kx, nx, ks, its, attempt, a_lost, k_ok
             ! Speed grids tried while orbits of the top nodes leave the model.
             integer, parameter :: max_attempts = 6
@@ -644,13 +646,15 @@ contains
             end do
             if (ks == HP_NO_MEMORY) st = DEVICE_MEMORY
             if (ks /= HP_OK) return
-            call hp_energy_coefficients(sys, j0(is), kk, qq, node_r, its, ks)
+            call hp_energy_coefficients(sys, j0(is), kk, qq, node_r, its, ks, &
+                residual=gmres_res)
             call hp_energy_free(sys)
             if (ks == HP_NO_CONVERGENCE) st = DEVICE_NO_CONVERGENCE
             if (ks /= HP_OK) return
             call energy_fluxes(kk, qq, is, species, prof, psi_pol_s, dpsi_dr, result(is, :))
             result(is, :)%factorisations = sys%n_factors
             result(is, :)%iterations = its
+            result(is, :)%residual = gmres_res
             result(is, :)%mesh_unknowns = maxval(sys%node%n)
             result(is, :)%lost_weight = tail_weight(x_cut)
             if (res%orbit_width) then

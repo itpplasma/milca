@@ -449,6 +449,7 @@ contains
         type(coupled_t) :: c
         complex(dp), allocatable :: h(:), b(:), u(:)
         real(dp), allocatable :: re(:), im(:)
+        real(dp) :: residual
         integer :: its, status
         call build([md], [1.0_dp], 1e-2_dp, .false., COLLOP_LORENTZ, c, status)
         if (status /= HP_OK) error stop 'hp_energy_setup failed'
@@ -458,10 +459,14 @@ contains
         call random_number(im)
         h = h + cmplx(re - 0.5_dp, im - 0.5_dp, dp)
         call hp_energy_apply(c%sys, h, b)
-        call hp_energy_solve(c%sys, b, u, its, status, tolerance=1e-16_dp)
+        call hp_energy_solve(c%sys, b, u, its, status, tolerance=1e-16_dp, &
+            residual=residual)
         print '(a,i0,a,i0)', 'status ', status, ', GMRES iterations ', its
         ok = status == HP_OK
         ok = below('GMRES iterations', real(its, dp), 399.0_dp) .and. ok
+        ! The accepted residual is reported: above the tolerance asked for.
+        ok = residual > 1e-16_dp .and. ok
+        ok = below('reported residual', residual, 1e-6_dp) .and. ok
         if (status /= HP_OK) return
         call speed_mass(c, re)
         ok = below('solution error in the speed-mass norm, relative', norm2(re*abs(u - h)) &
