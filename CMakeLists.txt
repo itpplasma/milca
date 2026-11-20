@@ -344,7 +344,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # boundary trace projection #152, the toroidal period #154 and its tensor
 # forms #160, factored anisotropic apply, the toroidal sheet-current energy
 # #224-#227 and its corrected trapezoidal rule #228-#231).
-set(MILCA_FORTFEM_REVISION "f692b9c5f571fa45d7c30ff60250a4a1a0446793")
+set(MILCA_FORTFEM_REVISION "c62338a9bbe3a5343dd7da58817684d21f70e969")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})

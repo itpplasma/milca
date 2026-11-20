@@ -217,15 +217,15 @@ contains
         u(8, :, :) = matmul(matmul(sheet%ub, phi), sheet%dt(:, :sheet%nv)) + jnet/(2*pi)
     end subroutine grid_inputs
 
-    pure function toroidal_current(u, jnet) result(u0)
-        ! The inputs with Phi = j v/(2 pi) only: the poloidal sheet current that
-        ! cancels the coil toroidal field.
-        real(dp), intent(in) :: u(:, :, :), jnet
-        real(dp) :: u0(size(u, 1), size(u, 2), size(u, 3))
-        u0 = u
-        u0(7, :, :) = 0
-        u0(8, :, :) = jnet/(2*pi)
-    end function toroidal_current
+    pure function toroidal_grid(sheet, jnet) result(grid)
+        ! The sheet grid less the energy of Phi = j v/(2 pi) alone, the
+        ! poloidal sheet current that cancels the coil toroidal field.
+        type(fb_sheet_t), intent(in) :: sheet
+        real(dp), intent(in) :: jnet
+        type(tst_grid_t) :: grid
+        grid = sheet%grid
+        grid%jt = jnet/(2*pi)
+    end function toroidal_grid
 
     subroutine grid_adjoint(sheet, g, gx, gphi)
         ! Transpose of grid_inputs (without the ramps): g(8, nu, nv) ->
@@ -391,22 +391,17 @@ contains
         real(dp), intent(out) :: energy
         real(dp), intent(out), optional :: gx(:, :, :), gphi(:, :)
         real(dp) :: u(8, sheet%nu, sheet%nv), g(8, sheet%nu, sheet%nv), gl(sheet%nu, sheet%nmode)
-        real(dp) :: g0(8, sheet%nu, sheet%nv), e0
         real(dp) :: e, jnet, ax(2, sheet%nb, sheet%nmode), ap(sheet%nph, sheet%nmode)
         real(dp) :: pn(sheet%nu, sheet%nmode)
         jnet = -2*pi*f_vac*sheet%o
         pn = matmul(sheet%ub, sheet%phi)
         call grid_inputs(sheet, x, sheet%phi, current, jnet, u)
         if (present(gx)) then
-            call tst_energy(sheet%grid, u, e, g)
-            call tst_energy(sheet%grid, toroidal_current(u, jnet), e0, g0)
-            g(1:6, :, :) = g(1:6, :, :) - g0(1:6, :, :)
+            call tst_energy(toroidal_grid(sheet, jnet), u, e, g)
         else
-            call tst_energy(sheet%grid, u, e)
-            call tst_energy(sheet%grid, toroidal_current(u, jnet), e0)
+            call tst_energy(toroidal_grid(sheet, jnet), u, e)
             g = 0
         end if
-        e = e - e0
         gl = 0
         call coupling(sheet, u, pn, field, current, jnet, 1, e, g, gl)
         energy = -e/mu0
@@ -448,14 +443,7 @@ contains
         dp0(1, 1) = 0
         dpn = matmul(sheet%ub, dp0)
         call grid_inputs(sheet, dx, dp0, 0.0_dp, 0.0_dp, du)
-        call tst_hvp(sheet%grid, u, du, hg)
-        block
-            real(dp) :: d0(8, sheet%nu, sheet%nv), h0(8, sheet%nu, sheet%nv)
-            d0 = du
-            d0(7:8, :, :) = 0
-            call tst_hvp(sheet%grid, toroidal_current(u, jnet), d0, h0)
-            hg(1:6, :, :) = hg(1:6, :, :) - h0(1:6, :, :)
-        end block
+        call tst_hvp(toroidal_grid(sheet, jnet), u, du, hg)
         g = 0; gl = 0; hl = 0; e = 0
         call coupling(sheet, u, pn, field, current, jnet, 2, e, g, gl, du, dpn, hg, hl)
         call grid_adjoint(sheet, hg, hx, hphi)
