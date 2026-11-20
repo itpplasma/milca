@@ -101,8 +101,7 @@ p'(\psi)=\frac{2\pi q}{\Phi_{edge}}\frac{dp}{ds}.
 |---|---|---|
 | MILCA | `src/equilibrium/grad_shafranov.f90` weighted P1 assembly; generated source/field/primitive leaves | Strong/source algebra and assembly inspected. Weak boundary theorem, quadrature/continuous error and nonlinear implicit derivatives are separate. |
 | FreeGS | `gradshafranov.py::GSsparse`, `equilibrium.py::solve`, `jtor.py::ProfilesPprimeFfprime` | Native second-order operator/current law inspected. Curved-LCFS mask is external; signed q and boundary refinement remain open. |
-| Public CHEASE | `setupa/setupb/curent/matrix/surface` | Hermite weak/Picard paths inspected with native normalization. Every source/constraint selector and full SI current correspondence are not proved. |
-| MARS CHEASE | Monolithic `SETUPA/SETUPB/CURENT/SURFACE` | Shared algorithm ancestry with public CHEASE. Native exports/endpoint derivatives differ; no separate independence vote. |
+| CHEASE | `setupa/setupb/curent/matrix/surface` | Hermite weak/Picard paths inspected with native normalization. Every source/constraint selector and full SI current correspondence are not proved. |
 | Original VMEC | `bcovar.f`, `profil1d.f`, `add_fluxes.f90`, force projections | Continuous nested field and pressure constraint inspected. Full discrete force variation/current-constrained branches remain open. |
 | VMEC++ | `radial_profiles.cc`, `ideal_mhd_model.cc` and local force kernels | Same variational ancestry; exact output-map/profile functions must match native pin. Complete discrete constraints and all modes remain open. |
 | DESC | `_field.py`, `_equil.py`, `ForceBalance`, profile classes | Force collocation differs from energy objective. Existing ten exact identities are local algebra, not full collocation/GS equivalence. |
@@ -125,7 +124,7 @@ p'(\psi)=\frac{2\pi q}{\Phi_{edge}}\frac{dp}{ds}.
 ## Source and literature anchors
 
 - MILCA inspected base: `5d75dfc6d9a43b0c3af1f61b44163a08f8c0a2a4`; generated source and exact FortSym pin are hashed in the device case closure receipt.
-- [GS source ledger](https://github.com/itpplasma/writeups/blob/main/theory/gs_solver_source_correspondence.md): KIN/FreeGS/public and MARS CHEASE pins, routine paths and weak/source normalizations.
+- [GS source ledger](https://github.com/itpplasma/writeups/blob/main/theory/gs_solver_source_correspondence.md): KIN, FreeGS and CHEASE pins, routine paths and weak/source normalizations.
 - [Original VMEC ledger](https://github.com/itpplasma/writeups/blob/main/theory/vmec2000_equilibrium_source_correspondence.md): native magnetic field, shell pressure energy, profile families and flux/current constraints.
 - [DESC ledger](https://github.com/itpplasma/writeups/blob/main/theory/desc_equilibrium_source_correspondence.md): collocation residual, native signed flux, axisymmetric reduction and separate Energy objective.
 - [GVEC ledger](https://github.com/itpplasma/writeups/blob/main/theory/gvec_equilibrium_source_correspondence.md): fixed-pressure nested energy, native field/force and documented variation-sign differences.
