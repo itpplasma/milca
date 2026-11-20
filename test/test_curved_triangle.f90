@@ -51,7 +51,32 @@ program test_curved_triangle
         if (abs(expected(2) + point(2)) > 1.0e-14_dp) error stop 'periodic parity'
     end do
     if (errors(1)/errors(2) < 14) error stop 'cubic spline fourth order'
-    print *, 'PASS: generic P2 geometry, inverse, signed jets and periodic spline'
+    ! Square with four samples per side and its vertices as corners: every
+    ! side stays straight (the periodic spline bulges at the vertices).
+    do j = 1, 16
+        t = real(mod(j - 1, 4), dp)/4
+        select case ((j - 1)/4)
+        case (0)
+            samples(:, j) = [5 + t, 0.0_dp]
+        case (1)
+            samples(:, j) = [6.0_dp, t]
+        case (2)
+            samples(:, j) = [6 - t, 1.0_dp]
+        case default
+            samples(:, j) = [5.0_dp, 1 - t]
+        end select
+    end do
+    call initialize_periodic_curve(curve, samples(:, :16), status, &
+        corners=[(mod(j - 1, 4) == 0, j = 1, 16)])
+    if (status /= 0) error stop 'cornered spline initialization'
+    errors(1) = 0
+    do j = 0, 159
+        call curve_value(curve, (j + 0.5_dp)/160, point)
+        errors(1) = max(errors(1), min(abs(point(1) - 5), abs(point(1) - 6), &
+            abs(point(2)), abs(point(2) - 1)))
+    end do
+    if (errors(1) > 1.0e-14_dp) error stop 'cornered spline leaves the square'
+    print *, 'PASS: generic P2 geometry, inverse, signed jets, periodic and cornered spline'
 contains
     pure subroutine map(x, y)
         real(dp), intent(in) :: x(2)

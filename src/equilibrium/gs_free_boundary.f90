@@ -103,15 +103,15 @@ module milca_gs_free_boundary
 
     type, public :: gs_fb_config_t
         integer :: mode = GS_FB_XPOINT
-        integer :: axis_sign = 1   !< +1: the axis is the flux maximum, -1 minimum
-        real(dp) :: axis_guess(2) = 0.0_dp      !< first guess of the magnetic axis
-        real(dp) :: xpoint_guess(2) = 0.0_dp    !< first guess of the X point
-        real(dp) :: search_radius = 0.5_dp      !< window of the stationary-point search
-        real(dp) :: cut_fraction = 1.0_dp       !< psi_b = psi_a + c (psi_X - psi_a)
-        real(dp), allocatable :: points(:, :)   !< limiter / target points (2, m)
+        integer :: axis_sign = 1 !< +1: the axis is the flux maximum, -1 minimum
+        real(dp) :: axis_guess(2) = 0.0_dp !< first guess of the magnetic axis
+        real(dp) :: xpoint_guess(2) = 0.0_dp !< first guess of the X point
+        real(dp) :: search_radius = 0.5_dp !< window of the stationary-point search
+        real(dp) :: cut_fraction = 1.0_dp !< psi_b = psi_a + c (psi_X - psi_a)
+        real(dp), allocatable :: points(:, :) !< limiter / target points (2, m)
         real(dp) :: quadrature_tolerance = 1.0e-9_dp
         real(dp) :: jacobian_tolerance = 1.0e-9_dp
-        real(dp) :: tolerance = 1.0e-10_dp      !< Newton: ||F|| / ||b + loads||
+        real(dp) :: tolerance = 1.0e-10_dp !< Newton: ||F|| / ||b + loads||
         !> A cell face whose nodes all satisfy |psi - psi_b| <= face_tolerance
         !! |psi_a - psi_b| lies on the plasma boundary (fitted mesh). 0 disables.
         real(dp) :: face_tolerance = 1.0e-10_dp
@@ -131,11 +131,11 @@ module milca_gs_free_boundary
 
     type, public :: gs_fb_system_t
         type(gs_coupling_t) :: coupling
-        type(gs_profile_law_t) :: law          !< normalised law, axis set per call
+        type(gs_profile_law_t) :: law !< normalised law, axis set per call
         type(gs_fb_config_t) :: cfg
         real(dp) :: mu0 = gs_mu0
-        real(dp), allocatable :: coil_load(:, :)   !< (n, circuits)
-        real(dp), allocatable :: extra_load(:)     !< psi-independent nodal load
+        real(dp), allocatable :: coil_load(:, :) !< (n, circuits)
+        real(dp), allocatable :: extra_load(:) !< psi-independent nodal load
         ! CSC pattern of J0 = A - M and the maps into it.
         integer, allocatable :: colptr(:), rowind(:)
         integer, allocatable :: slot_k(:), slot_trace(:, :), slot_cell(:, :, :)
@@ -150,29 +150,29 @@ module milca_gs_free_boundary
     type, public :: gs_fb_eval_t
         real(dp), allocatable :: residual(:), source(:)
         real(dp), allocatable :: ga(:), gb(:), ua(:), ub(:)
-        real(dp), allocatable :: mass(:, :, :)   !< M per cell, interface included
-        real(dp), allocatable :: interface_mass(:, :, :)  !< the interface part of M
+        real(dp), allocatable :: mass(:, :, :) !< M per cell, interface included
+        real(dp), allocatable :: interface_mass(:, :, :) !< the interface part of M
         logical, allocatable :: plasma_cell(:)
         real(dp) :: psi_axis = 0.0_dp, psi_bound = 0.0_dp
         real(dp) :: axis(2) = 0.0_dp, xpoint(2) = 0.0_dp
-        real(dp) :: plasma_current = 0.0_dp      !< int mu0 j dA / mu0 (A)
-        real(dp) :: interface_dropped = 0.0_dp   !< arcs that stalled at a saddle
-        integer :: face_cells = 0                !< plasma cell faces on the boundary
+        real(dp) :: plasma_current = 0.0_dp !< int mu0 j dA / mu0 (A)
+        real(dp) :: interface_dropped = 0.0_dp !< arcs that stalled at a saddle
+        integer :: face_cells = 0 !< plasma cell faces on the boundary
         logical :: has_jacobian = .false.
     end type gs_fb_eval_t
 
     type, public :: gs_fb_history_t
         integer :: iterations = 0
-        real(dp), allocatable :: residual(:)     !< ||F|| / scale per iterate
-        real(dp), allocatable :: step(:)         !< ||step||_inf per iteration
+        real(dp), allocatable :: residual(:) !< ||F|| / scale per iterate
+        real(dp), allocatable :: step(:) !< ||step||_inf per iteration
         real(dp), allocatable :: damping(:)
         real(dp), allocatable :: ip(:)
     end type gs_fb_history_t
 
     type, public :: gs_fb_refit_config_t
         integer :: max_refits = 4
-        real(dp) :: tolerance = 1.0e-3_dp   !< stop when Gamma_p moves < this * h
-        integer :: dense_factor = 8         !< rays per chain point (Gamma_p trace)
+        real(dp) :: tolerance = 1.0e-3_dp !< stop when Gamma_p moves < this * h
+        integer :: dense_factor = 8 !< rays per chain point (Gamma_p trace)
         integer :: project_iterations = 4
         !> A refit that leaves the distance above contraction * (previous distance)
         !! ends the loop at the discretisation floor (reported as stagnated).
@@ -180,10 +180,10 @@ module milca_gs_free_boundary
     end type gs_fb_refit_config_t
 
     type, public :: gs_fb_refit_report_t
-        integer :: refits = 0               !< mesh rebuilds performed
-        logical :: converged = .false.      !< chain within tolerance * h of boundary
-        logical :: stagnated = .false.      !< movement stopped contracting (floor)
-        real(dp) :: h = 0.0_dp              !< chain spacing of the final mesh
+        integer :: refits = 0 !< mesh rebuilds performed
+        logical :: converged = .false. !< chain within tolerance * h of boundary
+        logical :: stagnated = .false. !< movement stopped contracting (floor)
+        real(dp) :: h = 0.0_dp !< chain spacing of the final mesh
         real(dp) :: psi_bound = 0.0_dp
         !> Distance of the chain from the computed boundary, in units of h, on the
         !! mesh of pass 0, 1, ... (the last entry used is the final mesh).
@@ -488,7 +488,7 @@ contains
             end select
             p = start
             do iter = 1, 40
-             call triangle_basis_jet(p, shape(:ndof), grad(:, :ndof), hess(:, :, :ndof))
+                call triangle_basis_jet(p, shape(:ndof), grad(:, :ndof), hess(:, :, :ndof))
                 g = matmul(grad(:, :ndof), values)
                 h = 0.0_dp
                 do j = 1, ndof
@@ -521,15 +521,20 @@ contains
         end do
     end subroutine cell_maximum
 
-    subroutine cell_saddle(values, xi, found)
+    subroutine cell_saddle(values, xi, found, tolerance)
         !! Interior saddle (negative Hessian determinant) of the cell
-        !! polynomial nearest to the centroid.
+        !! polynomial nearest to the centroid. With `tolerance`, a saddle up to
+        !! that barycentric distance outside the cell is accepted and returned
+        !! clamped onto the cell (default 1e-12).
         real(dp), intent(in) :: values(:)
         real(dp), intent(out) :: xi(2)
         logical, intent(out) :: found
+        real(dp), intent(in), optional :: tolerance
         real(dp) :: shape(10), grad(2, 10), hess(2, 2, 10), p(2), g(2), h(2, 2)
-        real(dp) :: det, step(2), start(2)
+        real(dp) :: det, step(2), start(2), tol, b(3)
         integer :: ndof, iter, j, s
+        tol = 1.0e-12_dp
+        if (present(tolerance)) tol = tolerance
 
         ndof = size(values)
         found = .false.
@@ -547,7 +552,7 @@ contains
             end select
             p = start
             do iter = 1, 40
-             call triangle_basis_jet(p, shape(:ndof), grad(:, :ndof), hess(:, :, :ndof))
+                call triangle_basis_jet(p, shape(:ndof), grad(:, :ndof), hess(:, :, :ndof))
                 g = matmul(grad(:, :ndof), values)
                 h = 0.0_dp
                 do j = 1, ndof
@@ -562,7 +567,7 @@ contains
                 if (maxval(abs(step)) < 1.0e-15_dp) exit
             end do
             if (maxval(abs(p)) > 4.0_dp) cycle
-            if (min(1.0_dp - sum(p), p(1), p(2)) < -1.0e-12_dp) cycle
+            if (min(1.0_dp - sum(p), p(1), p(2)) < -tol) cycle
             call triangle_basis_jet(p, shape(:ndof), grad(:, :ndof), hess(:, :, :ndof))
             g = matmul(grad(:, :ndof), values)
             if (maxval(abs(g)) > 1.0e-9_dp*max(1.0_dp, maxval(abs(values)))) cycle
@@ -571,7 +576,8 @@ contains
                 h = h + hess(:, :, j)*values(j)
             end do
             if (h(1, 1)*h(2, 2) - h(1, 2)*h(2, 1) >= 0.0_dp) cycle
-            xi = p
+            b = max([1.0_dp - sum(p), p(1), p(2)], 0.0_dp)
+            xi = b(2:3)/sum(b)
             found = .true.
             return
         end do
@@ -597,7 +603,8 @@ contains
         real(dp) :: shape(10), values(10), xi(2), value, best, point(2), dist, best_dist
         real(dp) :: psi_x, level, local_best, local_axis(2), local_dist, local_point(2)
         real(dp) :: local_shape(10), local_psi
-        integer :: local_cell
+        real(dp), parameter :: tolerance(2) = [1.0e-12_dp, 0.1_dp]
+        integer :: local_cell, pass
         real(dp), allocatable :: shape_x(:)
         integer :: e, ndof, n, k, cell_best, stat, c, element
         logical :: found, any_found, near
@@ -665,51 +672,57 @@ contains
             any_found = .false.
             element = 0
             allocate (shape_x(ndof))
-            !$omp parallel default(shared) private(e, k, near, values, xi, found, &
-            !$omp& shape, point, stat, dist, local_dist, local_cell, local_point, &
-            !$omp& local_shape, local_psi)
-            local_dist = huge(1.0_dp)
-            local_cell = 0
-            local_point = 0.0_dp
-            local_shape = 0.0_dp
-            local_psi = 0.0_dp
-            !$omp do schedule(static)
-            do e = 1, size(state%triangles, 2)
-                near = .false.
-                do k = 1, ndof
-                    if (norm2(state%points(:, state%triangles(k, e)) - xpoint_hint) &
-                        <= cfg%search_radius) near = .true.
+            ! A refitted mesh puts the X-point of the previous pass on a vertex, where
+            ! the saddle of each adjacent cell polynomial can fall just outside its
+            ! cell; the second pass accepts such a saddle on the nearest cell edge.
+            do pass = 1, 2
+                !$omp parallel default(shared) private(e, k, near, values, xi, found, &
+                !$omp& shape, point, stat, dist, local_dist, local_cell, local_point, &
+                !$omp& local_shape, local_psi)
+                local_dist = huge(1.0_dp)
+                local_cell = 0
+                local_point = 0.0_dp
+                local_shape = 0.0_dp
+                local_psi = 0.0_dp
+                !$omp do schedule(static)
+                do e = 1, size(state%triangles, 2)
+                    near = .false.
+                    do k = 1, ndof
+                        if (norm2(state%points(:, state%triangles(k, e)) - xpoint_hint) &
+                            <= cfg%search_radius) near = .true.
+                    end do
+                    if (.not. near) cycle
+                    values(:ndof) = psi(state%triangles(:, e))
+                    call cell_saddle(values(:ndof), xi, found, tolerance(pass))
+                    if (.not. found) cycle
+                    call point_shape(state, e, xi, shape, point, stat)
+                    if (stat /= 0) cycle
+                    dist = norm2(point - xpoint_hint)
+                    if (dist < local_dist) then
+                        local_dist = dist
+                        local_cell = e
+                        local_point = point
+                        local_shape(:ndof) = shape(:ndof)
+                        local_psi = dot_product(shape(:ndof), values(:ndof))
+                    end if
                 end do
-                if (.not. near) cycle
-                values(:ndof) = psi(state%triangles(:, e))
-                call cell_saddle(values(:ndof), xi, found)
-                if (.not. found) cycle
-                call point_shape(state, e, xi, shape, point, stat)
-                if (stat /= 0) cycle
-                dist = norm2(point - xpoint_hint)
-                if (dist < local_dist) then
-                    local_dist = dist
-                    local_cell = e
-                    local_point = point
-                    local_shape(:ndof) = shape(:ndof)
-                    local_psi = dot_product(shape(:ndof), values(:ndof))
+                !$omp end do nowait
+                !$omp critical(gs_fb_saddle_scan)
+                if (local_cell /= 0) then
+                    if (local_dist < best_dist .or. &
+                        (local_dist <= best_dist .and. local_cell < element)) then
+                        best_dist = local_dist
+                        any_found = .true.
+                        element = local_cell
+                        xpoint = local_point
+                        shape_x = local_shape(:ndof)
+                        psi_x = local_psi
+                    end if
                 end if
+                !$omp end critical(gs_fb_saddle_scan)
+                !$omp end parallel
+                if (any_found) exit
             end do
-            !$omp end do nowait
-            !$omp critical(gs_fb_saddle_scan)
-            if (local_cell /= 0) then
-                if (local_dist < best_dist .or. &
-                    (local_dist <= best_dist .and. local_cell < element)) then
-                    best_dist = local_dist
-                    any_found = .true.
-                    element = local_cell
-                    xpoint = local_point
-                    shape_x = local_shape(:ndof)
-                    psi_x = local_psi
-                end if
-            end if
-            !$omp end critical(gs_fb_saddle_scan)
-            !$omp end parallel
             if (.not. any_found) return
             level = cfg%cut_fraction
             psi_bound = psi_axis + level*(psi_x - psi_axis)
@@ -760,14 +773,14 @@ contains
         status = GS_FB_OK
     end subroutine gs_fb_lcfs_levels
 
-  subroutine plasma_cells(state, psi, sigma, psi_bound, axis_cell, mode, cut_fraction, &
-                            axis, xpoint, flags)
+    subroutine plasma_cells(state, psi, sigma, psi_bound, axis_cell, mode, cut_fraction, &
+                              axis, xpoint, flags)
         !! Cells reached from the axis cell through cells that contain flux
         !! beyond the boundary level on the axis side. For the separatrix the
         !! half plane behind the X point (seen from the axis) is excluded:
         !! it holds the private flux region.
         type(gs_state_t), intent(in) :: state
-      real(dp), intent(in) :: psi(:), sigma, psi_bound, cut_fraction, axis(2), xpoint(2)
+        real(dp), intent(in) :: psi(:), sigma, psi_bound, cut_fraction, axis(2), xpoint(2)
         integer, intent(in) :: axis_cell, mode
         logical, allocatable, intent(out) :: flags(:)
         integer, allocatable :: queue(:)
@@ -823,8 +836,8 @@ contains
         integer, intent(out) :: status
         real(dp), parameter :: verts(2, 3) = reshape([0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, &
                                                       0.0_dp, 1.0_dp], [2, 3])
-      real(dp), parameter :: inward(2, 3) = reshape([0.0_dp, 1.0_dp, -1.0_dp, -1.0_dp, &
-                                                       1.0_dp, 0.0_dp], [2, 3])
+        real(dp), parameter :: inward(2, 3) = reshape([0.0_dp, 1.0_dp, -1.0_dp, -1.0_dp, &
+                                                         1.0_dp, 0.0_dp], [2, 3])
         real(dp) :: samples(4), roots(3), p(2), q(2), t, v(2), yacc(102)
         real(dp) :: shape(10), grad(2, 10), vmax
         integer :: ndof, k, j, nr, nstate
@@ -995,7 +1008,7 @@ contains
                     stalled_out = .true.
                     exit
                 end if
-              h = h*min(5.0_dp, max(0.2_dp, 0.9_dp*(max(enorm, 1.0e-10_dp))**(-0.2_dp)))
+                h = h*min(5.0_dp, max(0.2_dp, 0.9_dp*(max(enorm, 1.0e-10_dp))**(-0.2_dp)))
                 h = min(h, 0.2_dp/sp)
             end do
             stalled_out = .true.
@@ -1188,7 +1201,7 @@ contains
         type(gs_profile_law_t) :: law
         type(gs_profile_jacobian_t) :: jac
         real(dp), allocatable :: saved(:), action(:), load(:)
-    real(dp) :: pp_edge, ff_edge, controls(10), phi(10), dropped_cell, cell_mass(10, 10)
+        real(dp) :: pp_edge, ff_edge, controls(10), phi(10), dropped_cell, cell_mass(10, 10)
         real(dp) :: sigma, integral
         real(dp), allocatable :: cell_phi(:, :)
         logical, allocatable :: face_edge(:, :)
@@ -1774,7 +1787,7 @@ contains
         scale = 0.0_dp
         do iteration = 0, sys%cfg%max_iterations
             scale_load = ev%source + sys%extra_load
-       if (size(currents) > 0) scale_load = scale_load + matmul(sys%coil_load, currents)
+            if (size(currents) > 0) scale_load = scale_load + matmul(sys%coil_load, currents)
             scale = max(norm2(scale_load), tiny(1.0_dp))
             old_norm = norm2(ev%residual)
             res(iteration) = old_norm/scale
@@ -2107,7 +2120,8 @@ contains
         real(dp), allocatable :: candidates(:, :)
         logical, allocatable :: saddle(:)
         real(dp) :: xi(2), shape(10), point(2), flux_tol, position_tol
-        integer :: e, ndof, stat, nx, j
+        real(dp), parameter :: tolerance(2) = [1.0e-12_dp, 0.1_dp]
+        integer :: e, ndof, stat, nx, j, pass
         logical :: found, duplicate
 
         ndof = size(state%triangles, 1)
@@ -2116,19 +2130,24 @@ contains
         allocate (candidates(2, size(state%triangles, 2)))
         allocate (saddle(size(state%triangles, 2)))
         saddle = .false.
-        !$omp parallel do default(shared) private(e, xi, found, shape, point, stat) &
-        !$omp schedule(static)
-        do e = 1, size(state%triangles, 2)
-            call cell_saddle(psi(state%triangles(:, e)), xi, found)
-            if (.not. found) cycle
-            call point_shape(state, e, xi, shape, point, stat)
-            if (stat /= 0) cycle
-            if (abs(dot_product(shape(:ndof), psi(state%triangles(:, e))) &
-                    - psi_bound) > flux_tol) cycle
-            candidates(:, e) = point
-            saddle(e) = .true.
+        ! Second pass as in gs_fb_lcfs_levels: an X-point on a vertex of a
+        ! refitted mesh, clamped onto the nearest cell edge.
+        do pass = 1, 2
+            !$omp parallel do default(shared) private(e, xi, found, shape, point, stat) &
+            !$omp schedule(static)
+            do e = 1, size(state%triangles, 2)
+                call cell_saddle(psi(state%triangles(:, e)), xi, found, tolerance(pass))
+                if (.not. found) cycle
+                call point_shape(state, e, xi, shape, point, stat)
+                if (stat /= 0) cycle
+                if (abs(dot_product(shape(:ndof), psi(state%triangles(:, e))) &
+                        - psi_bound) > flux_tol) cycle
+                candidates(:, e) = point
+                saddle(e) = .true.
+            end do
+            !$omp end parallel do
+            if (any(saddle)) exit
         end do
-        !$omp end parallel do
         ! Deterministic compaction also merges a saddle on a shared cell edge.
         nx = 0
         do e = 1, size(saddle)
@@ -2150,7 +2169,10 @@ contains
         !! First exit from the axis component. An X-point radius is a mandatory
         !! march event. If a step straddles a radial minimum, bracket that
         !! minimum before bracketing the first flux crossing. Thus a narrow
-        !! vacuum wedge cannot be skipped into the private-flux region.
+        !! vacuum wedge cannot be skipped into the private-flux region. A ray
+        !! that reaches an X-point radius within one step of that X-point
+        !! without crossing the level ends there: next to the saddle the
+        !! discrete flux can stay just above the level of the X-point.
         type(gs_state_t), intent(in) :: state
         type(gs_fb_grid_t), intent(in) :: grid
         real(dp), intent(in) :: psi(:), axis(2), psi_bound, sigma, theta, step
@@ -2179,6 +2201,17 @@ contains
             end do
             call ray_jet(hi, value, slope, valid)
             if (.not. valid) return
+            if (value > 0.0_dp) then
+                do j = 1, size(xpoints, 2)
+                    radius = norm2(xpoints(:, j) - axis)
+                    if (abs(hi - radius) > 0.0_dp) cycle
+                    if (norm2(axis + hi*direction - xpoints(:, j)) < step) then
+                        point = xpoints(:, j)
+                        found = .true.
+                        return
+                    end if
+                end do
+            end if
             if (anchor > 0) then
                 radius = norm2(xpoints(:, anchor) - axis)
                 if (hi >= radius) then
@@ -2512,23 +2545,31 @@ contains
         integer, intent(out) :: status
         procedure(boundary_curve), optional :: curve
         type(gs_state_t) :: old
-        real(dp), allocatable :: psi_new(:), new_chain(:, :)
-        integer :: stat
+        real(dp), allocatable :: psi_new(:), new_chain(:, :), xpoints(:, :)
+        logical, allocatable :: corners(:)
+        integer :: stat, k, j
         real(dp) :: t0
         t0 = -1; call gs_phase_tick('', t0)
 
         call gs_fb_trace_lcfs(state, state%psi, axis, psi_bound, sigma, &
                               size(chain, 2), new_chain, status, &
-                              rcfg%dense_factor, rcfg%project_iterations)
+                              rcfg%dense_factor, rcfg%project_iterations, xpoints)
         call gs_phase_tick('refit.trace', t0)
         if (status /= GS_FB_OK) return
+        ! the trace retains the bounding X-points exactly as chain nodes
+        allocate (corners(size(new_chain, 2)))
+        do k = 1, size(corners)
+            corners(k) = any([(all(new_chain(:, k) == xpoints(:, j)), j = 1, size(xpoints, 2))])
+        end do
         old = state
         if (present(curve)) then
             call initialize_gs(state, contour, max_area, stat, old%element_order, &
-                               curved=old%mapped, curve=curve, interior_chain=new_chain)
+                               curved=old%mapped, curve=curve, interior_chain=new_chain, &
+                               chain_corners=corners)
         else
             call initialize_gs(state, contour, max_area, stat, old%element_order, &
-                               curved=old%mapped, interior_chain=new_chain)
+                               curved=old%mapped, interior_chain=new_chain, &
+                               chain_corners=corners)
         end if
         if (stat /= 0) then
             state = old

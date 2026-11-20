@@ -1,145 +1,145 @@
 module milca_grad_shafranov
-   use, intrinsic :: iso_fortran_env, only: dp => real64, int64
-   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-   use triangle_compat, only: tc_result_t, triangulate_compat
-   use basis_p1_2d_module, only: basis_p1_2d_t
-   use basis_p2_2d_module, only: basis_p2_2d_t
-   use milca_triangle_basis, only: triangle_basis_jet, cubic_segment_stationary, &
-       triangle_node_powers, TRIANGLE_MAX_DEGREE, TRIANGLE_MAX_NODES
-   use fortfem_triangle_level_quadrature, only: triangle_level_workspace_t, &
-       initialize_triangle_level_workspace, integrate_triangle_levels, &
-       triangle_level_coefficients
-   use fortfem_gauss_quadrature_2d, only: gauss_quadrature_triangle_t
-   use fortnum_krylov, only: real_conjugate_gradient_operator, real_gmres_operator, &
-       KRYLOV_OK, KRYLOV_MAX_ITERATIONS
-   use milca_gs_timers, only: gs_wall_s, gs_timer_add, GS_T_FIXED_CG, GS_T_FACTOR, &
-       GS_T_DIRECT
-   use milca_gs_options, only: gs_use_csr, gs_use_direct
-   use milca_gs_csr, only: csr_matrix_t, gs_csr_build, gs_csr_dirichlet_apply, &
-       gs_csr_spd_matrix
-   use milca_gs_direct, only: gs_direct_t, gs_direct_available, gs_direct_factor, &
-       gs_direct_solve, gs_direct_free
-   use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights, &
-       lagrange_combined_jvp, &
-       lagrange_combined_vjp, lagrange_nodes_jvp, lagrange_nodes_vjp
-   use milca_grad_shafranov_leaves, only: gs_source, gs_source_jvp, gs_source_vjp, &
-      gs_segment_primitive, &
-       gs_current_density, gs_current_sheet, gs_smooth_axis_q
-   use milca_curved_triangle, only: periodic_curve_t, initialize_periodic_curve, &
-       curve_value, boundary_curve, triangle_shapes, triangle_locate
-   use milca_gs_inverse_leaves, only: gs_normalized_profile_response
-   use milca_real_identity, only: same_real_value
-   use milca_gs_symmetry, only: gs_symmetry_t, GS_ROTATION, GS_TRANSLATION, &
-      GS_SCREW, GS_UNSUPPORTED_SYMMETRY, gs_reduced_field
-   use milca_gs_symmetry_leaves, only: gs_screw_bilinear, &
-      gs_translation_source, gs_screw_source
-   implicit none
-   private
-   public :: gs_symmetry_t, GS_ROTATION, GS_TRANSLATION, GS_SCREW
-   public :: GS_UNSUPPORTED_SYMMETRY
-   public :: gs_state_t, initialize_gs, solve_gs, gs_linear_response, sample_gs
-   ! Orders above GS_MAX_SOLVER_ORDER need geometry_only and give a mesh without
-   ! an assembled operator (ready false).
-   integer, parameter, public :: GS_MAX_SOLVER_ORDER = 3
-   public :: gs_recovery_t
-   integer, parameter, public :: GS_UNSUPPORTED_GEOMETRY = 20
-   integer, parameter, public :: GS_DEVICE_FAILURE = 21
-   integer, parameter, public :: GS_UNSUPPORTED_DEVICE = 22
-   integer, parameter :: geometry_arithmetic = 3
-   public :: gs_cell_data, apply_gs, gs_factor_ready, gs_apply_inverse
-   public :: gs_requested_device
-   public :: assemble_gs_rhs
-   public :: write_gs_mesh, read_gs_mesh
-   public :: gs_profile_response, gs_profile_implicit_response, gs_profile_tangent_cache
-   public :: gs_profile_response_cache_t, prepare_gs_profile_response_cache
-   public :: gs_profile_ff_load_basis
-   public :: gs_profile_load, gs_profile_load_jvp, gs_profile_load_vjp
-   public :: solve_gs_profiles, gs_profile_value, gs_profile_integral
-   public :: gs_element_jet, gs_axis_candidate, gs_current_jump
-   public :: gs_axis_safety_factor, gs_classical_current
-   ! Fixed-boundary P1/P2 weak GS in physical (R,Z), R>0. The domain is a
-   ! polygonal approximation; nested flux surfaces are not solver inputs.
-   ! A result is a candidate, NOT a continuous certificate. Geometry,
-   ! discretization and source-model errors remain separate open budgets.
-   ! Mesh-only data of the functional-majorant recovery system (vector Pk
-   ! grad-div plus r-mass): element blocks, CSR matrix and Cholesky factor are
-   ! built on the first majorant evaluation and shared by copies of the state.
-   type :: gs_recovery_t
-      logical :: ready = .false.
-      integer :: nodes = 0, cells = 0, order = 0
-      real(dp) :: signature = 0, cf2 = 0
-      integer, allocatable :: indices(:, :)
-      real(dp), allocatable :: matrix(:, :, :), diagonal(:)
-      type(csr_matrix_t) :: system
-      type(gs_direct_t) :: factor
-   end type gs_recovery_t
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use triangle_compat, only: tc_result_t, triangulate_compat
+    use basis_p1_2d_module, only: basis_p1_2d_t
+    use basis_p2_2d_module, only: basis_p2_2d_t
+    use milca_triangle_basis, only: triangle_basis_jet, cubic_segment_stationary, &
+        triangle_node_powers, TRIANGLE_MAX_DEGREE, TRIANGLE_MAX_NODES
+    use fortfem_triangle_level_quadrature, only: triangle_level_workspace_t, &
+        initialize_triangle_level_workspace, integrate_triangle_levels, &
+        triangle_level_coefficients
+    use fortfem_gauss_quadrature_2d, only: gauss_quadrature_triangle_t
+    use fortnum_krylov, only: real_conjugate_gradient_operator, real_gmres_operator, &
+        KRYLOV_OK, KRYLOV_MAX_ITERATIONS
+    use milca_gs_timers, only: gs_wall_s, gs_timer_add, GS_T_FIXED_CG, GS_T_FACTOR, &
+        GS_T_DIRECT
+    use milca_gs_options, only: gs_use_csr, gs_use_direct
+    use milca_gs_csr, only: csr_matrix_t, gs_csr_build, gs_csr_dirichlet_apply, &
+        gs_csr_spd_matrix
+    use milca_gs_direct, only: gs_direct_t, gs_direct_available, gs_direct_factor, &
+        gs_direct_solve, gs_direct_free
+    use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights, &
+        lagrange_combined_jvp, &
+        lagrange_combined_vjp, lagrange_nodes_jvp, lagrange_nodes_vjp
+    use milca_grad_shafranov_leaves, only: gs_source, gs_source_jvp, gs_source_vjp, &
+        gs_segment_primitive, &
+        gs_current_density, gs_current_sheet, gs_smooth_axis_q
+    use milca_curved_triangle, only: periodic_curve_t, initialize_periodic_curve, &
+        curve_value, boundary_curve, triangle_shapes, triangle_locate
+    use milca_gs_inverse_leaves, only: gs_normalized_profile_response
+    use milca_real_identity, only: same_real_value
+    use milca_gs_symmetry, only: gs_symmetry_t, GS_ROTATION, GS_TRANSLATION, &
+        GS_SCREW, GS_UNSUPPORTED_SYMMETRY, gs_reduced_field
+    use milca_gs_symmetry_leaves, only: gs_screw_bilinear, &
+        gs_translation_source, gs_screw_source
+    implicit none
+    private
+    public :: gs_symmetry_t, GS_ROTATION, GS_TRANSLATION, GS_SCREW
+    public :: GS_UNSUPPORTED_SYMMETRY
+    public :: gs_state_t, initialize_gs, solve_gs, gs_linear_response, sample_gs
+    ! Orders above GS_MAX_SOLVER_ORDER need geometry_only and give a mesh without
+    ! an assembled operator (ready false).
+    integer, parameter, public :: GS_MAX_SOLVER_ORDER = 3
+    public :: gs_recovery_t
+    integer, parameter, public :: GS_UNSUPPORTED_GEOMETRY = 20
+    integer, parameter, public :: GS_DEVICE_FAILURE = 21
+    integer, parameter, public :: GS_UNSUPPORTED_DEVICE = 22
+    integer, parameter :: geometry_arithmetic = 3
+    public :: gs_cell_data, apply_gs, gs_factor_ready, gs_apply_inverse
+    public :: gs_requested_device
+    public :: assemble_gs_rhs
+    public :: write_gs_mesh, read_gs_mesh
+    public :: gs_profile_response, gs_profile_implicit_response, gs_profile_tangent_cache
+    public :: gs_profile_response_cache_t, prepare_gs_profile_response_cache
+    public :: gs_profile_ff_load_basis
+    public :: gs_profile_load, gs_profile_load_jvp, gs_profile_load_vjp
+    public :: solve_gs_profiles, gs_profile_value, gs_profile_integral
+    public :: gs_element_jet, gs_axis_candidate, gs_current_jump
+    public :: gs_axis_safety_factor, gs_classical_current
+    ! Fixed-boundary P1/P2 weak GS in physical (R,Z), R>0. The domain is a
+    ! polygonal approximation; nested flux surfaces are not solver inputs.
+    ! A result is a candidate, NOT a continuous certificate. Geometry,
+    ! discretization and source-model errors remain separate open budgets.
+    ! Mesh-only data of the functional-majorant recovery system (vector Pk
+    ! grad-div plus r-mass): element blocks, CSR matrix and Cholesky factor are
+    ! built on the first majorant evaluation and shared by copies of the state.
+    type :: gs_recovery_t
+        logical :: ready = .false.
+        integer :: nodes = 0, cells = 0, order = 0
+        real(dp) :: signature = 0, cf2 = 0
+        integer, allocatable :: indices(:, :)
+        real(dp), allocatable :: matrix(:, :, :), diagonal(:)
+        type(csr_matrix_t) :: system
+        type(gs_direct_t) :: factor
+    end type gs_recovery_t
 
-   type :: gs_state_t
-      type(gs_symmetry_t) :: symmetry
-      real(dp), allocatable :: points(:, :), psi(:)
-      integer, allocatable :: triangles(:, :)
-      integer, allocatable :: neighbors(:, :)
-      logical, allocatable :: boundary(:)
-      real(dp), allocatable :: stiffness(:, :, :), gradient(:, :, :)
-      real(dp), allocatable :: area(:), diagonal(:)
-      logical, allocatable :: curved_cell(:)
-      ! Row-parallel CSR copy of `stiffness` (full pattern) used by apply_gs. A
-      ! hand-built state has none and keeps the element-wise operator. The
-      ! Cholesky factor is created on first use and shared by copies of the
-      ! state (they describe the same matrix); it lives until the program ends.
-      type(csr_matrix_t) :: op
-      type(gs_direct_t), pointer :: direct => null()
-      type(gs_recovery_t), pointer :: recovery => null()
-      ! Explicit device selection is immutable between initializations. Copies
-      ! share both this policy and the cached factor of the same operator.
-      integer, private :: linear_device = -1
-      integer(int64), private :: device_memory_limit_bytes = 0_int64
-      logical :: mapped = .false., ready = .false.
-      integer :: element_order = 1
-      real(dp) :: residual = huge(1.0_dp)
-      integer :: iterations = 0
-      character(32) :: claim = 'candidate'
-   end type gs_state_t
-   ! One owned immutable response context for one state/profile, with no globals.
-   type :: gs_profile_response_cache_t
-      private
-      type(gs_state_t) :: state
-      real(dp), allocatable :: flux(:), ff(:), matrix(:, :, :), axis_response(:)
-      real(dp), allocatable :: axis_shape(:)
-      real(dp), allocatable :: load_basis(:, :), load_error(:, :)
-      integer :: axis_element = 0
-      logical :: ready = .false.
-   end type gs_profile_response_cache_t
-   ! Minima of the represented flux, gathered from every mesh entity. The
-   ! minimum of a piecewise polynomial sits in a cell interior, in the interior
-   ! of an edge, or on a node, so each entity reports its own minimum. A shared
-   ! entity is reported once: its key is the canonical id of a node it owns, so
-   ! the neighbouring cell reproduces the same key and the same physical point
-   ! never counts as a second axis. Flux that is lowest on the domain boundary
-   ! is kept apart in `boundary`: such a state has no enclosed axis.
-   type :: axis_search_t
-      integer :: kind = 0          ! 1 node, 2 edge interior, 3 cell interior
-      integer :: id = 0
-      integer :: element = 0
-      real(dp) :: value = huge(1.0_dp)
-      real(dp) :: second = huge(1.0_dp)
-      real(dp) :: boundary = huge(1.0_dp)
-      real(dp) :: point(2) = 0.0_dp
-      real(dp) :: hessian(2, 2) = 0.0_dp
-   end type axis_search_t
-   interface
-      subroutine dgesv(n, nrhs, a, lda, ipiv, b, ldb, info)
-         import :: dp
-         integer, intent(in) :: n, nrhs, lda, ldb
-         integer, intent(out) :: ipiv(*), info
-         real(dp), intent(inout) :: a(lda, *), b(ldb, *)
-      end subroutine dgesv
-   end interface
+    type :: gs_state_t
+        type(gs_symmetry_t) :: symmetry
+        real(dp), allocatable :: points(:, :), psi(:)
+        integer, allocatable :: triangles(:, :)
+        integer, allocatable :: neighbors(:, :)
+        logical, allocatable :: boundary(:)
+        real(dp), allocatable :: stiffness(:, :, :), gradient(:, :, :)
+        real(dp), allocatable :: area(:), diagonal(:)
+        logical, allocatable :: curved_cell(:)
+        ! Row-parallel CSR copy of `stiffness` (full pattern) used by apply_gs. A
+        ! hand-built state has none and keeps the element-wise operator. The
+        ! Cholesky factor is created on first use and shared by copies of the
+        ! state (they describe the same matrix); it lives until the program ends.
+        type(csr_matrix_t) :: op
+        type(gs_direct_t), pointer :: direct => null()
+        type(gs_recovery_t), pointer :: recovery => null()
+        ! Explicit device selection is immutable between initializations. Copies
+        ! share both this policy and the cached factor of the same operator.
+        integer, private :: linear_device = -1
+        integer(int64), private :: device_memory_limit_bytes = 0_int64
+        logical :: mapped = .false., ready = .false.
+        integer :: element_order = 1
+        real(dp) :: residual = huge(1.0_dp)
+        integer :: iterations = 0
+        character(32) :: claim = 'candidate'
+    end type gs_state_t
+    ! One owned immutable response context for one state/profile, with no globals.
+    type :: gs_profile_response_cache_t
+        private
+        type(gs_state_t) :: state
+        real(dp), allocatable :: flux(:), ff(:), matrix(:, :, :), axis_response(:)
+        real(dp), allocatable :: axis_shape(:)
+        real(dp), allocatable :: load_basis(:, :), load_error(:, :)
+        integer :: axis_element = 0
+        logical :: ready = .false.
+    end type gs_profile_response_cache_t
+    ! Minima of the represented flux, gathered from every mesh entity. The
+    ! minimum of a piecewise polynomial sits in a cell interior, in the interior
+    ! of an edge, or on a node, so each entity reports its own minimum. A shared
+    ! entity is reported once: its key is the canonical id of a node it owns, so
+    ! the neighbouring cell reproduces the same key and the same physical point
+    ! never counts as a second axis. Flux that is lowest on the domain boundary
+    ! is kept apart in `boundary`: such a state has no enclosed axis.
+    type :: axis_search_t
+        integer :: kind = 0 ! 1 node, 2 edge interior, 3 cell interior
+        integer :: id = 0
+        integer :: element = 0
+        real(dp) :: value = huge(1.0_dp)
+        real(dp) :: second = huge(1.0_dp)
+        real(dp) :: boundary = huge(1.0_dp)
+        real(dp) :: point(2) = 0.0_dp
+        real(dp) :: hessian(2, 2) = 0.0_dp
+    end type axis_search_t
+    interface
+        subroutine dgesv(n, nrhs, a, lda, ipiv, b, ldb, info)
+            import :: dp
+            integer, intent(in) :: n, nrhs, lda, ldb
+            integer, intent(out) :: ipiv(*), info
+            real(dp), intent(inout) :: a(lda, *), b(ldb, *)
+        end subroutine dgesv
+    end interface
 contains
     subroutine initialize_gs(state, contour, max_area, status, element_order, &
                              curved, curve, interior_points, interior_chain, &
                              geometry_only, device, device_memory_limit_bytes, &
-         mirror_x, symmetry)
+            mirror_x, symmetry, chain_corners)
         !! Meshes the closed outer curve `contour` (counter-clockwise). The optional
         !! `interior_chain` is a second closed loop strictly inside it (free-boundary
         !! plasma boundary Gamma_p): its segments are constrained edges, never
@@ -158,11 +158,13 @@ contains
         procedure(boundary_curve), optional :: curve
         real(dp), intent(in), optional :: interior_points(:, :)
         real(dp), intent(in), optional :: interior_chain(:, :)
+        !> Chain nodes where the curved chain edges break (X-points).
+        logical, intent(in), optional :: chain_corners(:)
         logical, intent(in), optional :: geometry_only
         integer, intent(in), optional :: device
         integer(int64), intent(in), optional :: device_memory_limit_bytes
         real(dp), intent(in), optional :: mirror_x
-      type(gs_symmetry_t), intent(in), optional :: symmetry
+        type(gs_symmetry_t), intent(in), optional :: symmetry
         type(tc_result_t) :: mesh
         type(basis_p1_2d_t) :: basis
         type(gauss_quadrature_triangle_t) :: quadrature
@@ -170,21 +172,21 @@ contains
         real(dp) :: jac(2, 2), matrix(2, 2), det, grads(2, 3)
         real(dp), allocatable :: mesh_points(:, :)
         logical, allocatable :: used(:)
-      real(dp) :: point(2), shape(10), grad_q(2, 10), hess(2, 2, 10), weight, t, bilinear
+        real(dp) :: point(2), shape(10), grad_q(2, 10), hess(2, 2, 10), weight, t, bilinear
         integer, allocatable :: segments(:, :), original(:), original_chain(:)
         integer, allocatable :: segment_markers(:)
         integer :: j, e, k, l, q, pivot(2), stat, n, ndof, first, second, edge
         integer :: edge_node, local_node, nc, loop_size
         logical :: chain_edge
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (present(symmetry)) state%symmetry = symmetry
-      if (.not. state%symmetry%valid()) return
-      if (state%symmetry%kind /= GS_ROTATION) then
-         if (present(interior_chain)) return
-         if (present(device)) then
-            if (device >= 0) return
-         end if
-      end if
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (present(symmetry)) state%symmetry = symmetry
+        if (.not. state%symmetry%valid()) return
+        if (state%symmetry%kind /= GS_ROTATION) then
+            if (present(interior_chain)) return
+            if (present(device)) then
+                if (device >= 0) return
+            end if
+        end if
         status = 1
         if (present(device)) then
             if (device < -1) then
@@ -217,9 +219,9 @@ contains
         if (n < 3 .or. max_area <= 0) return
         if (.not. ieee_is_finite(max_area)) return
         if (any(.not. ieee_is_finite(contour))) return
-      if (state%symmetry%kind == GS_ROTATION) then
-         if (minval(contour(1, :)) <= 0) return
-      end if
+        if (state%symmetry%kind == GS_ROTATION) then
+            if (minval(contour(1, :)) <= 0) return
+        end if
         nc = 0
         if (present(interior_chain)) then
             if (size(interior_chain, 1) /= 2) return
@@ -240,9 +242,9 @@ contains
         if (present(interior_points)) then
             if (size(interior_points, 1) /= 2) return
             if (.not. all(ieee_is_finite(interior_points))) return
-         if (state%symmetry%kind == GS_ROTATION) then
-            if (any(interior_points(1, :) <= 0)) return
-         end if
+            if (state%symmetry%kind == GS_ROTATION) then
+                if (any(interior_points(1, :) <= 0)) return
+            end if
         end if
         if (nc > 0) then
             allocate (mesh_points(2, n + nc))
@@ -333,7 +335,8 @@ contains
                     end do
                 end do
                 if (count(original_chain /= 0) /= nc) return
-                call initialize_periodic_curve(chain_spline, interior_chain, stat)
+                call initialize_periodic_curve(chain_spline, interior_chain, stat, &
+                                               chain_corners)
                 if (stat /= 0) return
             end if
             if (present(curve)) then
@@ -436,20 +439,20 @@ contains
                     point, det, shape(:ndof), grad_q(:, :ndof), &
                     hess(:, :, :ndof), stat)
                 if (stat /= 0) return
-            weight = det*quadrature%weights(q)
-            if (state%symmetry%kind == GS_ROTATION) &
-               weight = det*quadrature%weights(q)/point(1)
+                weight = det*quadrature%weights(q)
+                if (state%symmetry%kind == GS_ROTATION) &
+                    weight = det*quadrature%weights(q)/point(1)
                 do l = 1, ndof
                     do k = 1, ndof
-                  if (state%symmetry%kind == GS_SCREW) then
-                     call gs_screw_bilinear(point(1), point(2), &
-                        state%symmetry%k, grad_q(1, k), grad_q(2, k), &
-                        grad_q(1, l), grad_q(2, l), bilinear)
-                  else
-                     bilinear = dot_product(grad_q(:, k), grad_q(:, l))
-                  end if
+                        if (state%symmetry%kind == GS_SCREW) then
+                            call gs_screw_bilinear(point(1), point(2), &
+                                state%symmetry%k, grad_q(1, k), grad_q(2, k), &
+                                grad_q(1, l), grad_q(2, l), bilinear)
+                        else
+                            bilinear = dot_product(grad_q(:, k), grad_q(:, l))
+                        end if
                         state%stiffness(k, l, e) = state%stiffness(k, l, e) &
-                     + weight*bilinear
+                            + weight*bilinear
                     end do
                 end do
             end do
@@ -682,20 +685,20 @@ contains
         status = 0
     end subroutine
 
-   subroutine gs_quadrature(order, quadrature)
-      integer, intent(in) :: order
-      type(gauss_quadrature_triangle_t), intent(out) :: quadrature
-      if (order == 1) then
-         call quadrature%init(2)
-      else if (order == 3) then
-         ! Positive degree-six rule, including the cubic geometry factors.
-         call quadrature%init(6)
-      else
-         ! Positive seven-point rule; degree-five exact for polynomials.
-         ! The physical 1/R weight is rational: this is not exact integration.
-         call quadrature%init(5)
-      end if
-   end subroutine gs_quadrature
+    subroutine gs_quadrature(order, quadrature)
+        integer, intent(in) :: order
+        type(gauss_quadrature_triangle_t), intent(out) :: quadrature
+        if (order == 1) then
+            call quadrature%init(2)
+        else if (order == 3) then
+            ! Positive degree-six rule, including the cubic geometry factors.
+            call quadrature%init(6)
+        else
+            ! Positive seven-point rule; degree-five exact for polynomials.
+            ! The physical 1/R weight is rational: this is not exact integration.
+            call quadrature%init(5)
+        end if
+    end subroutine gs_quadrature
 
     subroutine higher_order_mesh(mesh, state, status)
         type(tc_result_t), intent(in) :: mesh
@@ -984,173 +987,173 @@ contains
         ok = ieee_is_finite(rnorm) .and. rnorm <= tolerance
     end subroutine
 
-   subroutine gs_linear_response(state, source, response, status, iteration_count, &
-                                 relative_tolerance, stagnation_ok, residual_norm, &
-                                 timer_kind)
-      type(gs_state_t), intent(in) :: state
-      real(dp), intent(in) :: source(:)
-      real(dp), allocatable, intent(out) :: response(:)
-      integer, intent(out) :: status
-      integer, intent(out), optional :: iteration_count
-      real(dp), intent(in), optional :: relative_tolerance
-      logical, intent(in), optional :: stagnation_ok
-      ! Absolute norm of source - apply_gs(state, response) for the returned
-      ! response; huge when no response is produced.
-      real(dp), intent(out), optional :: residual_norm
-      ! Phase-timer slot for this solve (milca_gs_timers); 0 or absent: untimed.
-      integer, intent(in), optional :: timer_kind
-      real(dp) :: residual, tolerance, clock
-      real(dp), allocatable :: action(:)
-      logical :: keep_stagnant, direct_ok
-      integer :: iterations
-      status = 1
-      if (present(iteration_count)) iteration_count = 0
-      if (present(residual_norm)) residual_norm = huge(1.0_dp)
-      if (.not. state%ready) return
-      if (state%mapped) then
-         if (.not. all(ieee_is_finite(source))) return
-         if (.not. ieee_is_finite(norm2(source))) return
-      end if
-      if (size(source) /= size(state%psi)) return
-      allocate (response(size(source)))
-      response = 0.0_dp
-      tolerance = 1.0e-11_dp
-      if (present(relative_tolerance)) tolerance = relative_tolerance
-      if (.not. ieee_is_finite(tolerance)) return
-      if (tolerance <= 0) return
-      if (norm2(source) > 0.0_dp) tolerance = tolerance*min(1.0_dp, norm2(source))
-      clock = gs_wall_s()
-      direct_ok = .false.
-      iterations = 0
-      if (gs_factor_ready(state)) then
-         call gs_direct_response(state, source, response, tolerance, iterations, &
-                                 direct_ok)
-         if (direct_ok) then
-            status = KRYLOV_OK
-            residual = 0.0_dp
-         else
-            response = 0.0_dp
-         end if
-      end if
-      if (.not. direct_ok) then
-         if (state%linear_device >= 0) then
-            status = GS_DEVICE_FAILURE
-            response = 0.0_dp
-            residual = huge(1.0_dp)
-         else
-            call real_conjugate_gradient_operator(matvec, source, response, &
-                      tolerance, max(500, 10*ceiling(sqrt(real(size(source), dp)))), &
-                      status, iterations, residual, preconditioner)
-         end if
-      end if
-      if (present(timer_kind)) then
-         if (timer_kind > 0) call gs_timer_add(timer_kind, gs_wall_s() - clock, &
-                                               iterations)
-      end if
-      if (present(iteration_count)) iteration_count = iterations
-      keep_stagnant = .false.
-      if (present(stagnation_ok)) keep_stagnant = stagnation_ok
-      if (state%mapped) then
-         if (.not. all(ieee_is_finite(response))) status = geometry_arithmetic
-         if (.not. ieee_is_finite(residual)) status = geometry_arithmetic
-         if (status == KRYLOV_OK) then
-            ! Shared strong boundary policy for primal and equation responses.
-            where (state%boundary) response = source
-         else if (keep_stagnant .and. status == KRYLOV_MAX_ITERATIONS .and. &
-                  all(ieee_is_finite(response))) then
-            ! Diagonal-CG bottoms out on a mesh-dependent roundoff floor
-            ! (measured at ~1e-10 relative for a 95k-DOF device case tangent). The
-            ! retained iterate is the best finite response available; this
-            ! mode is only for callers that certify the result by an exact
-            ! residual check, such as Newton preconditioning or solve_gs.
-            where (state%boundary) response = source
-         else
-            response = 0.0_dp
-         end if
-      end if
-      if (present(residual_norm)) then
-         allocate (action(size(source)))
-         call apply_gs(state, response, action)
-         residual_norm = norm2(source - action)
-      end if
-   contains
-      subroutine matvec(input, output)
-         real(dp), intent(in) :: input(:)
-         real(dp), intent(out) :: output(:)
-         call apply_gs(state, input, output)
-      end subroutine matvec
-      subroutine preconditioner(input, output)
-         real(dp), intent(in) :: input(:)
-         real(dp), intent(out) :: output(:)
-         output = input/state%diagonal
-      end subroutine preconditioner
-   end subroutine gs_linear_response
+    subroutine gs_linear_response(state, source, response, status, iteration_count, &
+                                  relative_tolerance, stagnation_ok, residual_norm, &
+                                  timer_kind)
+        type(gs_state_t), intent(in) :: state
+        real(dp), intent(in) :: source(:)
+        real(dp), allocatable, intent(out) :: response(:)
+        integer, intent(out) :: status
+        integer, intent(out), optional :: iteration_count
+        real(dp), intent(in), optional :: relative_tolerance
+        logical, intent(in), optional :: stagnation_ok
+        ! Absolute norm of source - apply_gs(state, response) for the returned
+        ! response; huge when no response is produced.
+        real(dp), intent(out), optional :: residual_norm
+        ! Phase-timer slot for this solve (milca_gs_timers); 0 or absent: untimed.
+        integer, intent(in), optional :: timer_kind
+        real(dp) :: residual, tolerance, clock
+        real(dp), allocatable :: action(:)
+        logical :: keep_stagnant, direct_ok
+        integer :: iterations
+        status = 1
+        if (present(iteration_count)) iteration_count = 0
+        if (present(residual_norm)) residual_norm = huge(1.0_dp)
+        if (.not. state%ready) return
+        if (state%mapped) then
+            if (.not. all(ieee_is_finite(source))) return
+            if (.not. ieee_is_finite(norm2(source))) return
+        end if
+        if (size(source) /= size(state%psi)) return
+        allocate (response(size(source)))
+        response = 0.0_dp
+        tolerance = 1.0e-11_dp
+        if (present(relative_tolerance)) tolerance = relative_tolerance
+        if (.not. ieee_is_finite(tolerance)) return
+        if (tolerance <= 0) return
+        if (norm2(source) > 0.0_dp) tolerance = tolerance*min(1.0_dp, norm2(source))
+        clock = gs_wall_s()
+        direct_ok = .false.
+        iterations = 0
+        if (gs_factor_ready(state)) then
+            call gs_direct_response(state, source, response, tolerance, iterations, &
+                                    direct_ok)
+            if (direct_ok) then
+                status = KRYLOV_OK
+                residual = 0.0_dp
+            else
+                response = 0.0_dp
+            end if
+        end if
+        if (.not. direct_ok) then
+            if (state%linear_device >= 0) then
+                status = GS_DEVICE_FAILURE
+                response = 0.0_dp
+                residual = huge(1.0_dp)
+            else
+                call real_conjugate_gradient_operator(matvec, source, response, &
+                          tolerance, max(500, 10*ceiling(sqrt(real(size(source), dp)))), &
+                          status, iterations, residual, preconditioner)
+            end if
+        end if
+        if (present(timer_kind)) then
+            if (timer_kind > 0) call gs_timer_add(timer_kind, gs_wall_s() - clock, &
+                                                  iterations)
+        end if
+        if (present(iteration_count)) iteration_count = iterations
+        keep_stagnant = .false.
+        if (present(stagnation_ok)) keep_stagnant = stagnation_ok
+        if (state%mapped) then
+            if (.not. all(ieee_is_finite(response))) status = geometry_arithmetic
+            if (.not. ieee_is_finite(residual)) status = geometry_arithmetic
+            if (status == KRYLOV_OK) then
+                ! Shared strong boundary policy for primal and equation responses.
+                where (state%boundary) response = source
+            else if (keep_stagnant .and. status == KRYLOV_MAX_ITERATIONS .and. &
+                     all(ieee_is_finite(response))) then
+                ! Diagonal-CG bottoms out on a mesh-dependent roundoff floor
+                ! (measured at ~1e-10 relative for a 95k-DOF device case tangent). The
+                ! retained iterate is the best finite response available; this
+                ! mode is only for callers that certify the result by an exact
+                ! residual check, such as Newton preconditioning or solve_gs.
+                where (state%boundary) response = source
+            else
+                response = 0.0_dp
+            end if
+        end if
+        if (present(residual_norm)) then
+            allocate (action(size(source)))
+            call apply_gs(state, response, action)
+            residual_norm = norm2(source - action)
+        end if
+    contains
+        subroutine matvec(input, output)
+            real(dp), intent(in) :: input(:)
+            real(dp), intent(out) :: output(:)
+            call apply_gs(state, input, output)
+        end subroutine matvec
+        subroutine preconditioner(input, output)
+            real(dp), intent(in) :: input(:)
+            real(dp), intent(out) :: output(:)
+            output = input/state%diagonal
+        end subroutine preconditioner
+    end subroutine gs_linear_response
 
-   subroutine solve_gs(state, mu0, pprime, ffprime, status, f)
-      type(gs_state_t), intent(inout) :: state
-      real(dp), intent(in) :: mu0, pprime, ffprime
-      integer, intent(out) :: status
-      real(dp), intent(in), optional :: f
-      real(dp), allocatable :: rhs(:), solution(:), action(:)
-      real(dp) :: linear_residual
-      status = 1
-      if (.not. state%ready) return
-      if (state%mapped) then
-         state%residual = huge(1.0_dp)
-         if (.not. all(ieee_is_finite(state%psi))) return
-      end if
-      if (mu0 <= 0.0_dp) return
-      if (any(.not. ieee_is_finite([mu0, pprime, ffprime]))) return
-      allocate (rhs(size(state%psi)), action(size(state%psi)))
-      call assemble_gs_rhs(state, mu0, pprime, ffprime, rhs, status, f)
-      if (status /= 0) return
-      if (.not. all(ieee_is_finite(rhs))) then
-         status = geometry_arithmetic
-         return
-      end if
-      ! Resolve the fixed-source weak residual below the 1e-8 consumer gate.
-      ! A capped iterate is kept so that its residual is reported and gated.
-      call gs_linear_response(state, rhs, solution, status, state%iterations, &
-                              relative_tolerance=1.0e-10_dp, &
-                              stagnation_ok=.true., &
-                              residual_norm=linear_residual, timer_kind=GS_T_FIXED_CG)
-      if (status /= KRYLOV_OK .and. status /= KRYLOV_MAX_ITERATIONS) then
-         ! Failed linear response: report its residual, never the sentinel.
-         state%residual = linear_residual/max(norm2(rhs), tiny(1.0_dp))
-         return
-      end if
-      call apply_gs(state, solution, action)
-      state%residual = norm2(action - rhs)/max(norm2(rhs), tiny(1.0_dp))
-      if (.not. ieee_is_finite(state%residual)) then
-         status = geometry_arithmetic
-         return
-      end if
-      if (state%residual > 1.0e-8_dp) then
-         status = KRYLOV_MAX_ITERATIONS
-         return
-      end if
-      state%psi = solution
-      status = KRYLOV_OK
-   end subroutine solve_gs
+    subroutine solve_gs(state, mu0, pprime, ffprime, status, f)
+        type(gs_state_t), intent(inout) :: state
+        real(dp), intent(in) :: mu0, pprime, ffprime
+        integer, intent(out) :: status
+        real(dp), intent(in), optional :: f
+        real(dp), allocatable :: rhs(:), solution(:), action(:)
+        real(dp) :: linear_residual
+        status = 1
+        if (.not. state%ready) return
+        if (state%mapped) then
+            state%residual = huge(1.0_dp)
+            if (.not. all(ieee_is_finite(state%psi))) return
+        end if
+        if (mu0 <= 0.0_dp) return
+        if (any(.not. ieee_is_finite([mu0, pprime, ffprime]))) return
+        allocate (rhs(size(state%psi)), action(size(state%psi)))
+        call assemble_gs_rhs(state, mu0, pprime, ffprime, rhs, status, f)
+        if (status /= 0) return
+        if (.not. all(ieee_is_finite(rhs))) then
+            status = geometry_arithmetic
+            return
+        end if
+        ! Resolve the fixed-source weak residual below the 1e-8 consumer gate.
+        ! A capped iterate is kept so that its residual is reported and gated.
+        call gs_linear_response(state, rhs, solution, status, state%iterations, &
+                                relative_tolerance=1.0e-10_dp, &
+                                stagnation_ok=.true., &
+                                residual_norm=linear_residual, timer_kind=GS_T_FIXED_CG)
+        if (status /= KRYLOV_OK .and. status /= KRYLOV_MAX_ITERATIONS) then
+            ! Failed linear response: report its residual, never the sentinel.
+            state%residual = linear_residual/max(norm2(rhs), tiny(1.0_dp))
+            return
+        end if
+        call apply_gs(state, solution, action)
+        state%residual = norm2(action - rhs)/max(norm2(rhs), tiny(1.0_dp))
+        if (.not. ieee_is_finite(state%residual)) then
+            status = geometry_arithmetic
+            return
+        end if
+        if (state%residual > 1.0e-8_dp) then
+            status = KRYLOV_MAX_ITERATIONS
+            return
+        end if
+        state%psi = solution
+        status = KRYLOV_OK
+    end subroutine solve_gs
 
-   subroutine assemble_gs_rhs(state, mu0, pprime, ffprime, rhs, status, f)
+    subroutine assemble_gs_rhs(state, mu0, pprime, ffprime, rhs, status, f)
         type(gs_state_t), intent(in) :: state
         real(dp), intent(in) :: mu0, pprime, ffprime
         real(dp), intent(out) :: rhs(:)
         integer, intent(out) :: status
-      real(dp), intent(in), optional :: f
+        real(dp), intent(in), optional :: f
         type(gauss_quadrature_triangle_t) :: quadrature
         real(dp) :: point(2), shape(10), gradients(2, 10), hessians(2, 2, 10)
         real(dp) :: source, weight, det
         integer :: e, q, k, l, i, j, ndof
         rhs = 0
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (state%symmetry%kind == GS_SCREW) then
-         if (.not. present(f)) return
-         ! A fixed F with nonzero FFprime is not a consistent profile.
-         if (abs(ffprime) > 0) return
-         if (.not. ieee_is_finite(f)) return
-      end if
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (state%symmetry%kind == GS_SCREW) then
+            if (.not. present(f)) return
+            ! A fixed F with nonzero FFprime is not a consistent profile.
+            if (abs(ffprime) > 0) return
+            if (.not. ieee_is_finite(f)) return
+        end if
         ndof = size(state%triangles, 1)
         call gs_quadrature(state%element_order, quadrature)
         do e = 1, size(state%triangles, 2)
@@ -1162,15 +1165,15 @@ contains
                     rhs = 0
                     return
                 end if
-            select case (state%symmetry%kind)
-            case (GS_ROTATION)
-               call gs_source(point(1), mu0, pprime, ffprime, source)
-            case (GS_TRANSLATION)
-               call gs_translation_source(mu0, pprime, ffprime, source)
-            case (GS_SCREW)
-               call gs_screw_source(point(1), point(2), state%symmetry%k, &
-                  mu0, pprime, ffprime, f, source)
-            end select
+                select case (state%symmetry%kind)
+                case (GS_ROTATION)
+                    call gs_source(point(1), mu0, pprime, ffprime, source)
+                case (GS_TRANSLATION)
+                    call gs_translation_source(mu0, pprime, ffprime, source)
+                case (GS_SCREW)
+                    call gs_screw_source(point(1), point(2), state%symmetry%k, &
+                        mu0, pprime, ffprime, f, source)
+                end select
                 weight = det*quadrature%weights(q)
                 do k = 1, ndof
                     i = state%triangles(k, e)
@@ -1296,8 +1299,8 @@ contains
         integer :: e, k, l, node, boundary_node, ndof, work_limit, nc, nf
         integer :: ip, iff, ix, im
         character(160) :: message
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (state%symmetry%kind /= GS_ROTATION) return
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (state%symmetry%kind /= GS_ROTATION) return
         status = 1
         rhs = 0.0_dp
         if (present(error_estimate)) error_estimate = huge(1.0_dp)
@@ -1322,9 +1325,9 @@ contains
         if (any(.not. ieee_is_finite(state%psi))) return
         if (any(flux(2:) <= flux(:size(flux) - 1))) return
         tolerance = 1.0e-11_dp
-      if (present(relative_tolerance)) tolerance = relative_tolerance
-      if (.not. ieee_is_finite(tolerance)) return
-      if (tolerance <= 0) return
+        if (present(relative_tolerance)) tolerance = relative_tolerance
+        if (.not. ieee_is_finite(tolerance)) return
+        if (tolerance <= 0) return
         if (present(relative_tolerance)) tolerance = relative_tolerance
         if (.not. ieee_is_finite(tolerance)) return
         if (tolerance <= 0.0_dp .or. tolerance >= 1.0_dp) return
@@ -1393,8 +1396,8 @@ contains
                 dual_scale = maxval(abs(cotangent(state%triangles(:, e))))
                 epsabs(ndof + 1:2*ndof) = max(tiny(1.0_dp), &
                        0.01_dp*tolerance*dual_scale*(mu0*rmax*pp_slope + ff_slope/rmin))
-           epsabs(ip + 1:iff) = max(tiny(1.0_dp), 0.01_dp*tolerance*dual_scale*mu0*rmax)
-               epsabs(iff + 1:ix) = max(tiny(1.0_dp), 0.01_dp*tolerance*dual_scale/rmin)
+                epsabs(ip + 1:iff) = max(tiny(1.0_dp), 0.01_dp*tolerance*dual_scale*mu0*rmax)
+                epsabs(iff + 1:ix) = max(tiny(1.0_dp), 0.01_dp*tolerance*dual_scale/rmin)
                 epsabs(ix + 1:im - 1) = epsabs(ndof + 1)
                 epsabs(im) = max(tiny(1.0_dp), &
                                  0.01_dp*tolerance*dual_scale*rmax*maxval(abs(pp)))
@@ -1483,7 +1486,7 @@ contains
             real(dp) :: dsource, dual, gr, gmu, gp, gf, xp, xf
             real(dp) :: local_dual(6)
             call element_values(state%element_order, point(1), point(2), shape(:ndof))
-          r = dot_product(vertices(1, :), [1 - point(1) - point(2), point(1), point(2)])
+            r = dot_product(vertices(1, :), [1 - point(1) - point(2), point(1), point(2)])
             ! Shift flux and knots together before interpolating the profile law.
             psi_q = dot_product(shape(:ndof), local_psi(:ndof) - local_psi(1))
             pp_q = gs_profile_value(shifted_flux, pp, psi_q)
@@ -1496,15 +1499,15 @@ contains
                     dpp, dpsi_q, dpp_q)
                 call profile_tangent(shifted_flux, ff, psi_q, shifted_dflux, &
                     dff, dpsi_q, dff_q)
-             call gs_source_jvp(r, mu0, pp_q, ff_q, 0.0_dp, dmu0, dpp_q, dff_q, dsource)
+                call gs_source_jvp(r, mu0, pp_q, ff_q, 0.0_dp, dmu0, dpp_q, dff_q, dsource)
                 output(ndof + 1:) = dsource*shape(:ndof)
             else if (mode == 3) then
                 local_dual(:ndof) = cotangent(state%triangles(:, e))
                 where (state%boundary(state%triangles(:, e))) local_dual(:ndof) = 0
                 dual = dot_product(shape(:ndof), local_dual(:ndof))
                 call gs_source_vjp(r, mu0, pp_q, ff_q, dual, gr, gmu, gp, gf)
-              call profile_adjoint(shifted_flux, pp, psi_q, gp, xp, nodes_pp, values_pp)
-              call profile_adjoint(shifted_flux, ff, psi_q, gf, xf, nodes_ff, values_ff)
+                call profile_adjoint(shifted_flux, pp, psi_q, gp, xp, nodes_pp, values_pp)
+                call profile_adjoint(shifted_flux, ff, psi_q, gf, xf, nodes_ff, values_ff)
                 output(ndof + 1:2*ndof) = (xp + xf)*shape(:ndof)
                 output(ip + 1:iff) = values_pp
                 output(iff + 1:ix) = values_ff
@@ -1568,7 +1571,7 @@ contains
         end do
         call lagrange_combined_jvp(2, psi, flux(j:j + 1), values(j:j + 1), &
                                    dpsi, dvalues(j:j + 1), tangent)
- call lagrange_nodes_jvp(2, psi, flux(j:j + 1), values(j:j + 1), dflux(j:j + 1), motion)
+        call lagrange_nodes_jvp(2, psi, flux(j:j + 1), values(j:j + 1), dflux(j:j + 1), motion)
         tangent = tangent + motion
     end subroutine profile_tangent
 
@@ -1590,7 +1593,7 @@ contains
         end do
         call lagrange_combined_vjp(2, psi, flux(j:j + 1), values(j:j + 1), &
                                    dual, psi_bar, values_bar(j:j + 1))
-call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j:j + 1))
+        call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j:j + 1))
     end subroutine profile_adjoint
 
     subroutine element_values(order, xi, eta, shape)
@@ -1622,8 +1625,8 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
         real(dp) :: zero_profile(size(flux)), local_axis(6)
         integer :: ndof, nc, e, k, l, index, work_limit
         character(160) :: message
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (state%symmetry%kind /= GS_ROTATION) return
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (state%symmetry%kind /= GS_ROTATION) return
         status = 1
         if (state%mapped .or. state%element_order > 2) then
             status = GS_UNSUPPORTED_GEOMETRY
@@ -1758,8 +1761,8 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
         real(dp) :: coefficients(6), local_psi(6), vertices(2, 3), tolerance, rmin
         integer :: ndof, nf, e, k, j, node, index, work_limit
         character(160) :: message
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (state%symmetry%kind /= GS_ROTATION) return
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (state%symmetry%kind /= GS_ROTATION) return
         status = 1
         if (state%mapped .or. state%element_order > 2) then
             status = GS_UNSUPPORTED_GEOMETRY
@@ -2078,97 +2081,97 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
 
 
 
-   real(dp) function gs_profile_value(flux, values, psi) result(value)
-      real(dp), intent(in) :: flux(:), values(:), psi
-      real(dp) :: weights(2)
-      integer :: j
-      ! The declared input law is piecewise linear and constant beyond the
-      ! first/last supplied flux. Extension is explicit in the result claim.
-      if (psi <= flux(1)) then
-         value = values(1)
-         return
-      end if
-      do j = 1, size(flux) - 1
-         if (psi <= flux(j + 1)) then
-            call lagrange_weights(2,psi,flux(j:j+1),weights)
-            value = dot_product(weights,values(j:j+1))
+    real(dp) function gs_profile_value(flux, values, psi) result(value)
+        real(dp), intent(in) :: flux(:), values(:), psi
+        real(dp) :: weights(2)
+        integer :: j
+        ! The declared input law is piecewise linear and constant beyond the
+        ! first/last supplied flux. Extension is explicit in the result claim.
+        if (psi <= flux(1)) then
+            value = values(1)
             return
-         end if
-      end do
-      value = values(size(flux))
-   end function gs_profile_value
+        end if
+        do j = 1, size(flux) - 1
+            if (psi <= flux(j + 1)) then
+                call lagrange_weights(2,psi,flux(j:j+1),weights)
+                value = dot_product(weights,values(j:j+1))
+                return
+            end if
+        end do
+        value = values(size(flux))
+    end function gs_profile_value
 
-   real(dp) function gs_profile_integral(flux, values, psi) result(value)
-      real(dp), intent(in) :: flux(:), values(:), psi
-      real(dp) :: upper, width, segment
-      integer :: j
-      ! Integral from the supplied edge to psi of the executed derivative law.
-      ! Each linear segment is integrated exactly; endpoints extend constantly.
-      value = 0.0_dp
-      if (psi < flux(1)) value = (psi - flux(1))*values(1)
-      do j = 1, size(flux) - 1
-         upper = max(flux(j), min(psi, flux(j + 1)))
-         width = upper - flux(j)
-         call gs_segment_primitive(width, values(j), &
-            (values(j + 1) - values(j))/(flux(j + 1) - flux(j)), segment)
-         value = value + segment
-         value = value - 0.5_dp*(flux(j + 1) - flux(j))* &
-                 (values(j) + values(j + 1))
-      end do
-      if (psi > flux(size(flux))) value = value + &
-                                          (psi - flux(size(flux)))*values(size(flux))
-   end function gs_profile_integral
+    real(dp) function gs_profile_integral(flux, values, psi) result(value)
+        real(dp), intent(in) :: flux(:), values(:), psi
+        real(dp) :: upper, width, segment
+        integer :: j
+        ! Integral from the supplied edge to psi of the executed derivative law.
+        ! Each linear segment is integrated exactly; endpoints extend constantly.
+        value = 0.0_dp
+        if (psi < flux(1)) value = (psi - flux(1))*values(1)
+        do j = 1, size(flux) - 1
+            upper = max(flux(j), min(psi, flux(j + 1)))
+            width = upper - flux(j)
+            call gs_segment_primitive(width, values(j), &
+                (values(j + 1) - values(j))/(flux(j + 1) - flux(j)), segment)
+            value = value + segment
+            value = value - 0.5_dp*(flux(j + 1) - flux(j))* &
+                    (values(j) + values(j + 1))
+        end do
+        if (psi > flux(size(flux))) value = value + &
+                                            (psi - flux(size(flux)))*values(size(flux))
+    end function gs_profile_integral
 
-   subroutine solve_gs_profiles(state, mu0, flux, pp, ff, status, relative_tolerance)
-      type(gs_state_t), intent(inout) :: state
-      real(dp), intent(in) :: mu0, flux(:), pp(:), ff(:)
-      integer, intent(out) :: status
-      real(dp), intent(in), optional :: relative_tolerance
-      real(dp), allocatable :: rhs(:), solution(:), action(:)
-      real(dp) :: tolerance
-      integer :: iteration
-      status = 1
-      if (state%mapped) then
-         status = GS_UNSUPPORTED_GEOMETRY
-         state%residual = huge(1.0_dp)
-         return
-      end if
-      if (mu0 <= 0.0_dp) return
-      if (.not. ieee_is_finite(mu0)) return
-      tolerance = 1.0e-8_dp
-      if (present(relative_tolerance)) tolerance = relative_tolerance
-      if (.not. ieee_is_finite(tolerance)) return
-      if (tolerance <= 0 .or. tolerance >= 1) return
-      if (size(flux) < 2) return
-      if (size(pp) /= size(flux) .or. size(ff) /= size(flux)) return
-      if (any(flux(2:) <= flux(:size(flux) - 1))) return
-      if (any(.not. ieee_is_finite(flux))) return
-      if (any(.not. ieee_is_finite(pp))) return
-      if (any(.not. ieee_is_finite(ff))) return
-      allocate (rhs(size(state%psi)), action(size(state%psi)))
-      do iteration = 1, 1000
-         call gs_profile_load(state, mu0, flux, pp, ff, rhs, status, &
-              relative_tolerance=min(1.0e-11_dp,0.01_dp*tolerance))
-         if (status /= 0) return
-         call gs_linear_response(state, rhs, solution, status, &
-                                 relative_tolerance=min(1.0e-11_dp, 0.01_dp*tolerance))
-         if (status /= KRYLOV_OK) return
-         where (.not. state%boundary)
-            state%psi = 0.3_dp*solution + 0.7_dp*state%psi
-         end where
-         call gs_profile_load(state, mu0, flux, pp, ff, rhs, status, &
-              relative_tolerance=min(1.0e-11_dp,0.01_dp*tolerance))
-         if (status /= 0) return
-         call apply_gs(state, state%psi, action)
-         state%residual = norm2(action - rhs)/max(norm2(rhs), tiny(1.0_dp))
-         state%iterations = iteration
-         if (state%residual <= tolerance) then
-            status = 0
+    subroutine solve_gs_profiles(state, mu0, flux, pp, ff, status, relative_tolerance)
+        type(gs_state_t), intent(inout) :: state
+        real(dp), intent(in) :: mu0, flux(:), pp(:), ff(:)
+        integer, intent(out) :: status
+        real(dp), intent(in), optional :: relative_tolerance
+        real(dp), allocatable :: rhs(:), solution(:), action(:)
+        real(dp) :: tolerance
+        integer :: iteration
+        status = 1
+        if (state%mapped) then
+            status = GS_UNSUPPORTED_GEOMETRY
+            state%residual = huge(1.0_dp)
             return
-         end if
-      end do
-      status = 2 ! Candidate did not solve the declared nonlinear model.
-   end subroutine solve_gs_profiles
+        end if
+        if (mu0 <= 0.0_dp) return
+        if (.not. ieee_is_finite(mu0)) return
+        tolerance = 1.0e-8_dp
+        if (present(relative_tolerance)) tolerance = relative_tolerance
+        if (.not. ieee_is_finite(tolerance)) return
+        if (tolerance <= 0 .or. tolerance >= 1) return
+        if (size(flux) < 2) return
+        if (size(pp) /= size(flux) .or. size(ff) /= size(flux)) return
+        if (any(flux(2:) <= flux(:size(flux) - 1))) return
+        if (any(.not. ieee_is_finite(flux))) return
+        if (any(.not. ieee_is_finite(pp))) return
+        if (any(.not. ieee_is_finite(ff))) return
+        allocate (rhs(size(state%psi)), action(size(state%psi)))
+        do iteration = 1, 1000
+            call gs_profile_load(state, mu0, flux, pp, ff, rhs, status, &
+                 relative_tolerance=min(1.0e-11_dp,0.01_dp*tolerance))
+            if (status /= 0) return
+            call gs_linear_response(state, rhs, solution, status, &
+                                    relative_tolerance=min(1.0e-11_dp, 0.01_dp*tolerance))
+            if (status /= KRYLOV_OK) return
+            where (.not. state%boundary)
+                state%psi = 0.3_dp*solution + 0.7_dp*state%psi
+            end where
+            call gs_profile_load(state, mu0, flux, pp, ff, rhs, status, &
+                 relative_tolerance=min(1.0e-11_dp,0.01_dp*tolerance))
+            if (status /= 0) return
+            call apply_gs(state, state%psi, action)
+            state%residual = norm2(action - rhs)/max(norm2(rhs), tiny(1.0_dp))
+            state%iterations = iteration
+            if (state%residual <= tolerance) then
+                status = 0
+                return
+            end if
+        end do
+        status = 2 ! Candidate did not solve the declared nonlinear model.
+    end subroutine solve_gs_profiles
 
     subroutine gs_element_jet(state, element, r, z, psi, grad, hessian, status, &
                               affine_chart)
@@ -2185,9 +2188,9 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
         psi = 0; grad = 0; hessian = 0
         status = 1
         if (.not. ieee_is_finite(r) .or. .not. ieee_is_finite(z)) return
-      if (state%symmetry%kind == GS_ROTATION) then
-         if (r <= 0) return
-      end if
+        if (state%symmetry%kind == GS_ROTATION) then
+            if (r <= 0) return
+        end if
         if (element < 1 .or. element > size(state%triangles, 2)) return
         local = matmul(transpose(state%gradient(:, 2:3, element)), &
             [r, z] - state%points(:, state%triangles(1, element)))
@@ -2236,46 +2239,46 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
         do e = 1, size(state%triangles, 2)
             call gs_element_jet(state, e, r, z, psi, grad, hessian, status)
             if (status /= 0) cycle
-         call gs_reduced_field(state%symmetry, r, z, grad(1), grad(2), f, br, bz, bt)
+            call gs_reduced_field(state%symmetry, r, z, grad(1), grad(2), f, br, bz, bt)
             return
         end do
     end subroutine sample_gs
 
-   subroutine gs_classical_current(state, element, r, z, mu0, current, status)
-      type(gs_state_t), intent(in) :: state
-      integer, intent(in) :: element
-      real(dp), intent(in) :: r, z, mu0
-      real(dp), intent(out) :: current
-      integer, intent(out) :: status
-      real(dp) :: psi, grad(2), hessian(2, 2)
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (state%symmetry%kind /= GS_ROTATION) return
-      status = 1; current = 0.0_dp
-      if (.not. ieee_is_finite(mu0)) return
-      if (mu0 <= 0) return
-      call gs_element_jet(state, element, r, z, psi, grad, hessian, status)
-      if (status /= 0) return
-      call gs_current_density(r, mu0, grad(1), hessian(1, 1), hessian(2, 2), current)
-   end subroutine gs_classical_current
+    subroutine gs_classical_current(state, element, r, z, mu0, current, status)
+        type(gs_state_t), intent(in) :: state
+        integer, intent(in) :: element
+        real(dp), intent(in) :: r, z, mu0
+        real(dp), intent(out) :: current
+        integer, intent(out) :: status
+        real(dp) :: psi, grad(2), hessian(2, 2)
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (state%symmetry%kind /= GS_ROTATION) return
+        status = 1; current = 0.0_dp
+        if (.not. ieee_is_finite(mu0)) return
+        if (mu0 <= 0) return
+        call gs_element_jet(state, element, r, z, psi, grad, hessian, status)
+        if (status /= 0) return
+        call gs_current_density(r, mu0, grad(1), hessian(1, 1), hessian(2, 2), current)
+    end subroutine gs_classical_current
 
-   subroutine gs_axis_safety_factor(r, f_axis, hessian, q, status)
-      real(dp), intent(in) :: r, f_axis, hessian(2, 2)
-      real(dp), intent(out) :: q
-      integer, intent(out) :: status
-      real(dp) :: determinant
-      status = 1; q = 0.0_dp
-      if (.not. all(ieee_is_finite([r, f_axis]))) return
-      if (.not. all(ieee_is_finite(hessian))) return
-      if (r <= 0 .or. abs(f_axis) <= tiny(f_axis)) return
-      if (abs(hessian(1, 2)-hessian(2, 1)) > &
-          64*epsilon(r)*maxval(abs(hessian))) return
-      determinant = hessian(1, 1)*hessian(2, 2)-hessian(1, 2)**2
-      if (hessian(1, 1) <= 0 .or. determinant <= 0) return
-      call gs_smooth_axis_q(r, f_axis, hessian(1, 1), &
-                            hessian(1, 2), hessian(2, 2), q)
-      if (.not. ieee_is_finite(q)) return
-      status = 0
-   end subroutine gs_axis_safety_factor
+    subroutine gs_axis_safety_factor(r, f_axis, hessian, q, status)
+        real(dp), intent(in) :: r, f_axis, hessian(2, 2)
+        real(dp), intent(out) :: q
+        integer, intent(out) :: status
+        real(dp) :: determinant
+        status = 1; q = 0.0_dp
+        if (.not. all(ieee_is_finite([r, f_axis]))) return
+        if (.not. all(ieee_is_finite(hessian))) return
+        if (r <= 0 .or. abs(f_axis) <= tiny(f_axis)) return
+        if (abs(hessian(1, 2)-hessian(2, 1)) > &
+            64*epsilon(r)*maxval(abs(hessian))) return
+        determinant = hessian(1, 1)*hessian(2, 2)-hessian(1, 2)**2
+        if (hessian(1, 1) <= 0 .or. determinant <= 0) return
+        call gs_smooth_axis_q(r, f_axis, hessian(1, 1), &
+                              hessian(1, 2), hessian(2, 2), q)
+        if (.not. ieee_is_finite(q)) return
+        status = 0
+    end subroutine gs_axis_safety_factor
 
     ! True when a stationary parameter sits on an edge node: that minimum is
     ! already offered as a node entity, so the edge must not offer the same
@@ -2557,47 +2560,47 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
         status = 0
     end subroutine cubic_axis_candidate
 
-   subroutine gs_current_jump(state, left, right, r, z, normal, mu0, current, status)
-      type(gs_state_t), intent(in) :: state
-      integer, intent(in) :: left, right
-      real(dp), intent(in) :: r, z, normal(2), mu0
-      real(dp), intent(out) :: current
-      integer, intent(out) :: status
-      real(dp) :: psi, gl(2), gr(2), hessian(2, 2), tangent(2), toward(2)
-      integer :: j, k, first, second, edge
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (state%symmetry%kind /= GS_ROTATION) return
-      status = 1; current = 0.0_dp
-      if (state%mapped) then
-         status = GS_UNSUPPORTED_GEOMETRY
-         return
-      end if
-      if (.not. all(ieee_is_finite([normal, mu0]))) return
-      if (mu0 <= 0) return
-      if (abs(norm2(normal)-1) > 1.0e-10_dp) return
-      if (left < 1 .or. left > size(state%triangles, 2)) return
-      if (right < 1 .or. right > size(state%triangles, 2)) return
-      edge = 0
-      do j = 1, 3
-         if (state%neighbors(j, left) == right) edge = j
-      end do
-      if (edge == 0) return
-      k = mod(edge, 3)+1
-      first = state%triangles(edge, left); second = state%triangles(k, left)
-      tangent = state%points(:, second)-state%points(:, first)
-      toward = sum(state%points(:, state%triangles(1:3, right)), dim=2) &
-             - sum(state%points(:, state%triangles(1:3, left)), dim=2)
-      if (abs(dot_product(normal, tangent)) > 1.0e-10_dp*norm2(tangent)) return
-      if (dot_product(normal, toward) <= 0) return
-      if (abs(dot_product(normal, [r, z]-state%points(:, first))) > &
-          1.0e-10_dp*norm2(tangent)) return
-      call gs_element_jet(state, left, r, z, psi, gl, hessian, status)
-      if (status /= 0) return
-      call gs_element_jet(state, right, r, z, psi, gr, hessian, status)
-      if (status /= 0) return
-      call gs_current_sheet(r, mu0, gr(1)-gl(1), gr(2)-gl(2), &
-                            normal(1), normal(2), current)
-   end subroutine gs_current_jump
+    subroutine gs_current_jump(state, left, right, r, z, normal, mu0, current, status)
+        type(gs_state_t), intent(in) :: state
+        integer, intent(in) :: left, right
+        real(dp), intent(in) :: r, z, normal(2), mu0
+        real(dp), intent(out) :: current
+        integer, intent(out) :: status
+        real(dp) :: psi, gl(2), gr(2), hessian(2, 2), tangent(2), toward(2)
+        integer :: j, k, first, second, edge
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (state%symmetry%kind /= GS_ROTATION) return
+        status = 1; current = 0.0_dp
+        if (state%mapped) then
+            status = GS_UNSUPPORTED_GEOMETRY
+            return
+        end if
+        if (.not. all(ieee_is_finite([normal, mu0]))) return
+        if (mu0 <= 0) return
+        if (abs(norm2(normal)-1) > 1.0e-10_dp) return
+        if (left < 1 .or. left > size(state%triangles, 2)) return
+        if (right < 1 .or. right > size(state%triangles, 2)) return
+        edge = 0
+        do j = 1, 3
+            if (state%neighbors(j, left) == right) edge = j
+        end do
+        if (edge == 0) return
+        k = mod(edge, 3)+1
+        first = state%triangles(edge, left); second = state%triangles(k, left)
+        tangent = state%points(:, second)-state%points(:, first)
+        toward = sum(state%points(:, state%triangles(1:3, right)), dim=2) &
+               - sum(state%points(:, state%triangles(1:3, left)), dim=2)
+        if (abs(dot_product(normal, tangent)) > 1.0e-10_dp*norm2(tangent)) return
+        if (dot_product(normal, toward) <= 0) return
+        if (abs(dot_product(normal, [r, z]-state%points(:, first))) > &
+            1.0e-10_dp*norm2(tangent)) return
+        call gs_element_jet(state, left, r, z, psi, gl, hessian, status)
+        if (status /= 0) return
+        call gs_element_jet(state, right, r, z, psi, gr, hessian, status)
+        if (status /= 0) return
+        call gs_current_sheet(r, mu0, gr(1)-gl(1), gr(2)-gl(2), &
+                              normal(1), normal(2), current)
+    end subroutine gs_current_jump
 
     subroutine read_gs_mesh(state, path, status)
         ! Evaluation-only restart: preserves native coefficients and geometry.
@@ -2622,12 +2625,12 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
         state%element_order = 2
         if (index(header, 'milca-gs-mesh-v1:') > 0) then
             state%element_order = 1
-         else if (index(header, 'milca-gs-mesh-v4:') > 0) then
+        else if (index(header, 'milca-gs-mesh-v4:') > 0) then
             state%element_order = 3
             state%mapped = .true.
-         else if (index(header, 'milca-gs-mesh-v3:') > 0) then
+        else if (index(header, 'milca-gs-mesh-v3:') > 0) then
             state%mapped = .true.
-         else if (index(header, 'milca-gs-mesh-v2:') == 0) then
+        else if (index(header, 'milca-gs-mesh-v2:') == 0) then
             close (unit)
             return
         end if
@@ -2700,34 +2703,34 @@ call lagrange_nodes_vjp(2, psi, flux(j:j + 1), values(j:j + 1), dual, flux_bar(j
         status = 0
     end subroutine read_gs_mesh
 
-   subroutine write_gs_mesh(state, path, status)
-      type(gs_state_t), intent(in) :: state
-      character(*), intent(in) :: path
-      integer, intent(out) :: status
-      integer :: unit, j
-      status = GS_UNSUPPORTED_SYMMETRY
-      if (state%symmetry%kind /= GS_ROTATION) return
-      open (newunit=unit, file=path, status='replace', action='write', &
-            iostat=status)
-      if (status /= 0) return
-      if (state%element_order == 3) then
-         write (unit, '(a)') '# milca-gs-mesh-v4: isoparametric P3 SI R Z psi boundary'
-      else if (state%mapped) then
-         write (unit, '(a)') '# milca-gs-mesh-v3: isoparametric P2 SI R Z psi boundary'
-      else if (state%element_order == 1) then
-         write (unit, '(a)') '# milca-gs-mesh-v1: SI R[m] Z[m] psi[Wb/rad] boundary'
-      else
-         write (unit, '(a)') '# milca-gs-mesh-v2: P2 SI R[m] Z[m] psi[Wb/rad] boundary'
-      end if
-      write (unit, *) size(state%psi), size(state%triangles, 2)
-      do j = 1, size(state%psi)
-         write (unit, '(3es25.16e3,1x,i1)') state%points(:, j), state%psi(j), &
-            merge(1, 0, state%boundary(j))
-      end do
-      write (unit, '(a)') '# triangle node indices (one-based)'
-      do j = 1, size(state%triangles, 2)
-         write (unit, '(*(i10))') state%triangles(:, j)
-      end do
-      close (unit)
-   end subroutine write_gs_mesh
+    subroutine write_gs_mesh(state, path, status)
+        type(gs_state_t), intent(in) :: state
+        character(*), intent(in) :: path
+        integer, intent(out) :: status
+        integer :: unit, j
+        status = GS_UNSUPPORTED_SYMMETRY
+        if (state%symmetry%kind /= GS_ROTATION) return
+        open (newunit=unit, file=path, status='replace', action='write', &
+              iostat=status)
+        if (status /= 0) return
+        if (state%element_order == 3) then
+            write (unit, '(a)') '# milca-gs-mesh-v4: isoparametric P3 SI R Z psi boundary'
+        else if (state%mapped) then
+            write (unit, '(a)') '# milca-gs-mesh-v3: isoparametric P2 SI R Z psi boundary'
+        else if (state%element_order == 1) then
+            write (unit, '(a)') '# milca-gs-mesh-v1: SI R[m] Z[m] psi[Wb/rad] boundary'
+        else
+            write (unit, '(a)') '# milca-gs-mesh-v2: P2 SI R[m] Z[m] psi[Wb/rad] boundary'
+        end if
+        write (unit, *) size(state%psi), size(state%triangles, 2)
+        do j = 1, size(state%psi)
+            write (unit, '(3es25.16e3,1x,i1)') state%points(:, j), state%psi(j), &
+                merge(1, 0, state%boundary(j))
+        end do
+        write (unit, '(a)') '# triangle node indices (one-based)'
+        do j = 1, size(state%triangles, 2)
+            write (unit, '(*(i10))') state%triangles(:, j)
+        end do
+        close (unit)
+    end subroutine write_gs_mesh
 end module milca_grad_shafranov

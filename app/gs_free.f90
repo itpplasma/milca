@@ -500,9 +500,14 @@ contains
             prof(:, k) = [psi_b + phi, s, pressure, f, pp, ff]
         end do
         ! Flux surfaces of the plasma cells: q and toroidal flux.
+        ! A separatrix boundary is read 1e-3 of the flux depth inside: q
+        ! diverges there, and on a refitted mesh the level runs through the
+        ! chain vertices and the X-point. At 1e-4 the contour of the diverted
+        ! test case left the plasma cells in some threaded runs.
         call read_gs_equilibrium(state, executed%f_edge, 0.0_dp, 0, 0, surfaces, &
                                  q_status, law=executed, psi_bound=psi_b, &
-                                 plasma_cell=ev%plasma_cell)
+                                 plasma_cell=ev%plasma_cell, &
+                                 boundary_inset=merge(1.0e-3_dp, 0.0_dp, lcfs_mode == 'xpoint'))
         if (q_status /= 0) write (output_unit, '(a,i0)') &
             'flux-surface readback failed, status ', q_status
     end subroutine do_readback
