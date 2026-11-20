@@ -268,12 +268,19 @@ contains
                 radius = x(1)
                 if (field%fs%cyl_r0 > 0) radius = field%fs%cyl_r0
                 vol = vol + w/radius**2
+                h = [0.0_dp, 1/radius, 0.0_dp]
+                if (metric%kind == METRIC_IDENTITY) then
+                    ! K = I is constant in phi, so the phi samples of the
+                    ! nonzero harmonics average to zero and only the mean stays.
+                    hk = hk + w*dot_product(h, h)
+                    local(1:nl) = local(1:nl) + w*matmul(h, basis)*field%fs%sp(2)%sgn(:, t)
+                    cycle
+                end if
                 do j = 1, nphi
                     pts(:, j) = [x, 2*pi*(j - 1)/(nphi*field%period)]
                 end do
                 call metric%tensor(t, pts, kt, status)
                 if (status /= 0) return
-                h = [0.0_dp, 1/radius, 0.0_dp]
                 do j = 1, nphi
                     call trig(modes, field%period*pts(3, j), tr)
                     kh = matmul(kt(:, :, j), h)
