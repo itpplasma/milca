@@ -137,6 +137,8 @@ program test_ideal_free_boundary
     use milca_ideal_free_boundary, only: ideal_fb_init_fixed, ideal_fb_fixed_mode
     use milca_ideal_free_boundary, only: ideal_fb_init_bem
     use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit, fb_coil_flux_value
+    use milca_ideal_fb_coil_field, only: fb_coil_field_t, fb_coil_field_fit, &
+        fb_coil_field_eval, fb_coil_field_nd
     use milca_nested_ring_mesh, only: nested_ring_mesh
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, &
         ideal_fb_set_drive, ideal_fb_gradient, ideal_fb_hessian, ideal_fb_step, &
@@ -151,7 +153,8 @@ program test_ideal_free_boundary
         ideal_fb_curvature_t, ideal_fb_negative_curvature, ideal_fb_trust_subproblem, &
         ideal_fb_reduced_spectrum, ideal_fb_symmetry_defect
     use milca_curved_triangle, only: triangle_locate
-    use milca_coils_3d, only: coil_set_t, coil_set_from_polylines, coil_set_modes
+    use milca_coils_3d, only: coil_set_t, coil_set_from_polylines, coil_set_modes, &
+        coil_set_b_cart
     use fortfem_axisymmetric_gs_kernel, only: gs_green_gradient, gs_green
     use fortnum_symmetric_eigen, only: dense_oracle => symmetric_eigen
     use fortnum_quadrature, only: gauss_legendre
@@ -198,6 +201,8 @@ program test_ideal_free_boundary
         call vacuum_3d()
     case ('bem')
         call bem_checks()
+    case ('coilfield')
+        call coil_field_checks()
     case ('slide')
         call slide_checks()
     case ('kink')
@@ -1209,6 +1214,93 @@ contains
         print '(a,es9.2)', '  asymmetry/max ', worst/big
         if (worst > 1.0e-12_dp*big) error stop 'KKT matrix not symmetric'
     end subroutine
+
+    subroutine coil_field_checks()
+        ! Harmonic ring-source fit of a 3D coil field (three window coils at
+        ! 1e5 A, nfp = 3, plus F grad(phi)) from its harmonics on a grid inside
+        ! an ellipse: the field at interior points against Biot-Savart, and
+        ! the (R, Z) jets against central differences of the fitted field.
+        integer, parameter :: nphi = 120, kmax = 18, nfp_w = 3
+        type(fb_coil_field_t) :: field
+        real(dp), allocatable :: points(:, :), bcos(:, :, :), bsin(:, :, :), rings(:, :)
+        real(dp) :: rr, zz, phi, bc(3), bcyl(3), b(3), db(3, 2), d2b(3, 3), bp(3), &
+            bm(3), dbp(3, 2), dbm(3, 2), d2(3, 3), h, worst_b, worst_d, worst_d2, &
+            scale, x(2), v
+        integer :: i, j, l, k, n, st, nd, np
+        call make_windows(1.0e5_dp)
+        allocate (points(2, 400), bcos(3, 0:kmax, 400), bsin(3, 0:kmax, 400))
+        np = 0
+        do j = 1, 21
+            do i = 1, 15
+                rr = 2.25_dp + 1.6_dp*(i - 1)/14.0_dp
+                zz = -1.3_dp + 2.6_dp*(j - 1)/20.0_dp
+                if (((rr - 3.05_dp)/0.85_dp)**2 + (zz/1.35_dp)**2 > 1) cycle
+                np = np + 1
+                points(:, np) = [rr, zz]
+                bcos(:, :, np) = 0; bsin(:, :, np) = 0
+                do l = 1, nphi
+                    phi = 2*pi*(l - 1)/nphi
+                    bcyl = cylindrical_window_field(rr, zz, phi)
+                    do k = 0, kmax
+                        n = k*nfp_w
+                        bcos(:, k, np) = bcos(:, k, np) + merge(1.0_dp, 2.0_dp, k == 0) &
+                            *bcyl*cos(n*phi)/nphi
+                        bsin(:, k, np) = bsin(:, k, np) + 2*bcyl*sin(n*phi)/nphi
+                    end do
+                end do
+            end do
+        end do
+        allocate (rings(2, 64))
+        do j = 1, 64
+            rings(:, j) = [3.05_dp, 0.0_dp] + 1.45_dp*[0.85_dp*cos(2*pi*(j - 1)/64), &
+                1.35_dp*sin(2*pi*(j - 1)/64)]
+        end do
+        nd = fb_coil_field_nd(rings, points(:, :np), nfp_w)
+        call fb_coil_field_fit(points(:, :np), bcos(:, :, :np), bsin(:, :, :np), nfp_w, &
+            kmax, rings, nd, field, st)
+        if (st /= 0) error stop 'coil field fit'
+        worst_b = 0; worst_d = 0; worst_d2 = 0; scale = 0
+        h = 1.0e-4_dp
+        do i = 1, 12
+            x = [3.05_dp + 0.6_dp*cos(1.7_dp*i), 0.9_dp*sin(1.7_dp*i)]
+            v = 0.37_dp*i
+            call fb_coil_field_eval(field, x(1), x(2), v, b, db, d2b)
+            bc = cylindrical_window_field(x(1), x(2), v)
+            scale = max(scale, norm2(bc))
+            worst_b = max(worst_b, norm2(b - bc))
+            do k = 1, 2
+                call fb_coil_field_eval(field, x(1) + h*merge(1, 0, k == 1), &
+                    x(2) + h*merge(1, 0, k == 2), v, bp, dbp, d2)
+                call fb_coil_field_eval(field, x(1) - h*merge(1, 0, k == 1), &
+                    x(2) - h*merge(1, 0, k == 2), v, bm, dbm, d2)
+                worst_d = max(worst_d, maxval(abs((bp - bm)/(2*h) - db(:, k))))
+                ! second derivatives RR (k = 1) and RZ, ZZ (k = 2) from db
+                if (k == 1) worst_d2 = max(worst_d2, maxval(abs((dbp(:, 1) &
+                    - dbm(:, 1))/(2*h) - d2b(:, 1))))
+                if (k == 2) worst_d2 = max(worst_d2, maxval(abs((dbp(:, 1) &
+                    - dbm(:, 1))/(2*h) - d2b(:, 2))), maxval(abs((dbp(:, 2) &
+                    - dbm(:, 2))/(2*h) - d2b(:, 3))))
+            end do
+        end do
+        print '(a,i0,a,i0,a,es9.2,a,es9.2)', 'coil field: ', np, ' samples, nd ', nd, &
+            ', fit misfit ', field%misfit, ', F ', field%f_vac
+        print '(a,es9.2,a,es9.2,a,es9.2)', 'coil field: |B - Biot-Savart|/|B| ', &
+            worst_b/scale, ', jet errors (1st, 2nd) ', worst_d/scale, ' ', worst_d2/scale
+        if (worst_b/scale > 1.0e-6_dp) error stop 'coil field misses Biot-Savart'
+        if (worst_d/scale > 1.0e-6_dp .or. worst_d2/scale > 1.0e-5_dp) &
+            error stop 'coil field jets'
+        print '(a)', 'coil field ok'
+    end subroutine
+
+    function cylindrical_window_field(r, z, p) result(bcyl)
+        ! Window coils at 1e5 A plus F grad(phi), cylindrical components.
+        real(dp), intent(in) :: r, z, p
+        real(dp) :: bcyl(3), bx(3)
+        call coil_set_b_cart(windows, [1.0e5_dp, 1.0e5_dp, 1.0e5_dp], &
+            [r*cos(p), r*sin(p), z], bx)
+        bcyl = [bx(1)*cos(p) + bx(2)*sin(p), -bx(1)*sin(p) + bx(2)*cos(p) &
+            + f_vac/r, bx(3)]
+    end function
 
     subroutine vertical_checks()
         ! Manufactured discrete load at a displaced Solov'ev state, retained

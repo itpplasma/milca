@@ -516,7 +516,8 @@ set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
 target_sources(milca_mhd PRIVATE src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90 src/mhd/ideal_free_boundary.f90
-    src/mhd/ideal_fb_bem.f90 src/mhd/inertia_newton.f90)
+    src/mhd/ideal_fb_bem.f90 src/mhd/inertia_newton.f90
+    src/generated/milca_coil_field_leaves.f90 src/mhd/ideal_fb_coil_field.f90)
 set_source_files_properties(src/generated/milca_vacuum_shell_leaves.f90
     src/generated/milca_fold_barrier_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
@@ -598,6 +599,9 @@ set_tests_properties(ideal_fb_external_kink PROPERTIES ENVIRONMENT
     "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4 TIMEOUT 120)
 add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
 add_test(NAME ideal_fb_bem_derivatives COMMAND test_ideal_free_boundary bem)
+add_test(NAME ideal_fb_coil_field_fit COMMAND test_ideal_free_boundary coilfield)
+milca_test_labels(ideal_fb_coil_field_fit fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
 milca_test_labels(ideal_fb_bem_derivatives fast CLASSES mhd
     TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_vertical_newton COMMAND test_ideal_free_boundary vertical)
@@ -1595,7 +1599,7 @@ if(MILCA_FORTSYM_BUILD)
             fermi_gas quantum_fock quantum_evolution quantum_correlations
             quantum_reference_gallery classical_pair coulomb species coulomb_encounter
             pp_fusion pp_fusion_eft
-            jellium_cell ocp island_seed thermal_screening rm_oracles)
+            jellium_cell ocp island_seed thermal_screening rm_oracles coil_field)
         add_executable(gen_${generator} gen/gen_${generator}.f90)
         target_link_libraries(gen_${generator} PRIVATE milca_gen_support)
     endforeach()
