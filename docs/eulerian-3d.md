@@ -77,11 +77,16 @@ from ι(χ) as an unknown profile with the poloidal flux as its constraint.
 ## 4. Discrete spaces and the weak constraint
 
 - A ∈ V1, ungauged. B = ∇×A ∈ V2 is divergence free exactly (d∘d = 0).
-- χ and λ̃ ∈ V0, one pair per region. C(χ) and G(χ) are splines in χ,
+- χ ∈ V0 and λ̃ ∈ V0 of one degree lower (section 5), one pair per region. C(χ) and G(χ) are splines in χ,
   and X is a curve sampled at the toroidal nodes.
 - The constraint holds weakly: ∫ ν B·∇χ dV = 0 for all ν ∈ V0.
-- Label normalisation: one scalar constraint per region, Φ(χ) = χ Φ_edge,
-  which removes χ → g(χ).
+- Label normalisation: (1)–(5) are invariant under χ → g(χ) with p and C
+  carried along, so a profile constraint fixes the label, e.g. the poloidal
+  flux ψ_p(χ) = χ ψ_p,edge. One scalar per region is not enough.
+- Discrete flux functions of χ_h ∈ V0 are only approximately in V0. With
+  an equal-degree multiplier ν ∈ V0 the constraint locks for a profile that
+  is not affine in χ_h. The multiplier space is therefore one degree lower
+  than χ (section 5, G2a).
 - Fixed values or constraints on the harmonic coefficients of A: the
   toroidal flux and, by mode, the linked poloidal flux.
 
@@ -107,6 +112,36 @@ assumed:
    ladder L6), where the topology allows it.
 
 VMEC hides this by truncating Fourier modes. MILCA has to state it.
+
+Measured in axisymmetry (G2a, labels fixed, A and λ̃ unknown, −ε I on the
+λ̃ block relative to max|K|, A and χ of degree 2, error of B relative to
+the interpolant's):
+
+| label | multiplier degree | ε | 2 cells | 4 | 8 | 16 |
+|---|---|---|---|---|---|---|
+| χ = ψ_N | 2 | 1e-14 | 1.00 | 1.00 | 1.00 | 1.00 |
+| χ = ψ_N | 2 | 1e-10 | 1.00 | 1.00 | 1.00 | 2.10 |
+| χ = ψ_N | 2 | 1e-8 | 1.00 | 1.00 | 1.91 | 38.6 |
+| χ = (ψ_N + ψ_N²/2)/1.5 | 2 | 1e-16 | 6.06 | 30.6 | 88.4 | 11.1 |
+| χ = (ψ_N + ψ_N²/2)/1.5 | 2 | 1e-14 | 6.06 | 30.3 | 10.4 | 1.88 |
+| χ = (ψ_N + ψ_N²/2)/1.5 | 2 | 1e-12 | 6.06 | 16.7 | 1.93 | 1.24 |
+| χ = ψ_N | 1 | 0 | 1.04 | 1.01 | 1.00 | 1.00 |
+| χ = (ψ_N + ψ_N²/2)/1.5 | 1 | 0 | 1.18 | 1.11 | 1.07 | 1.04 |
+| χ = (ψ_N + ψ_N²/2)/1.5 | 1 | 1e-8 | 1.17 | 1.09 | 1.37 | 31.9 |
+
+- Equal degrees: D^T has a near kernel of discrete flux functions, so
+  ε > 0 is needed, and a fixed ε pollutes B more on finer meshes. For the
+  nonlinear label the exact field violates the discrete constraint by
+  |D a_I|/(|D||a_I|) = 3.3e-4, 1.6e-5, 4.9e-7, 1.7e-8, and the solution
+  locks until that falls below ε.
+- Multiplier one degree lower: stable without regularisation (only the
+  constants remain in the kernel and one node is pinned), no locking for
+  either label, and B within 18 % of the interpolation error from the
+  coarsest mesh on. A penalty still pollutes and is not used.
+- This matters for 3D, where both Φ(χ) and ψ_p(χ) are constrained and one
+  of them is nonlinear in any label. Whether the lower-degree multiplier
+  stays stable without axisymmetry and near rational surfaces is the open
+  part of the inf–sup question (G2, G3).
 
 ## 6. Wall and exterior
 
@@ -135,6 +170,7 @@ classes (toroidal, poloidal), and their fluxes are the two numbers of the wall.
 | Gate | Case | Reference | Checks |
 |---|---|---|---|
 | G1 | vacuum torus, n×A fixed on Γ_c, prescribed harmonic fluxes | B = B0 R0/R φ̂ and a Dommaschk field | B to the projection error, AMS iterations independent of the mesh |
+| G2a | axisymmetric Solov'ev, labels fixed to χ_h = Π0 ψ_N, A and λ̃ unknown | exact field | B to the interpolation error, (4) satisfied weakly without being imposed |
 | G2 | axisymmetric Solov'ev, n = 0 only, through (1)–(5) | the spline Grad–Shafranov solver | identical ψ and q, inf–sup estimate bounded |
 | G3 | 3D low-β stellarator with fixed boundary | VMEC++ and GVEC | E4 observables |
 | L5 | Landreman–Paul QA, free boundary | VMEC++ | as in the plan |
@@ -149,6 +185,22 @@ M = 2):
 | 3 | 2 / 4 / 8 | 3.12e-3 / 3.55e-4 / 4.33e-5 | 3.15e-3 / 3.78e-4 / 4.48e-5 | 3.14, 3.03 |
 
 The AMS part of G1 waits for the fortsparse preconditioner.
+
+G2a result (ψ = α(R² − R0²)² + βR²Z², α = 1/4, β = 1, R0 = 3, wall
+ψ = 6.25, μ0 = 1, F = 3, A and χ of degree 2, λ̃ and ν of degree 1, no
+regularisation, the toroidal current through C(χ) h_θ about the exact
+axis):
+
+| cells per block side | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|
+| rel. L2 error of B, χ = ψ_N | 2.28e-2 | 4.41e-3 | 9.03e-4 | 2.12e-4 |
+| rel. L2 error of B, χ = (ψ_N + ψ_N²/2)/1.5 | 2.58e-2 | 4.85e-3 | 9.64e-4 | 2.20e-4 |
+| interpolant | 2.20e-2 | 4.37e-3 | 9.02e-4 | 2.12e-4 |
+| weak residual of (4), χ = ψ_N | 1.3e-2 | 1.8e-3 | 3.0e-4 | 6.9e-5 |
+| weak residual of (4), nonlinear label | 3.0e-2 | 6.1e-3 | 1.9e-3 | 6.1e-4 |
+
+The residual of (4) is tested with interior ν of degree 2 and taken
+relative to the p' term.
 
 ## 9. Open
 
