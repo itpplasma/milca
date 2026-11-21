@@ -118,6 +118,25 @@ Prior work (reading state: R method sections read, A abstract only):
   two axes and a separatrix is computed (Fig. 13, quadrupole on an l = 3
   field, A = 16, β = 0.03). No label: tangency and ι are not preserved
   discretely, and topology is whatever the relaxation reaches.
+- Hender, Carreras, Garcia, Rome and Lynch, J. Comput. Phys. 60, 76 (1985)
+  [R], NEAR: the Chodura–Schlüter relaxation on vacuum flux coordinates used
+  as a fixed (Eulerian) grid, Fourier series in both angles and finite
+  differences in radius, chosen "because it allows the study of equilibria
+  whose flux surface topology changes with pressure" and shown to be far
+  more economical than the cylindrical grid; it agrees with Chodura–Schlüter
+  at low β and departs where their resolution is short. Panici et al.,
+  J. Plasma Phys. 89, 955890303 (2023) [R, sections 1–2] place both in the
+  move to spectral angle representations.
+- Reiman, Pomphrey and Boozer, Phys. Fluids B 1, 555 (1989) [R]: the
+  limiting form of a general 3D equilibrium near a separatrix with nonzero
+  toroidal field. In hyperbolic coordinates ξ = aρ cosh α, η = cρ sinh α about
+  the x-line (a, c from the second derivatives of the helical flux), the
+  magnetic angle is Θ = −a c B_0 α/(2 q_h) + Θ_1 and q_h ∝ ln(1/√Ψ_h): the
+  straight-field-line angle carries the hyperbolic angle α, which is the
+  singular part of g near X (section 4a, E2b). ∇p vanishes on the x-line and
+  the pressure-driven current stays finite at the separatrix, unlike on a
+  rational surface. They propose using this local solution in equilibrium
+  codes, as axis expansions are used.
 - HINT, PIES, SIESTA [A]: Eulerian or mixed equilibrium codes without a label
   field. SIESTA's V3FIT coupling uses normalised pressure as a diagnostic
   label.
@@ -332,7 +351,10 @@ The exact g is log-singular near X, g ≈ (B_0/2) log|(x + y)/(x − y)| for
 χ − χ_X = (x² − y²)/2. B sees only |∇χ| times its tangential derivative, which
 is bounded, so the aligned, graded, broken space should reach order p. If
 the disc around X falls short, the fallback is a local enrichment
-g = g_sing + g_h with this form, evaluated together with the winding term.
+g = g_sing + g_h with this form, evaluated together with the winding term;
+Reiman, Pomphrey and Boozer (1989) give its general 3D version through the
+hyperbolic angle α about the x-line, with a, c and γ from the Hessian of χ_h
+there.
 A smooth carrier B_reg of the guide field is a diagnostic in axisymmetry
 only: in 3D a divergence-free field tangent to χ is again of Clebsch form and
 carries the same singularity.
