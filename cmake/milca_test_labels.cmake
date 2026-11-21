@@ -355,7 +355,7 @@ milca_test_labels(ou_susceptibility fast CLASSES continuum TARGETS test_ou_susce
 milca_test_labels(fusion_reactivity fast CLASSES quantum TARGETS test_fusion_reactivity)
 milca_test_labels(fusion_beam_target fast CLASSES quantum TARGETS test_fusion_beam_target)
 milca_test_labels(qed_bremsstrahlung fast CLASSES quantum TARGETS test_qed_bremsstrahlung)
-milca_test_labels(qed_bremsstrahlung_rates fast CLASSES quantum
+milca_test_labels(qed_bremsstrahlung_rates slow CLASSES quantum
     TARGETS test_qed_bremsstrahlung_rates)
 milca_test_labels(radiation_reaction fast CLASSES quantum TARGETS test_radiation_reaction)
 milca_test_labels(qed_thermal fast CLASSES quantum TARGETS test_qed_thermal)
@@ -1089,7 +1089,7 @@ milca_test_labels(vrmhd_cylinder_profiles fast CLASSES mhd TARGETS test_vrmhd_cy
 milca_test_labels(vrmhd_cylinder_stationary slow CLASSES mhd TARGETS test_vrmhd_cylinder)
 milca_test_labels(vrmhd_cylinder_linear slow CLASSES mhd TARGETS test_vrmhd_cylinder)
 milca_test_labels(vrmhd_torus_shafranov fast CLASSES mhd TARGETS test_vrmhd_torus)
-milca_test_labels(vrmhd_torus_lift fast CLASSES mhd TARGETS test_vrmhd_torus)
+milca_test_labels(vrmhd_torus_lift slow CLASSES mhd TARGETS test_vrmhd_torus)
 milca_test_labels(vrmhd_island_induction_mixed fast CLASSES mhd
     TARGETS test_vrmhd_island)
 milca_test_labels(vrmhd_island_regeneration fast CLASSES mhd
