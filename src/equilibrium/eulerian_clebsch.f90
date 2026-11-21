@@ -23,10 +23,17 @@ module milca_eulerian_clebsch
             real(dp), intent(in) :: chi
             real(dp), intent(out) :: f(3), g(3), p(3)
         end subroutine clebsch_profiles
+
+        subroutine clebsch_exact_field(x, b)
+            !! Reference B in cylindrical components at x = (R, phi, Z).
+            import :: dp
+            real(dp), intent(in) :: x(3)
+            real(dp), intent(out) :: b(3)
+        end subroutine clebsch_exact_field
     end interface
 
     public :: clebsch_profiles, clebsch_axisym_system, clebsch_node_gradients, &
-              clebsch_3d_system
+              clebsch_3d_system, clebsch_exact_field
 
 contains
 
@@ -153,7 +160,8 @@ contains
 
 
     subroutine clebsch_3d_system(derham, quad, nt, profiles, axis, chi, g, energy, &
-                                 gradient, hessian, plane_axis, plane_nodes)
+                                 gradient, hessian, plane_axis, plane_nodes, plane_frames, &
+                                 exact_field, field_error)
         !! 3D label lane on the section x trigonometric-nodal complex (nt =
         !! 2M + 1 planes, cylindrical chart, phi = 2 pi t). Unknowns chi and g
         !! as node values per plane, section index fastest, ordered (chi, g).
@@ -167,6 +175,10 @@ contains
         !! follows the axis are both isoparametric. With plane_axis (the
         !! axis X_k on each plane) the winding form is about the axis curve
         !! X(t) = sum_k L_k(t) X_k. The quadrature stays that of derham.
+        !! With plane_frames (M_k, typically H^(1/2) of chi at X_k) the angle
+        !! is theta = atan2 of u = M(t)(x - X(t)), M(t) = sum_k L_k(t) M_k: at
+        !! an elliptic axis it follows the straight-field-line angle, so g
+        !! stays regular there.
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
         integer, intent(in) :: nt
@@ -175,13 +187,19 @@ contains
         real(dp), intent(out) :: energy
         real(dp), allocatable, intent(out) :: gradient(:)
         type(csr_t), intent(out), optional :: hessian
-        real(dp), intent(in), optional :: plane_axis(:, :), plane_nodes(:, :, :)
+        real(dp), intent(in), optional :: plane_axis(:, :), plane_nodes(:, :, :), &
+                                           plane_frames(:, :, :)
+        procedure(clebsch_exact_field), optional :: exact_field
+        !! sum of w |B - B_exact|^2 and of w |B_exact|^2 over the quadrature
+        real(dp), intent(out), optional :: field_error(2)
         real(dp), allocatable :: v0(:, :, :), gn(:, :, :), du(:, :), gloc(:), hloc(:, :), &
                                  vals(:)
         real(dp) :: dt(2), xt(2), sm(2), fm(2, 2), ft(2, 2), detf, gx(2), v(2), rt(2), &
-                    sk(2, nt), gk(2, 2, nt)
-        integer :: kk
+                    sk(2, nt), gk(2, 2, nt), mf(2, 2), mdot(2, 2), uu(2), udot(2), bv(3), &
+                    bx(3)
+        integer :: kk, ka, kb, la, lb, il, jl
         integer, allocatable :: d0(:), idx(:), rows(:), cols(:)
+        real(dp), allocatable :: sx(:, :, :), am(:, :, :, :, :), tb(:, :, :)
         real(dp) :: lt(nt, 2), ht(nt, 2), s(2), jet(2, 6), wq, wt, c, gc(3), gg(3), hv(3), &
                     rho2, f(3), gp(3), pr(3), w, gu(7), h(28), hm(7, 7), t
         real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
@@ -195,6 +213,7 @@ contains
         allocate (gradient(2*ntot))
         gradient = 0
         energy = 0
+        if (present(field_error)) field_error = 0
         nz = size(quad%point_offset)*(2*(derham%degree + 1)**2*nt)**2
         allocate (rows(nz), cols(nz), vals(nz))
         nz = 0
@@ -202,8 +221,10 @@ contains
             call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
             nloc = size(d0)
             nl = nloc*nt
-            if (allocated(du)) deallocate (du, gloc, hloc, idx)
-            allocate (du(7, 2*nl), gloc(2*nl), hloc(2*nl, 2*nl), idx(2*nl))
+            if (allocated(du)) deallocate (du, gloc, hloc, idx, sx, am, tb)
+            allocate (du(7, 2*nl), gloc(2*nl), hloc(2*nl, 2*nl), idx(2*nl), &
+                      sx(7, 2*nloc, 2), am(2*nloc, 2*nloc, 2, 2, nqt), tb(nt, 2, nqt))
+            am = 0
             do k = 1, nt
                 idx((k - 1)*nloc + 1:k*nloc) = d0 + n0*(k - 1)
                 idx(nl + (k - 1)*nloc + 1:nl + k*nloc) = ntot + d0 + n0*(k - 1)
@@ -245,8 +266,21 @@ contains
                     detf = fm(1, 1)*fm(2, 2) - fm(1, 2)*fm(2, 1)
                     ft = reshape([fm(2, 2), -fm(1, 2), -fm(2, 1), fm(1, 1)], [2, 2])/detf
                     rt = sm - xt
-                    rho2 = rt(1)**2 + rt(2)**2
-                    hv = [-rt(2), (rt(2)*dt(1) - rt(1)*dt(2))/(two_pi*sm(1)), rt(1)]/rho2
+                    mf = reshape([1.0_dp, 0.0_dp, 0.0_dp, 1.0_dp], [2, 2])
+                    mdot = 0
+                    if (present(plane_frames)) then
+                        mf = 0
+                        do kk = 1, nt
+                            mf = mf + lt(kk, 1)*plane_frames(:, :, kk)
+                            mdot = mdot + lt(kk, 2)*plane_frames(:, :, kk)
+                        end do
+                    end if
+                    ! u = M (x - X); d/dt at fixed x: u' = M' (x - X) - M X'
+                    uu = matmul(mf, rt)
+                    udot = matmul(mdot, rt) - matmul(mf, dt)
+                    rho2 = uu(1)**2 + uu(2)**2
+                    gx = matmul(transpose(mf), [-uu(2), uu(1)])/rho2
+                    hv = [gx(1), (uu(1)*udot(2) - uu(2)*udot(1))/(rho2*two_pi*sm(1)), gx(2)]
                     du = 0
                     do k = 1, nt
                         do i = 1, nloc
@@ -277,6 +311,13 @@ contains
                                            h(25), h(26), h(27), h(28))
                     wt = wq*abs(detf)*two_pi/nqt
                     energy = energy + wt*w
+                    if (present(exact_field)) then
+                        ! B = grad g x grad chi + F' grad chi x h + G' grad chi x grad phi
+                        bv = cross3(gg, gc) + f(1)*cross3(gc, hv) &
+                             + gp(1)*cross3(gc, [0.0_dp, 1/sm(1), 0.0_dp])
+                        call exact_field([sm(1), two_pi*t, sm(2)], bx)
+                        field_error = field_error + wt*[sum((bv - bx)**2), sum(bx**2)]
+                    end if
                     gloc = gloc + wt*matmul(gu, du)
                     k = 0
                     do a = 1, 7
@@ -286,9 +327,51 @@ contains
                             hm(b, a) = h(k)
                         end do
                     end do
-                    if (present(hessian)) hloc = hloc + wt*matmul(transpose(du), matmul(hm, du))
+                    if (present(hessian)) then
+                        ! du = sum_c sx(:, :, c) (x) T_c(t) with T_1 = L_k, T_2 = L_k':
+                        ! accumulate the section factors per toroidal point, expand
+                        ! over the planes once per cell
+                        sx = 0
+                        do i = 1, nloc
+                            gx = matmul(ft, gn(:, i, q))
+                            sx(1, i, 1) = v0(1, i, q)
+                            sx(2, i, 1) = gx(1)
+                            sx(3, i, 1) = -dot_product(v, gx)/(two_pi*sm(1))
+                            sx(3, i, 2) = v0(1, i, q)/(two_pi*sm(1))
+                            sx(4, i, 1) = gx(2)
+                            sx(5:7, nloc + i, :) = sx(2:4, i, :)
+                        end do
+                        tb(:, :, m) = lt
+                        do b = 1, 2
+                            do a = 1, 2
+                                am(:, :, a, b, m) = am(:, :, a, b, m) + &
+                                    wt*matmul(transpose(sx(:, :, a)), matmul(hm, sx(:, :, b)))
+                            end do
+                        end do
+                    end if
                 end do
             end do
+            if (present(hessian)) then
+                do m = 1, nqt
+                    do b = 1, 2
+                        do a = 1, 2
+                            do kb = 1, 2*nloc
+                                do lb = 1, nt
+                                    jl = merge((lb - 1)*nloc + kb, nl + (lb - 1)*nloc + kb - nloc, kb <= nloc)
+                                    do ka = 1, 2*nloc
+                                        if (am(ka, kb, a, b, m) == 0) cycle
+                                        do la = 1, nt
+                                            il = merge((la - 1)*nloc + ka, nl + (la - 1)*nloc + ka - nloc, ka <= nloc)
+                                            hloc(il, jl) = hloc(il, jl) + tb(la, a, m)*tb(lb, b, m) &
+                                                           *am(ka, kb, a, b, m)
+                                        end do
+                                    end do
+                                end do
+                            end do
+                        end do
+                    end do
+                end do
+            end if
             gradient(idx) = gradient(idx) + gloc
             if (.not. present(hessian)) cycle
             do col = 1, 2*nl
@@ -310,5 +393,13 @@ contains
         hessian%col = mm%row_idx
         hessian%val = mm%val
     end subroutine clebsch_3d_system
+
+    pure function cross3(a, b) result(c)
+        !! Cross product in right-handed (R, phi, Z) components.
+        real(dp), intent(in) :: a(3), b(3)
+        real(dp) :: c(3)
+
+        c = [a(2)*b(3) - a(3)*b(2), a(3)*b(1) - a(1)*b(3), a(1)*b(2) - a(2)*b(1)]
+    end function cross3
 
 end module milca_eulerian_clebsch
