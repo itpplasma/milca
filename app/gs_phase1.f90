@@ -51,6 +51,8 @@ program gs_phase1_main
     integer :: inverse_intervals = 2, inverse_evaluations = 0, inverse_newton = 0
     integer :: degree = 2
     integer :: boundary_nodes = 96, radial_points = 0, angular_points = 0
+    logical :: readback_edge_packed = .true.
+    real(dp), allocatable :: rho_levels(:)
     integer :: unit, status, n, i, next, majorant_status, recovery_iterations
     integer(int64) :: start, finish, rate
     real(dp) :: mesh_s = 0, newton_s = 0, readback_s = 0, io_s = 0, io_total_s = 0
@@ -69,7 +71,7 @@ program gs_phase1_main
     character(512) :: argument
     character(:), allocatable :: commit, dirty
     namelist /gs_phase1/ boundary_file, mesh_file, boundary_nodes, max_area, &
-        pprime, ffprime, f_edge, mu0, curved, radial_points, angular_points, degree, &
+        pprime, ffprime, f_edge, mu0, curved, radial_points, angular_points, readback_edge_packed, degree, &
         profile_file, nonlinear_tolerance, quadrature_tolerance, total_current, q_file, &
         phi_target, inverse_intervals, q_tolerance, solve_wall_limit_s, &
         interior_points_file, pprime_law_file, inverse_knots_file, &
@@ -289,8 +291,19 @@ program gs_phase1_main
     flush (output_unit)
     clock = gs_wall_s()
     call gs_readback_resolution(state, radial_points, angular_points)
-    call read_gs_equilibrium(state, f_edge, ffprime, radial_points, angular_points, &
-        readback, status, law)
+    ! rho_j = sin(pi x_j/2) packs the levels towards the edge, where q and
+    ! Phi = int 2 pi q dpsi vary fastest: on the DIII-D boundary 45 uniform
+    ! levels put q(s_tor = 0.95) 12 % high, 97 packed ones 0.2 %.
+    if (readback_edge_packed) then
+        radial_points = max(radial_points, 97)
+        rho_levels = [(sin(0.5_dp*acos(-1.0_dp)*real(i - 1, dp)/(radial_points - 1)), &
+            i=1, radial_points)]
+        call read_gs_equilibrium(state, f_edge, ffprime, radial_points, angular_points, &
+            readback, status, law, rho_grid=rho_levels)
+    else
+        call read_gs_equilibrium(state, f_edge, ffprime, radial_points, angular_points, &
+            readback, status, law)
+    end if
     readback_s = gs_wall_s() - clock
     write (output_unit, '(a,f10.3)') 'readback done: readback_s=', readback_s
     flush (output_unit)
