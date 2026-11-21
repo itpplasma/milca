@@ -151,13 +151,64 @@ E0 and E1 also run the multiplier formulation with the same enrichment of A
 (V1 ⊕ span{f_k(χ_h) h}) for comparison. The representation that passes E1
 with fewer unknowns and better Newton convergence is kept.
 
+E0 result (degree 2, cubic profile splines on 8 + 4n intervals, relative
+ridge 1e-12 for g → g + k(χ_h), relative L2 error of B):
+
+| cells per block side | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|
+| χ = ψ_N | 2.17e-2 | 4.53e-3 | 9.36e-4 | 2.20e-4 |
+| χ = (ψ_N + ψ_N²/2)/1.5 | 2.45e-2 | 5.62e-3 | 1.31e-3 | 3.28e-4 |
+| projection of the exact A | 2.20e-2 | 4.37e-3 | 9.02e-4 | 2.12e-4 |
+
+The nonlinear label converges at order p (rates 2.12, 2.10, 2.00) instead
+of locking at 13 %.
+
+E1 (Newton on (χ, g, X, μ) with given F, G, p, FortSym leaf
+`clebsch_energy_axisym`):
+
+- ∇×(F(χ) h_θ) contains 2π F(χ(X)) δ_X, which the quadrature does not see.
+  Without the constraint χ_h(X) = 0 Newton converges to a state with B off
+  by 10 % at every mesh.
+- With X fixed while argmin χ_h moves, F' ∇χ×h_θ ~ 1/ρ at X. X is therefore
+  the label minimum, ∇χ_h(X) = 0, as a Newton unknown. An outer update of X
+  oscillates.
+- The gradient terms F' ∇N×h_θ are ~ 1/ρ. Gauss quadrature gets the cells
+  at X wrong at O(1). A polar (Duffy) rule in the cells whose closure
+  contains X fixes them.
+- With X free in a fixed mesh, the residual jumps whenever X crosses a cell
+  edge, and Newton stalls from perturbed labels. ALE removes this: the core
+  corners of the O-grid move with X, so X stays the central vertex of the
+  core block and the polar cells never change. The X columns of the Jacobian
+  are central differences of the residual with the mesh moving.
+
+E1 result (degree 2, 10 Gauss points per direction, labels perturbed by 5 %,
+FortFEM's polar rule at the vertex X):
+
+| cells per block side | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|
+| L2 error of B | 2.15e-2 | 4.44e-3 | 9.25e-4 | 2.17e-4 |
+| interpolant | 2.20e-2 | 4.37e-3 | 9.02e-4 | 2.12e-4 |
+| max \|χ_h − Π0 ψ_N\| | 3.6e-3 | 3.8e-4 | 6.6e-5 | 9.5e-6 |
+| Newton steps | 6 | 4 | 3 | 5 |
+
+The labels converge at about order p + 1 (rates 3.3, 2.5, 2.8). With 6
+Gauss points per direction the polar rule is too coarse and the label error
+at 16 cells rises to 1.5e-4.
+
+E2 case: ψ = R⁴/8 + 1.2373 R² − 3.3090 ψ3 − 2.0931 ψ4 + 0.4209 ψ5 +
+0.1550 ψ6 + 0.00694 ψ7 (R0 = 1, ψ_k the up-down symmetric homogeneous
+solutions of Cerfon and Freidberg, Phys. Plasmas 17, 032502 (2010), each
+checked numerically): magnetic axes at (1, ±0.170), X-point at (1, 0), wall
+level ψ_X + 9.3e-4 closed within 0.27 of the X-point.
+
 ## 6. Order of work
 
 1. Literature: done, section 3. Repeat the enrichment search with a
    working web search before any publication.
 2. FortSym leaves for the pointwise terms of (3) and (5) and their first and
    second derivatives in (χ, g, profile coefficients), with identities.
-3. E0, E1 in axisymmetry (MILCA tests next to G2a, G2).
+3. E0, E1 in axisymmetry (done, `test_eulerian_clebsch_fit`,
+   `test_eulerian_clebsch_newton`).
 4. O-line handling for several axes, E2.
 5. 3D: h_θ about an axis curve, θ_X = atan2(Z − Z_X(φ), R − R_X(φ)) per
    toroidal angle, closed away from X. E3, then E4.
