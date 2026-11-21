@@ -13,7 +13,7 @@ module vacuum_torus_fields
     type(spline_space_t), public :: space
     type(curve_chart_t), public :: chart
 
-    public :: full, potential, field_b, metric2, det3
+    public :: full, potential, field_b, metric2, det3, jacobian3
 
 contains
 
@@ -59,18 +59,24 @@ contains
         b = exact_b(x)
     end subroutine field_b
 
+    subroutine jacobian3(block, xi, t, jacobian)
+        integer, intent(in) :: block
+        real(dp), intent(in) :: xi(2), t
+        real(dp), intent(out) :: jacobian(:, :)
+        real(dp) :: x(3), j3(3, 3)
+
+        call full(block, xi, t, x, j3)
+        jacobian(1:3, 1:3) = j3
+    end subroutine jacobian3
+
     subroutine metric2(block, xi, t, weight)
         integer, intent(in) :: block
         real(dp), intent(in) :: xi(2), t
         real(dp), intent(out) :: weight(:, :)
-        real(dp) :: x(3), j3(3, 3), jet(2, 6)
-        integer :: status
+        real(dp) :: x(3), j3(3, 3)
 
-        ! spline_derham_mass weights with quad%weight, which holds det DG
         call full(block, xi, t, x, j3)
-        call spline_geometry_at(space, block, xi, jet, status)
-        weight(1:3, 1:3) = matmul(transpose(j3), j3)/abs(det3(j3)) &
-                           /abs(jet(1, 2)*jet(2, 3) - jet(1, 3)*jet(2, 2))
+        weight(1:3, 1:3) = matmul(transpose(j3), j3)/abs(det3(j3))
     end subroutine metric2
 
     pure real(dp) function det3(j)
@@ -95,22 +101,31 @@ program test_vacuum_torus_3d
     use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build
     use fortfem_curve_chart, only: curve_chart_cylindrical
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_build, &
-        spline_derham_project, spline_derham_boundary_dofs, spline_derham_evaluate
+        spline_derham_project, spline_derham_boundary_dofs, spline_derham_tree, spline_derham_evaluate, &
+        spline_derham_interpolation
     use fortsparse_csr, only: csr_t, csr_matvec
-    use milca_eulerian_vacuum, only: eu_curl_curl, eu_boundary_tree, eu_constrained_solve
-    use vacuum_torus_fields, only: space, chart, r0, potential, field_b, metric2, full, det3
+    use fortfem_element_to_csr, only: csr_matrix_t
+    use milca_eulerian_vacuum, only: eu_curl_curl, eu_constrained_solve, eu_ams_solve
+    use vacuum_torus_fields, only: space, chart, r0, potential, field_b, metric2, full, det3, &
+        jacobian3
     implicit none
     integer, parameter :: modes = 2, degree = 2, levels = 3
     integer :: level, cells(levels) = [2, 4, 8], failures
-    real(dp) :: error(levels), error_interp, energy, energy_interp, rate
+    real(dp) :: error(levels), error_interp, energy, energy_interp, rate, error_ams
+    integer :: iterations(levels)
 
     failures = 0
     call curve_chart_cylindrical(chart, 1)
     do level = 1, levels
-        call solve(cells(level), error(level), error_interp, energy, energy_interp)
+        call solve(cells(level), error(level), error_interp, energy, energy_interp, &
+                   error_ams, iterations(level))
         print '(a,i3,a,2es10.3,a,2es22.14)', 'cells', cells(level), &
             ' L2 error of B (Galerkin, interpolant)', error(level), error_interp, &
             ' energy', energy, energy_interp
+        print '(a,i0,a,es10.3)', 'ungauged PCG-AMS iterations ', iterations(level), &
+            ' L2 error of B ', error_ams
+        call check(abs(error_ams - error(level)) < 1e-3_dp*error(level), &
+                   'ungauged AMS solve gives the field of the gauged direct solve')
         call check(energy <= energy_interp*(1 + 1e-12_dp), &
                    'Galerkin energy below the interpolant energy')
     end do
@@ -136,17 +151,20 @@ contains
         end if
     end subroutine check
 
-    subroutine solve(n, err, e_p, e_h, e_i)
+    subroutine solve(n, err, e_p, e_h, e_i, err_ams, its)
         integer, intent(in) :: n
-        real(dp), intent(out) :: err, e_p, e_h, e_i
+        real(dp), intent(out) :: err, e_p, e_h, e_i, err_ams
+        integer, intent(out) :: its
         type(block_layout_t) :: layout
         type(spline_space_options_t) :: options
         type(spline_quadrature_t) :: quad
         type(spline_derham_t) :: derham
         type(csr_t) :: k
+        type(csr_matrix_t) :: interpolation
         integer, allocatable :: nodes(:), edges(:), tree(:), fixed(:)
-        real(dp), allocatable :: a_i(:), a_h(:), kv(:)
-        integer :: st
+        real(dp), allocatable :: a_i(:), a_h(:), kv(:), a_ams(:)
+        logical, allocatable :: tree_mask(:)
+        integer :: st, i
 
         call layout_ogrid([r0, 0.0_dp], 1.0_dp, 0.5_dp, layout, st)
         if (st /= 0) error stop 'layout'
@@ -167,7 +185,8 @@ contains
         if (st /= 0) error stop 'curl-curl'
         call spline_derham_boundary_dofs(derham, LAYOUT_WALL, 0, nodes)
         call spline_derham_boundary_dofs(derham, LAYOUT_WALL, 1, edges)
-        call eu_boundary_tree(derham, nodes, tree)
+        call spline_derham_tree(derham, tree_mask, roots=nodes)
+        tree = pack([(i, i=1, size(tree_mask))], tree_mask)
         fixed = [edges, tree]
         call eu_constrained_solve(k, 0*a_i, fixed, [a_i(edges), 0*a_i(tree)], a_h, st)
         if (st /= 0) error stop 'solve'
@@ -180,6 +199,13 @@ contains
         e_i = dot_product(a_i, kv)
         err = l2_error(derham, quad, curl(derham, a_h))
         e_p = l2_error(derham, quad, curl(derham, a_i))
+        call spline_derham_interpolation(derham, jacobian3, interpolation, st, 1e-4_dp)
+        if (st /= 0) error stop 'interpolation'
+        allocate (a_ams(size(a_h)))
+        call eu_ams_solve(k, derham%grad, interpolation, derham%dimension(0), edges, &
+                          a_i(edges), nodes, a_ams, 1e-10_dp, its, st)
+        if (st /= 0) print *, 'AMS status', st, ' iterations', its
+        err_ams = l2_error(derham, quad, curl(derham, a_ams))
     end subroutine solve
 
     function curl(derham, a) result(b)
