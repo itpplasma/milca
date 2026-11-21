@@ -143,9 +143,35 @@ the interpolant's):
   stays stable without axisymmetry and near rational surfaces is the open
   part of the inf–sup question (G2, G3).
 
-With the labels as unknowns neither multiplier degree is stable and free of
-locking. The plan that replaces the multiplier by a direct Clebsch
-representation is [eulerian-label-plan.md](eulerian-label-plan.md).
+With the labels as unknowns (G2: Newton on (A, λ̃, χ) with p(χ), C(χ) of the
+exact equilibrium, χ = ψ_N, axis fixed, Jacobian checked against finite
+differences to 1e-9, test `test_eulerian_solovev_newton` at commit
+6ed7cde0), the two multiplier degrees fail in opposite ways:
+
+| multiplier | 4 cells | 8 | 16 | Newton |
+|---|---|---|---|---|
+| degree p − 1: B / interpolant | 2.7 | 2.2 | 2.3 | 6 to 12 steps, not quadratic |
+| degree p − 1: max \|χ_h − Π0 ψ_N\| | 2.2e-1 | 3.6e-2 | 1.7e-2 | |
+| degree p, ε = 1e-14: B / interpolant | 1.00 | 1.00 | 1.01 | 7 steps, none at 16 cells |
+| degree p, ε = 1e-14: max \|χ_h − Π0 ψ_N\| | 1.9e-4 | 1.9e-5 | 3.7e-4 | |
+
+- (4) has one equation per χ node. Its surface average fixes the label,
+  and the rest must be absorbed by λ̃. A multiplier of degree p − 1 has a
+  quarter of the unknowns, so χ absorbs the excess at O(h).
+- With equal degrees and λ̃ = 0 on the wall, D on the free A is square: the
+  weak Poisson bracket {ψ_h, χ_h} tested in V0, whose kernel is only ψ_h
+  affine in χ_h. It locks for every label in which ψ is nonlinear, and
+  keeping λ̃ orthogonal to projected flux functions T_k(2χ_h − 1),
+  k < 16, does not change that (B error 13 % at all meshes).
+- The weak constraint B·∇χ = 0 with one multiplier for both (4) and (5)
+  therefore has no stable discrete pairing on a mesh that is not aligned
+  with χ. Candidate ways out: a mesh aligned with χ (ALE, flux functions
+  exact in V0), a Clebsch representation B = ∇χ×∇α that satisfies (5)
+  identically, or separate test spaces for (4) and (5) (Petrov–Galerkin,
+  loses the symmetric Hessian).
+
+The plan that replaces the multiplier by a direct Clebsch representation is
+[eulerian-label-plan.md](eulerian-label-plan.md).
 
 ## 6. Wall and exterior
 

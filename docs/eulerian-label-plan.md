@@ -54,11 +54,56 @@ the topology of the level sets of χ is free:
   smooth away from its own O-line, so the q → ∞ of flux coordinates does
   not appear in the fields.
 
-This corrects the earlier claim that a Clebsch field does not generalise to
-non-nested surfaces: that holds for Clebsch coordinates, not for Clebsch
-fields.
+Clebsch coordinates do not generalise to non-nested surfaces, Clebsch
+fields do.
 
-## 3. Discrete spaces
+## 3. Place among the lanes and prior work
+
+In the lane table of [equilibrium-core.md](equilibrium-core.md) (D2) this is
+a fourth lane, the label lane:
+
+| Lane | Unknown U | B = P(U) | Constraint set | Gauge | Seed |
+|---|---|---|---|---|---|
+| label | χ, g ∈ V0, F_j, G splines in χ, O-lines X_j | (3) | B·∇χ = 0 exactly, p = p(χ), topology of the level sets of χ | g → g + k(χ), relabelling | ψ lane or map lane |
+
+It is ideal and keeps the topology of χ, like the map lane, but on a fixed
+or ALE mesh in physical space, like the free-B lane. It shares the D3
+Maxwell-stress residual and the D8 cross-lane checks. Against the free-B
+lane's NN2 closure (parallel pressure diffusion) it is the ideal limit with
+labelled pressure.
+
+Prior work (reading state: R method sections read, A abstract only):
+
+- Kruskal and Kulsrud, Phys. Fluids 1, 265 (1958) [R], section H: B =
+  ∇ψ×∇ν with ν = λ + η χ'(ψ) − θ, single-valued λ and multivalued angles,
+  and W stationary over (p, λ, ψ). This is (2) for nested surfaces and one
+  axis, as an analytic variational principle. The representation is not
+  new.
+- Terradas and Neukirch, A&A 671, A31 (2023) [R]: Euler potentials (α, β)
+  as finite-element fields in a fixed 3D box, solved in physical space, with
+  open, line-tied field lines and single-valued potentials. No toroidal
+  topology, winding parts or net current.
+- Cheng, GRL 22, 2401 (1995) [A] and Zaharia et al., Ann. Geophys. 22, 251
+  (2004) [R]: B = ∇ψ×∇α for the magnetosphere, solved in inverse form.
+- Chodura and Schlüter, J. Comput. Phys. 41, 68 (1981) [A], HINT, PIES,
+  SIESTA [A]: Eulerian or mixed equilibrium codes without a label field.
+  SIESTA's V3FIT coupling uses normalised pressure as a diagnostic label.
+- Degond, Lozinski, Narski and Negulescu, J. Comput. Phys. 231, 2724 (2012)
+  [R], and Deluzet and Narski, Multiscale Model. Simul. (2019) [R]: the
+  kernel of B·∇ is reached by penalty, multiplier or iteration for a given
+  b. The latter name the failure without functions constant along b in the
+  discrete space locking (citing Babuška and Suri 1992), the counterpart of
+  section 1.
+- MRX (arXiv:2510.26986, cited in [equilibrium-nonnested.md](equilibrium-nonnested.md)):
+  FEEC relaxation in physical space with δB = ∇×(v×B), no label.
+
+Not found in this search (searches of questions on enrichment were thin):
+a discretisation of (2) on a mesh in physical space with Newton, one winding
+form per O-line for several axes and island chains, the O-lines as unknowns,
+and the use of (2) against parallel-constraint locking. Separatrices and
+changes of topology are not treated in any work read.
+
+## 4. Discrete spaces
 
 - χ, g ∈ V0 (degree p), profiles F_j, G as 1D splines in χ with
   F_j(χ(X_j)) = 0, O-lines X_j as unknown curves (two numbers per toroidal
@@ -90,7 +135,7 @@ Pointwise evaluation of f(χ_h) needs a quadrature that resolves the profile
 splines. Use profiles one degree smoother than V0 and check the quadrature
 error per gate.
 
-## 4. Gates (each runs in seconds)
+## 5. Gates (each runs in seconds)
 
 | Gate | Case | Pass criterion |
 |---|---|---|
@@ -106,12 +151,10 @@ E0 and E1 also run the multiplier formulation with the same enrichment of A
 (V1 ⊕ span{f_k(χ_h) h}) for comparison. The representation that passes E1
 with fewer unknowns and better Newton convergence is kept.
 
-## 5. Order of work
+## 6. Order of work
 
-1. Literature: Zotero and web for Eulerian (direct) Clebsch equilibrium
-   solvers, partition-of-unity or level-set enrichment (GFEM, XFEM) used for
-   flux functions, asymptotic-preserving treatments of B·∇. Note what exists
-   and where (2) differs. Novelty is stated only after this check.
+1. Literature: done, section 3. Repeat the enrichment search with a
+   working web search before any publication.
 2. FortSym leaves for the pointwise terms of (3) and (5) and their first and
    second derivatives in (χ, g, profile coefficients), with identities.
 3. E0, E1 in axisymmetry (MILCA tests next to G2a, G2).
@@ -124,7 +167,7 @@ with fewer unknowns and better Newton convergence is kept.
 7. Free boundary, E6, and the solver: Newton–Krylov with AMS for the V1 part
    and AMG for χ and g.
 
-## 6. Open
+## 7. Open
 
 - Stochastic regions have no label. Candidate: regions with p' = 0, where the
   plasma part of (5) has no constraint, as in SPEC's relaxed regions.
