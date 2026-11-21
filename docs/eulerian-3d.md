@@ -42,35 +42,48 @@ So the stationary points are ideal-MHD equilibria with nested surfaces
 χ = const. λ is the current potential: (3) is the Clebsch form of J, and (4)
 is the magnetic differential equation of the Pfirsch–Schlüter current.
 
-## 3. Net toroidal current
+## 3. Net currents
 
-The single-valued λ in (3) carries no net toroidal current. A multivalued
-part λ_h = c(χ) θ, with θ a poloidal angle, gives it. In the de Rham complex
-θ is not a function. Its gradient is the harmonic 1-form h_pol that FortFEM
-delivers (`spline_derham_harmonic`, one per b1 class). Write
+With single-valued λ, J = ∇×(χ∇λ), so the toroidal current inside the
+surface χ vanishes:
 
-    J = ∇χ × (∇λ̃ + c(χ) h_pol),   λ̃ single valued.                    (7)
+    I(χ) = ∮_{∂S(χ)} χ ∇λ·dl = χ ∮ ∇λ·dl = 0.                           (7)
 
-(7) is divergence free for every c(χ): with ∇×h_pol = 0,
+The net currents come from multivalued parts of λ, one per angle:
 
-    ∇·(∇χ×c h) = −∇χ·∇×(c h) = −∇χ·(c' ∇χ×h) = 0.                       (8)
+    J = ∇χ×∇λ̃ + ∇×(C(χ) h_θ) + ∇×(G(χ) h_φ),   λ̃ single valued.       (8)
 
-The current profile then fixes c(χ):
+- h_φ = ∇φ is closed on the whole torus. It is FortFEM's toroidal harmonic
+  class (`spline_derham_harmonic`), and G(χ) gives the poloidal current.
+- h_θ = ∇θ is the winding form about the magnetic axis X. Poloidal loops
+  are contractible in the solid torus, so the complex has no such class:
+  ∇×h_θ = 2π δ_X. Then
 
-    I(χ) = ∫_{S(χ)} J·dS.                                               (9)
+      ∇×(C h_θ) = C'(χ) ∇χ×h_θ + 2π C(χ(X)) δ_X,                       (9)
 
-Current mode (VMEC's I(s)): c(χ) is an unknown profile with (9) as its
-constraint. ι mode: c follows from ι(χ) through the poloidal flux.
+  and the line current at X vanishes only for C(χ_axis) = 0, so X must be
+  the magnetic axis. X is an unknown per toroidal plane, fixed by Newton
+  together with the axis, as in the 2D solver. The toroidal current is
+  I(χ) = 2π C(χ).
+
+Both terms enter weakly, ∫ A·∇×(C h) dV = ∫ B·C(χ) h dV (plus a wall
+term), with h evaluated pointwise. h_θ ~ 1/ρ at the axis is integrable.
+A gradient added to h changes the load by −∫ f ∇·(C B) dV =
+−∫ f C' B·∇χ dV, which vanishes under (5), so only the winding matters.
+
+Current mode (VMEC's I(s)): C(χ) is the given profile. ι mode: C follows
+from ι(χ) as an unknown profile with the poloidal flux as its constraint.
 
 ## 4. Discrete spaces and the weak constraint
 
 - A ∈ V1, ungauged. B = ∇×A ∈ V2 is divergence free exactly (d∘d = 0).
-- χ and λ̃ ∈ V0, one pair per region, and c(χ) is a spline in χ.
+- χ and λ̃ ∈ V0, one pair per region. C(χ) and G(χ) are splines in χ,
+  and X is a curve sampled at the toroidal nodes.
 - The constraint holds weakly: ∫ ν B·∇χ dV = 0 for all ν ∈ V0.
 - Label normalisation: one scalar constraint per region, Φ(χ) = χ Φ_edge,
   which removes χ → g(χ).
 - Fixed values or constraints on the harmonic coefficients of A: the
-  toroidal flux and, by mode, the linked poloidal flux or (9).
+  toroidal flux and, by mode, the linked poloidal flux.
 
 ## 5. Inf–sup and rational surfaces
 
@@ -106,7 +119,7 @@ classes (toroidal, poloidal), and their fluxes are the two numbers of the wall.
 
 ## 7. Solver
 
-- **Production:** Newton–Krylov on the saddle-point system in (A, χ, c, λ̃)
+- **Production:** Newton–Krylov on the saddle-point system in (A, χ, λ̃, X)
   and the scalar multipliers.
   - A stays ungauged: the energy depends on A only through B, so every Newton
     right-hand side lies in range(∇×ᵀ) and Krylov iterations converge there.
