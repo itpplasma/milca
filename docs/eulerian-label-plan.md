@@ -244,7 +244,8 @@ of a reconstruction from measured profiles and magnetics.
 | E2 | Solov'ev doublet (two magnetic axes, one separatrix) | as E1, both axes found, separatrix flux to the interpolation error |
 | E3 | E1 through the 3D complex (M ≥ 2, n = 0 solution) | identical to E1 |
 | E3b | E3 with one axis point per toroidal plane, non-axisymmetric start | identical to E3, axis curve a circle |
-| E4 | low-β stellarator, fixed boundary | VMEC++ and GVEC within their convergence |
+| E4a | exact 3D Landreman equilibria, fixed labels, g fitted | B at order p against the exact field |
+| E4 | E4a with χ, g and the axis curve by Newton (sheared family), then the registered integer case against VMEC++, DESC and GVEC | B and χ at order p; time to accuracy |
 | E5 | tokamak with a resonant boundary perturbation, island chain, ΔΦ_I as input | continuous to the nested solution at ΔΦ_I → 0, derivatives against finite differences, minimum-energy width against a published SPEC or HINT case |
 | E6 | free boundary: plasma (2) coupled to V1 vacuum and the wall operator | the 2D spline free-boundary results, then Landreman–Paul QA (L5) |
 
@@ -359,6 +360,45 @@ A smooth carrier B_reg of the guide field is a diagnostic in axisymmetry
 only: in 3D a divergence-free field tangent to χ is again of Clebsch form and
 carries the same singularity.
 
+E4a (fixed χ_h = Π0 ψ/δ per plane, per-plane O-grid on the exact axis fitted to
+the exact boundary, winding angle in the Hessian frame of each plane,
+relative L2 error of B against the exact field, degree 2):
+
+| case | planes | 2 cells | 4 cells | 8 cells |
+|---|---|---|---|---|
+| integer family, ε = 0.1 | 13 | 1.09e-2 | 2.47e-3 | 4.99e-4 |
+| integer family, ε = 0.1 | 21 | | | 4.96e-4 |
+| sheared family, ε = 1.2 | 21 | 2.81e-2 | 1.03e-2 | 2.77e-3 |
+| sheared family, ε = 1.2 | 31 | 2.81e-2 | 1.02e-2 | |
+
+- The sign pair F = −Φ/(2π), G = −ιΦ/(2π) is selected by the data: the
+  other three pairs miss B by 35–200 % at 2 cells.
+- The sheared case needs 21 planes (axis R from 1.02 to 1.44 over φ); with
+  13 the planes limit the error.
+- Newton on the integer family does not converge, even from the exact state
+  and at ε = 0: ι = 2 everywhere, so every surface is rational and shearless,
+  B·∇ has a kernel far beyond functions of χ, the g block is nearly singular
+  and the label equation loses its stiffness. The integer family stays a
+  fixed-label (E4a) and cross-code case; Newton moves to the sheared family.
+- The multiplier of χ(X) = 0 is nonzero and mesh independent (0.103 for
+  ε = 0): the winding form leaves a point term 4πκF'² δχ(X) in the first
+  variation of W, which the constraint absorbs.
+- Open: on the sheared sections the axis rows stay at 0.5 from the exact
+  state because `layout_set_curve` scales the core corners with the wall, so
+  the central core vertex leaves the axis. The core must be re-centred on X
+  after the wall is set.
+- The 3D assembly is threaded over cells (OpenMP): the E3b gate takes 1.4 s
+  and E4a 2.4 s on 16 threads, against 11 s and 17 s serial. The finite
+  difference axis columns (2 nt gradient assemblies per Newton step) remain
+  the cost at 21 planes.
+
+FortFEM supplies the separatrix-aligned layouts for E2b and E5:
+`layout_doublet` (18 blocks, X of valence 8) and `layout_island_chain` (any
+m ≥ 2), V0 cut across `LAYOUT_SEPARATRIX`, one-sided traces and grading
+towards the separatrix and X. For a log singularity in g, power grading with
+exponent above 2(p + 1) is needed for order p + 1 in L2; geometric grading
+with a fixed ratio stalls.
+
 ## 6. Order of work
 
 1. Literature: done, section 3. Repeat the enrichment search with a
@@ -367,10 +407,11 @@ carries the same singularity.
    second derivatives in (χ, g, profile coefficients), with identities.
 3. E0, E1 in axisymmetry (done, `test_eulerian_clebsch_fit`,
    `test_eulerian_clebsch_newton`).
-4. O-line handling for several axes: E2a done, E2b on a separatrix-aligned
-   mesh (layout requested from FortFEM), then E2 with Newton.
-5. 3D: h_θ about an axis curve, θ_X = atan2(Z − Z_X(φ), R − R_X(φ)) per
-   toroidal angle, closed away from X. E3, then E4.
+4. O-line handling for several axes: E2a done, E2b on FortFEM's doublet
+   layout (power grading ≥ 8 at p = 2, or p = 3), then E2 with Newton.
+5. 3D: E3, E3b and E4a done; E4 with Newton on the sheared family after the
+   core is re-centred on the axis, then the registered integer case against
+   VMEC++, DESC and GVEC.
 6. Islands and rational surfaces, E5. Open whether Newton from nested
    initial labels finds the island topology, or whether the topology has to
    be seeded.
@@ -398,6 +439,19 @@ carries the same singularity.
   on one movable interface, then label + NN2 (staggered, then monolithic),
   aimed at the W7-X island divertor (E9). Island size is an input in
   reconstruction and needs a Taylor, NN2 or resistive closure in prediction.
+  NN2 with vanishing pressure gradient does not reduce to the helicity
+  constrained Beltrami state by itself (different invariants); the same
+  closed stochastic region solved with both, on matched boundary fields,
+  calibrates when the Taylor closure suffices.
+- Stability: the Newton Hessian of W in (χ, g) at fixed F, G and p(χ) is
+  not the ideal δW (no compressional γp(∇·ξ)² term, not the space of
+  displacements ξ); global stability of a label equilibrium goes through the
+  ξ-based stability machinery until the relation is derived.
+- Kinetics: the regional labels and θ* = θ + g/F' give the flux coordinates
+  that a nested-surface drift-kinetic solver (K2) needs inside island
+  interiors; orbits that cross separatrices or stochastic regions remain
+  open. With anisotropic or flowing kinetic pressure, ∇p ≠ 0 no longer
+  implies surfaces.
 - Globalisation: the Newton basin for the axis is about 2e-3 of the minor
   radius; continuation in β, boundary and ΔΦ_I.
 - Inf–sup of the δχ equation near O-points and saddles, where ∇χ = 0.
