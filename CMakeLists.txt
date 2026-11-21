@@ -884,6 +884,11 @@ target_link_libraries(test_eulerian_solovev_labels PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_solovev_labels_gate_g2a COMMAND test_eulerian_solovev_labels)
 add_test(NAME eulerian_solovev_nonlinear_labels_gate_g2a
     COMMAND test_eulerian_solovev_labels nonlinear)
+add_executable(test_eulerian_clebsch_fit test/test_eulerian_clebsch_fit.f90)
+target_link_libraries(test_eulerian_clebsch_fit PRIVATE milca_eulerian_test)
+add_test(NAME eulerian_clebsch_fit_gate_e0 COMMAND test_eulerian_clebsch_fit)
+add_test(NAME eulerian_clebsch_fit_nonlinear_gate_e0
+    COMMAND test_eulerian_clebsch_fit nonlinear)
 add_executable(test_gs_fb_manufactured test/test_gs_fb_manufactured.f90)
 target_link_libraries(test_gs_fb_manufactured PRIVATE milca_gs_fb_test)
 add_library(milca_gs_ci_test STATIC test/support/gs_ci_fixture.f90)
