@@ -4,17 +4,61 @@ Plan of 2026-11-20 for the free-boundary gates E4, E5 and E8 of roadmap item
 P1b (3D equilibrium, [procedure](../ROADMAP.md#p1b-procedure)). MILCA has two
 equilibrium lanes, and both get the same free boundary: a fixed outer
 surface Γ_c with an exact exterior, the coil field split off, and a mesh
-whose tangential motion is a gauge.
+that moves by its own equation (ALE).
 
 | Lane | Model | Topology | Comparators |
 |---|---|---|---|
-| Frozen lane ([ideal-map-3d.md](ideal-map-3d.md)) | ideal MHD, unknown the map of a reference mesh, fluxes given as functions of a label per region | nested, or islands whose topology the reference fixes | VMEC family, GVEC, DESC (nested), SIESTA ideal steps and SPEC with prescribed current (fixed-topology islands) |
+| Frozen lane (section 0) | ideal MHD, Eulerian vector potential and one label per region, the topology imposed as field constraints | nested, or islands whose topology the regions fix | VMEC family, GVEC, DESC (nested), SIESTA ideal steps and SPEC with prescribed current (fixed-topology islands) |
 | NN lane ([NN2](equilibrium-nonnested-nn2.md)) | vector potential, pressure, electric potential and loop voltage on a mesh fixed in space, closed by pressure transport and Ohm's law (or Taylor regions) | any, including islands that form and stochastic regions | SPEC and SPECTRE (Taylor regions), HINT and PIES (published results), SIESTA resistive steps |
 
 VMEC is a comparator only for nested states of the frozen lane, because only
 there both solve the same model. In 3D, nested surfaces with a smooth
 pressure are not a generic solution of ideal MHD, and VMEC imposes them
 through its coordinates. NN2 at finite resistivity opens islands there.
+
+## 0. Decision of 2026-11-21: Eulerian frozen lane on an ALE mesh
+
+The material map of the frozen lane ([ideal-map-3d.md](ideal-map-3d.md)) has
+an exact null for every relabelling along the surfaces (particle-relabelling
+symmetry). Gauges of it (VMEC's angle condition, the transversal gauge,
+slide moments, penalties) put the mesh parametrisation into the physics
+Newton and fail in strong shaping. The frozen lane therefore drops the
+material map and uses unknowns without that symmetry:
+
+- B = ∇×A with A in the spline de Rham complex (∇·B = 0 exactly), and one
+  label χ_r per region r (nested core, each island, each axis);
+- the topology as constraints on the fields: B·∇χ_r = 0 weakly with a
+  multiplier, and χ_r normalised by its enclosed toroidal flux, Φ_r(χ_r) =
+  χ_r Φ_r,edge, which fixes χ_r → g(χ_r) exactly;
+- profiles p_r(χ) and ι_r(χ) or I_r(χ) (VMEC's profiles for one region);
+- the only gauge left is A → A + ∇φ, removed exactly by tree–cotree;
+- free boundary through the coil split and the exterior map on Γ_c
+  (sections 2 and 4).
+
+The mesh is ALE: it moves by its own equation (Winslow, alignment,
+refinement), never part of the energy. Coupling is staggered first (physics
+Newton on a frozen mesh, then mesh update and field transfer by projection)
+and monolithic once the staggered loop is verified. In axisymmetry the
+lane is the inverse Grad–Shafranov problem in the poloidal flux ψ (B·∇ψ ≡
+0) with p(s) and I(s) or ι(s) in the toroidal-flux label s, as CEDRES++,
+FEEQS and NICE solve it; MILCA's `gs_free` is its Eulerian solver. The NN
+lane uses the same unknowns, spaces, mesh and exterior and replaces
+B·∇χ = 0 by transport.
+
+Ladder, each step in seconds before the next:
+
+| Step | Case | Compared | Passed when |
+|---|---|---|---|
+| L1 | fixed-boundary Solov'ev | exact solution | optimal order in ψ and B |
+| L2 | free-boundary Solov'ev | exact solution with its coil field | optimal order, quadratic Newton |
+| L3 | profiles in s: p(s), I(s) or ι(s) on a shaped fixed boundary | converged VMEC (fixed boundary) | I(s), ι(s), β, R_axis within the error estimate |
+| L4 | DIII-D free boundary, `lasym = F` and `lasym = T` decks | converged VMEC2000 (ns 512, mpol 20) | V, β, R_axis, ι, I(s) within the error estimate; wall time at matched accuracy |
+| L5 | 3D nested (A, χ) | VMEC++ on the Landreman–Paul QA case | E4 observables |
+| L6 | islands with fixed topology, several axes | SIESTA, SPEC | E7 observables |
+
+The material map, its relabelling potential and gauges (section 4 and the
+gates B1–B3) are superseded; [ideal-map-3d.md](ideal-map-3d.md) stays as the
+verified reference until L4 and L5 pass.
 
 ## 1. Reason
 
