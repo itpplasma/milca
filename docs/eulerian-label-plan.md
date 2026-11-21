@@ -379,17 +379,25 @@ carries the same singularity.
 
 ## 7. Open
 
-- Stochastic regions have no label. Ideal force balance gives B·∇p = 0, so
-  p is constant on every region one field line fills: ideal pressure
-  gradients sit on surfaces, where the labels are exact. Realistic
-  stochastic regions keep gradients through finite parallel transport and
-  belong to the transport lane (NN2), not to this one. A force-free or
-  Taylor-relaxed unlabelled region with A ∈ V1, matched to (2) by the
-  tangential trace on good surfaces as in SPEC's relaxed volumes, is
-  possible later if a SPEC comparison needs it; it is not planned before
-  E5.
-  Check of a label solution: relax with A free from it and trace field
-  lines; where layers widen, the region must become unlabelled.
+- Regions and closures. Representation (labels (2), free A ∈ V1, vacuum)
+  and physical closure (prescribed profiles, ideal force balance, Taylor
+  relaxation, anisotropic transport, kinetic closures) are separate choices.
+  Ideal force balance gives B·∇p = 0: where ∇p ≠ 0 the level sets of p are
+  local magnetic surfaces, so ideal pressure gradients sit where labels are
+  exact; on a fully ergodic volume p is constant and current continuity makes
+  α in ∇×B = αB constant (Beltrami). The long-term model is one residual
+  system with region blocks: labels for the core and island interiors, the
+  Taylor closure (`nonnested_beltrami`) for fully relaxed volumes, NN2 for
+  stochastic and open edge regions with finite transport, vacuum and coils
+  through the free-boundary coupling. Interfaces are good magnetic surfaces
+  with continuous tangential A, matched harmonic fluxes and total-pressure
+  balance from the variation of the shared interface, plus a transport-flux
+  law where NN2 meets them; at material targets sheath conditions replace
+  B·n = 0. Regions are chosen explicitly or from a verified topology analysis
+  between solves, never inside Newton. Order after E5: label + Taylor region
+  on one movable interface, then label + NN2 (staggered, then monolithic),
+  aimed at the stellarator island divertor (E9). Island size is an input in
+  reconstruction and needs a Taylor, NN2 or resistive closure in prediction.
 - Globalisation: the Newton basin for the axis is about 2e-3 of the minor
   radius; continuation in β, boundary and ΔΦ_I.
 - Inf–sup of the δχ equation near O-points and saddles, where ∇χ = 0.
