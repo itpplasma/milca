@@ -25,6 +25,7 @@ module milca_gs_free_current
     use milca_grad_shafranov, only: gs_state_t
     use milca_gs_profile_law, only: gs_profile_law_t, gs_law_primitives, gs_law_sources
     use milca_gs_free_boundary, only: gs_fb_system_t, gs_fb_eval_t, gs_fb_newton, &
+        gs_fb_history_t, &
         gs_fb_evaluate, gs_fb_surface_integrals, GS_FB_OK, GS_FB_XPOINT
     implicit none
     private
@@ -299,6 +300,7 @@ contains
             df(:, :), dg(:, :), gamma(:)
         integer, parameter :: memory = 6
         integer :: npass, npts, pass, stat, nk, used, retry
+        type(gs_fb_history_t) :: history
         real(dp), allocatable :: psi_accepted(:), x_accepted(:)
         logical :: talk
 
@@ -320,7 +322,7 @@ contains
             ! A failed solve halves the last step back towards the accepted
             ! state (at most six times).
             do retry = 0, 6
-                call gs_fb_newton(state, sys, currents, stat)
+                call gs_fb_newton(state, sys, currents, stat, history)
                 if (stat == GS_FB_OK .or. pass == 1) exit
                 if (retry == 6) exit
                 state%psi = psi_accepted
@@ -380,9 +382,9 @@ contains
             report%passes = pass
             report%change = change
             report%cut_fraction = next_cut
-            if (talk) print '(a,i3,a,es10.3,a,f9.6,a,es13.6,a,f9.5)', 'current pass', &
+            if (talk) print '(a,i3,a,es10.3,a,f9.6,a,es13.6,a,f9.5,a,i0)', 'current pass', &
                 pass, ' change', change, ' cut', next_cut, ' Ip', ev%plasma_current, &
-                ' Phi(deepest)', phi_deepest
+                ' Phi(deepest)', phi_deepest, ' Newton iterations ', history%iterations
             sys%law%pp = next%pp
             sys%law%ff = next%ff
             sys%law%p_edge = next%p_edge
