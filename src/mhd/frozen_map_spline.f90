@@ -62,6 +62,10 @@ module milca_frozen_map_spline
         type(frozen_spline_kernel_t) :: kernel
         real(dp), allocatable :: coef(:, :) ! (NF, dof)
         logical, allocatable :: fixed(:) ! (NF*dof)
+        ! transversal gauge: q of a transversal dof moves along dir only
+        ! (reference radial direction pushed forward by the initial map)
+        logical, allocatable :: transversal(:) ! (dof)
+        real(dp), allocatable :: dir(:, :) ! (2, dof)
     end type
 
 contains
@@ -130,7 +134,165 @@ contains
         end do
         ! f + const is an exact null
         m%fixed(3) = .true.
+        call transversal_gauge(m, boundary, core_fraction)
         status = FROZEN_SPLINE_OK
+    end subroutine
+
+    subroutine transversal_gauge(m, boundary, core_fraction)
+        ! Outside the core block every dof moves only along the reference
+        ! radial direction s/|s| pushed forward by the initial map (central
+        ! difference of the harmonic extension), so slides along the surfaces
+        ! are not unknowns and f carries the whole relabelling. The dof's
+        ! location is the extraction-weighted mean of its broken functions'
+        ! reference control points.
+        type(frozen_spline_map_t), intent(inout) :: m
+        real(dp), intent(in) :: boundary(:, :, 0:), core_fraction
+        real(dp), allocatable :: loc(:, :), wsum(:)
+        real(dp) :: r, a(2, 1), b(2, 1), eps
+        integer :: br, k, d
+        allocate (loc(2, m%space%dof_count), wsum(m%space%dof_count), &
+            m%transversal(m%space%dof_count), m%dir(2, m%space%dof_count))
+        loc = 0; wsum = 0
+        do br = 1, m%space%broken_count
+            do k = m%space%broken_ptr(br), m%space%broken_ptr(br + 1) - 1
+                d = m%space%broken_dof(k)
+                loc(:, d) = loc(:, d) + abs(m%space%broken_weight(k))*m%space%geometry(:, br)
+                wsum(d) = wsum(d) + abs(m%space%broken_weight(k))
+            end do
+        end do
+        eps = 1.0e-4_dp
+        m%transversal = .false.; m%dir = 0
+        do d = 1, m%space%dof_count
+            if (.not. wsum(d) > 0) cycle
+            loc(:, d) = loc(:, d)/wsum(d)
+            r = norm2(loc(:, d))
+            if (r <= core_fraction) cycle
+            call ideal_seed_boundary_coefficients(loc(:, d)*(1 + eps), boundary, a, &
+                centre=[0.0_dp, 0.0_dp], axes=[1.0_dp, 1.0_dp])
+            call ideal_seed_boundary_coefficients(loc(:, d)*(1 - eps), boundary, b, &
+                centre=[0.0_dp, 0.0_dp], axes=[1.0_dp, 1.0_dp])
+            m%dir(:, d) = (a(:, 1) - b(:, 1))/norm2(a(:, 1) - b(:, 1))
+            m%transversal(d) = .true.
+        end do
+    end subroutine
+
+    subroutine reduced_system(m, h, g, ptr, idx, val, gr, drop)
+        ! H' = P^T H P and g' = P^T g with P the transversal gauge: the q1
+        ! slot of a transversal dof carries nu (dq = nu dir), its q2 slot and
+        ! the fixed slots are dropped (unit rows).
+        type(frozen_spline_map_t), intent(in) :: m
+        type(csr_matrix_t), intent(in) :: h
+        real(dp), intent(in) :: g(:)
+        integer, allocatable, intent(out) :: ptr(:), idx(:)
+        real(dp), allocatable, intent(out) :: val(:), gr(:)
+        logical, allocatable, intent(out) :: drop(:)
+        integer, allocatable :: slot(:), ci(:), cj(:), order(:)
+        real(dp), allocatable :: coef(:), cv(:)
+        integer :: n, r, c, p, cnt, d, i, nnz
+        n = size(g)
+        allocate (slot(n), coef(n), drop(n))
+        drop = m%fixed
+        do r = 1, n
+            slot(r) = r; coef(r) = 1
+        end do
+        do d = 1, m%space%dof_count
+            if (.not. m%transversal(d)) cycle
+            r = 1 + NF*(d - 1)
+            slot(r) = r; coef(r) = m%dir(1, d)
+            slot(r + 1) = r; coef(r + 1) = m%dir(2, d)
+            drop(r + 1) = .true.
+            if (m%fixed(r) .or. m%fixed(r + 1)) drop(r) = .true.
+        end do
+        allocate (gr(n))
+        gr = 0
+        do r = 1, n
+            gr(slot(r)) = gr(slot(r)) + coef(r)*g(r)
+        end do
+        where (drop) gr = 0
+        nnz = size(h%val)
+        allocate (ci(nnz + n), cj(nnz + n), cv(nnz + n))
+        cnt = 0
+        do r = 1, n
+            if (drop(slot(r))) cycle
+            do p = h%rowptr(r), h%rowptr(r + 1) - 1
+                c = h%colidx(p)
+                if (drop(slot(c))) cycle
+                cnt = cnt + 1
+                ci(cnt) = slot(r); cj(cnt) = slot(c); cv(cnt) = coef(r)*h%val(p)*coef(c)
+            end do
+        end do
+        do r = 1, n
+            if (.not. drop(r)) cycle
+            cnt = cnt + 1; ci(cnt) = r; cj(cnt) = r; cv(cnt) = 1
+        end do
+        ! COO -> CSR with duplicates summed (sort by row, then column)
+        allocate (order(cnt))
+        order = [(i, i=1, cnt)]
+        call sort_pairs(ci(:cnt), cj(:cnt), order)
+        allocate (ptr(n + 1), idx(cnt), val(cnt))
+        ptr = 0
+        nnz = 0
+        do i = 1, cnt
+            p = order(i)
+            if (nnz > 0) then
+                if (idx(nnz) == cj(p) .and. ci(order(i - 1)) == ci(p)) then
+                    val(nnz) = val(nnz) + cv(p); cycle
+                end if
+            end if
+            nnz = nnz + 1; idx(nnz) = cj(p); val(nnz) = cv(p)
+            ptr(ci(p) + 1) = ptr(ci(p) + 1) + 1
+        end do
+        ptr(1) = 1
+        do r = 1, n
+            ptr(r + 1) = ptr(r + 1) + ptr(r)
+        end do
+        idx = idx(:nnz); val = val(:nnz)
+    end subroutine
+
+    subroutine expand_step(m, x, du)
+        ! du = P x
+        type(frozen_spline_map_t), intent(in) :: m
+        real(dp), intent(in) :: x(:)
+        real(dp), intent(out) :: du(:)
+        integer :: d, r
+        du = x
+        do d = 1, m%space%dof_count
+            if (.not. m%transversal(d)) cycle
+            r = 1 + NF*(d - 1)
+            du(r) = m%dir(1, d)*x(r); du(r + 1) = m%dir(2, d)*x(r)
+        end do
+    end subroutine
+
+    subroutine sort_pairs(ci, cj, order)
+        ! order sorted by (ci, cj) (merge sort on keys)
+        integer, intent(in) :: ci(:), cj(:)
+        integer, intent(inout) :: order(:)
+        integer, allocatable :: tmp(:)
+        integer :: n, width, lo, mid, hi, i, j, k
+        n = size(order)
+        allocate (tmp(n))
+        width = 1
+        do while (width < n)
+            do lo = 1, n, 2*width
+                mid = min(lo + width - 1, n); hi = min(lo + 2*width - 1, n)
+                i = lo; j = mid + 1; k = lo
+                do while (k <= hi)
+                    if (j > hi) then
+                        tmp(k) = order(i); i = i + 1
+                    else if (i > mid) then
+                        tmp(k) = order(j); j = j + 1
+                    else if (ci(order(j)) < ci(order(i)) .or. (ci(order(j)) == ci(order(i)) &
+                            .and. cj(order(j)) < cj(order(i)))) then
+                        tmp(k) = order(j); j = j + 1
+                    else
+                        tmp(k) = order(i); i = i + 1
+                    end if
+                    k = k + 1
+                end do
+            end do
+            order = tmp
+            width = 2*width
+        end do
     end subroutine
 
     subroutine project_map(m, target, status)
@@ -294,7 +456,9 @@ contains
         integer, intent(out) :: iterations, status
         real(dp), intent(out) :: residual
         type(csr_matrix_t) :: h
-        real(dp), allocatable :: g(:), du(:), c0(:, :)
+        real(dp), allocatable :: g(:), du(:), c0(:, :), gr(:), x(:), val(:)
+        integer, allocatable :: ptr(:), idx(:)
+        logical, allocatable :: drop(:)
         real(dp) :: e0, e1, g0, mu, alpha
         integer :: st, tries
         status = FROZEN_SPLINE_FAILED
@@ -303,20 +467,23 @@ contains
         if (st /= 0) then
             status = FROZEN_SPLINE_FOLDED; return
         end if
-        where (m%fixed) g = 0
-        g0 = norm2(g)
+        g0 = -1
         residual = 1
         do iterations = 0, max_iterations
-            residual = norm2(g)/max(g0, tiny(1.0_dp))
+            call spline_energy_hessian_csr(m%space, m%quad, m%kernel, m%coef, h, st)
+            if (st /= 0) exit
+            call reduced_system(m, h, g, ptr, idx, val, gr, drop)
+            if (g0 < 0) g0 = norm2(gr)
+            residual = norm2(gr)/max(g0, tiny(1.0_dp))
             if (residual <= tolerance) then
                 status = FROZEN_SPLINE_OK; return
             end if
             if (iterations == max_iterations) exit
-            call spline_energy_hessian_csr(m%space, m%quad, m%kernel, m%coef, h, st)
-            if (st /= 0) exit
             c0 = m%coef
+            allocate (du(size(g)))
             do tries = 1, 20
-                call solve_csr(h, -g, du, st, fixed=m%fixed, shift=mu)
+                call solve_arrays(ptr, idx, val, -gr, drop, x, st, shift=mu)
+                if (st == 0) call expand_step(m, x, du)
                 if (st /= 0) then
                     mu = max(4*mu, 1.0e-8_dp); cycle
                 end if
@@ -327,12 +494,48 @@ contains
                 m%coef = c0
                 mu = max(4*mu, 1.0e-8_dp)
             end do
+            deallocate (du)
             if (tries > 20) exit
             mu = mu/4
             e0 = e1
             call frozen_spline_energy(m, e0, st, g)
-            where (m%fixed) g = 0
         end do
+    end subroutine
+
+    subroutine solve_arrays(ptr, idx, val, b, drop, x, status, shift)
+        ! x = A^-1 b for A in symmetric CSR (= CSC) with unit rows where drop;
+        ! Levenberg-Marquardt shift in the diagonal metric
+        integer, intent(in) :: ptr(:), idx(:)
+        real(dp), intent(in) :: val(:), b(:)
+        logical, intent(in) :: drop(:)
+        real(dp), allocatable, intent(out) :: x(:)
+        integer, intent(out) :: status
+        real(dp), intent(in) :: shift
+        type(sparse_direct_factor_t) :: factor
+        real(dp), allocatable :: v(:), rhs(:)
+        real(dp) :: dmax
+        integer :: n, i, p
+        n = size(b)
+        v = val
+        dmax = 0
+        do i = 1, n
+            do p = ptr(i), ptr(i + 1) - 1
+                if (idx(p) == i) dmax = max(dmax, abs(v(p)))
+            end do
+        end do
+        do i = 1, n
+            if (drop(i)) cycle
+            do p = ptr(i), ptr(i + 1) - 1
+                if (idx(p) == i) v(p) = v(p) + shift*max(abs(v(p)), 1.0e-12_dp*dmax)
+            end do
+        end do
+        rhs = b
+        where (drop) rhs = 0
+        call sparse_direct_factor_csc(factor, n, ptr, idx, v, status)
+        if (status /= 0) return
+        allocate (x(n))
+        call sparse_direct_solve_factored(factor, rhs, x, status)
+        call sparse_direct_free(factor)
     end subroutine
 
     subroutine solve_csr(a, b, x, status, fixed, shift, field3)
@@ -374,8 +577,9 @@ contains
                 do p = a%rowptr(i), a%rowptr(i + 1) - 1
                     if (drop(a%colidx(p))) cycle
                     cnt = cnt + 1; idx(cnt) = a%colidx(p); val(cnt) = a%val(p)
+                    ! Levenberg-Marquardt in the Hessian-diagonal metric
                     if (present(shift) .and. a%colidx(p) == i) &
-                        val(cnt) = val(cnt) + shift*dmax
+                        val(cnt) = val(cnt) + shift*max(abs(a%val(p)), 1.0e-12_dp*dmax)
                 end do
             end if
             ptr(i + 1) = cnt + 1
