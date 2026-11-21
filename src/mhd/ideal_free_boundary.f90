@@ -56,7 +56,8 @@ module milca_ideal_free_boundary
     use milca_equilibrium_chart, only: ideal_chart_t, cylindrical_chart_t
     use milca_ideal_map, only: ideal_map_t, ideal_frozen_t, &
         ideal_map_init, ideal_map_freeze, ideal_map_energy, ideal_map_dof, &
-        IDEAL_MAP_OK
+        IDEAL_MAP_OK, ideal_map_position_gauge, ideal_map_angle_enable, ideal_map_hessian
+    use milca_ideal_seed_3d, only: ideal_seed_angle_tables
     use milca_ideal_map_leaves, only: ideal_energy_gradient, ideal_energy_hessian
     use milca_ideal_dw_leaves, only: dw_point_mass, dw_point_adiabatic, &
         dw_point_inertia
@@ -84,10 +85,11 @@ module milca_ideal_free_boundary
         csc_normalize_symmetric_raw, &
         FORTSPARSE_ORDER_AMD, FORTSPARSE_LU_SUPERNODAL, &
         FORTSPARSE_SYM_INDEFINITE, sparse_inertia, FORTSPARSE_INERTIA_RELIABLE
-    use milca_ideal_fb_bem, only: fb_bem_t, fb_coil_flux_t, fb_bem_setup, &
-        fb_bem_replan, fb_bem_terms, fb_bem_exact
+    use milca_ideal_fb_bem, only: fb_bem_seconds, fb_bem_calls, fb_bem_t, fb_coil_flux_t, fb_bem_setup, &
+        fb_bem_replan, fb_bem_terms, fb_bem_exact, fb_coil_flux_value
     use milca_inertia_newton, only: inertia_newton_t, inertia_newton_factor, &
-        inertia_newton_solve, inertia_newton_accept, INERTIA_NEWTON_OK
+        inertia_newton_solve, inertia_newton_accept, INERTIA_NEWTON_OK, &
+        inertia_watchdog_t, inertia_watchdog_start, inertia_watchdog_check, WATCHDOG_RESTORE
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t, gamma_c_3d_energy, &
         assignment(=)
     implicit none
@@ -102,6 +104,8 @@ module milca_ideal_free_boundary
     public :: ideal_fb_mode_inertia, ideal_fb_mode_lanczos
     public :: ideal_fb_init_fixed, ideal_fb_fixed_mode
     public :: ideal_fb_init_bem, ideal_fb_bem_settle, ideal_fb_fix_vertical
+    public :: ideal_fb_enable_angle
+    public :: ideal_fb_set_coil_split, ideal_fb_coil_split_energy
     public :: ideal_fb_newton_step, ideal_fb_sensitivity
     public :: ideal_fb_slide_system, ideal_fb_hypotheses_t, ideal_fb_hypotheses
     public :: ideal_fb_hypotheses_print
@@ -210,6 +214,15 @@ module milca_ideal_free_boundary
         real(dp), allocatable :: xs(:, :, :), phi(:, :), lam(:, :, :)
         ! Unknown layout: plasma reduced, shell map, multipliers, potential.
         integer :: np = 0, nx = 0, nf = 0, n = 0
+        ! Field-angle relabelling unknowns of the plasma map (ideal_map_angle_enable)
+        ! after all others, at na0 + 1 .. na0 + fb%plasma%nangle; na0 = 0: none.
+        integer :: na0 = 0
+        ! Coil field split off (theory/derivations/free-boundary-coil-split.md):
+        ! the coil poloidal flux enters on Gamma_p only, so the coils may lie
+        ! inside Gamma_c; split_chain lists the plasma boundary nodes in
+        ! counterclockwise panel order, split_shell their shell nodes.
+        type(fb_coil_flux_t), allocatable :: coil_split
+        integer, allocatable :: split_chain(:), split_shell(:)
         ! Energy scale sigma*V (J per field period) for the reported residual.
         real(dp) :: energy_scale = 1
         ! Tangential damping (Newton matrix only) on the plasma nodes, relative
@@ -1849,6 +1862,22 @@ contains
                     - fb%load(:, m))
             end do
         end if
+        if (allocated(fb%coil_split)) then
+            block
+                real(dp), allocatable :: gpos(:, :), gphi(:)
+                real(dp) :: esplit
+                integer :: b
+                call ideal_fb_coil_split_energy(fb, esplit, gpos, gphi)
+                ec = ec + esplit
+                do b = 1, size(fb%split_chain)
+                    do c = 1, 2
+                        p = pidx(fb, c, 1, fb%split_chain(b))
+                        grad(p) = grad(p) - gpos(c, b)
+                    end do
+                    gf(1, fb%split_shell(b)) = gf(1, fb%split_shell(b)) + gphi(b)
+                end do
+            end block
+        end if
         call constraint_residual(fb, res)
         ! C^T lambda on xs and on the plasma Gamma_p dofs.
         cx = 0
@@ -1927,6 +1956,7 @@ contains
         if (allocated(fb%exterior_3d)) cap = (fb%nmode*fb%nt)**2
         cap = size(hp%val) + size(hs%val) + cap &
             + 2*3*fb%nmode*(size(fb%lap_val) + 2*fb%ns) + fb%np
+        if (allocated(fb%coil_split)) cap = cap + size(fb%split_chain)*(3*(fb%order + 1))**2
         allocate (ci(cap), cj(cap), cv(cap))
         cnt = 0
         do i = 1, fb%np
@@ -1939,6 +1969,22 @@ contains
                 call push(shell_global(i), shell_global(hs%colidx(p)), -hs%val(p))
             end do
         end do
+        if (allocated(fb%coil_split)) then
+            block
+                real(dp), allocatable :: hpanel(:, :, :)
+                integer, allocatable :: gidx(:, :)
+                integer :: q, r, np_split
+                call coil_split_hessian(fb, hpanel, gidx)
+                np_split = size(gidx, 2)
+                do q = 1, np_split
+                    do r = 1, size(hpanel, 1)
+                        do l = 1, size(hpanel, 1)
+                            call push(gidx(l, q), gidx(r, q), -hpanel(l, r, q))
+                        end do
+                    end do
+                end do
+            end block
+        end if
         if (allocated(fb%exterior_3d)) then
             do m2 = 1, fb%nmode
                 do m = 1, fb%nmode
@@ -1986,6 +2032,7 @@ contains
             end do
         end do
         call coo_to_csr(fb%n, ci(:cnt), cj(:cnt), cv(:cnt), rowptr, colidx, val)
+        if (allocated(fb%coil_split)) call symmetrize_csr(rowptr, colidx, val)
     contains
         integer function shell_global(q)
             integer, intent(in) :: q
@@ -2196,6 +2243,8 @@ contains
             fb%bem%tau = fb%bem%tau + alpha*du(fb%np + 1:fb%np + fb%bem%nt)
             fb%bem%psi_hat = fb%bem%psi_hat + alpha*du(fb%np + fb%bem%nt + 1)
         end if
+        if (fb%na0 > 0) fb%plasma%angle = fb%plasma%angle &
+            + alpha*du(fb%na0 + 1:fb%na0 + fb%plasma%nangle)
     end subroutine
 
     subroutine slide_directions(fb)
@@ -2404,7 +2453,7 @@ contains
         status = IDEAL_FB_BAD_INPUT
         if (max_iterations < 0) return
         if (.not. ideal_fb_exterior_ready(fb)) return
-        if (allocated(fb%bem)) then
+        if (allocated(fb%bem) .or. allocated(fb%coil_split)) then
             ! no shell to globalise: inertia-controlled Newton on E_red
             block
                 logical :: talk
@@ -5673,6 +5722,96 @@ contains
         x = fb%plasma%x(1:2, 1, fb%bem%node)
     end function bem_coords
 
+    subroutine ideal_fb_enable_angle(fb, mpol, flux, centre, axes, status)
+        ! Poloidal field-angle relabelling of the frozen form (the fixed-boundary
+        ! seed's eta, mpol harmonics, ntor = 0) as further unknowns of the
+        ! vacuum-on-Gamma_p solve: without it b3 stays frozen per element and
+        ! the edge current and F(psi) carry the seed's distribution.
+        type(ideal_fb_t), intent(inout) :: fb
+        integer, intent(in) :: mpol
+        real(dp), intent(in) :: flux, centre(2), axes(2)
+        integer, intent(out) :: status
+        integer :: st
+        status = IDEAL_FB_BAD_INPUT
+        if (.not. allocated(fb%bem) .or. fb%na0 > 0 .or. mpol < 1 .or. fb%ntor /= 0) return
+        fb%plasma%position_gauge = .true.
+        call ideal_map_position_gauge(fb%plasma)
+        call ideal_map_angle_enable(fb%plasma, mpol, 0, st)
+        if (st /= IDEAL_MAP_OK) return
+        call ideal_seed_angle_tables(fb%plasma, flux, centre, axes)
+        fb%plasma%angle = 0
+        fb%na0 = fb%n
+        fb%n = fb%n + fb%plasma%nangle
+        call boundary_slide_gauge(fb)
+        status = IDEAL_FB_OK
+    end subroutine
+
+    subroutine boundary_slide_gauge(fb)
+        ! With the field angle a tangential slide of the Gamma_p nodes and the
+        ! matching angle leave B unchanged (an exact null). The boundary nodes
+        ! move normal to Gamma_p only: one constraint t_a . u_a = 0 per node,
+        ! t_a the chain tangent at the present map, appended to the slide
+        ! moments of slide_directions.
+        type(ideal_fb_t), intent(inout) :: fb
+        real(dp), allocatable :: slide(:, :, :)
+        real(dp) :: t(2)
+        integer :: nb, nl, b, a, prev, next
+        nb = fb%bem%nb
+        nl = size(fb%slide, 3)
+        allocate (slide(2, fb%plasma%nodes, nl + nb))
+        slide = 0
+        slide(:, :, :nl) = fb%slide
+        do b = 1, nb
+            a = fb%bem%node(b)
+            prev = fb%bem%node(modulo(b - 2, nb) + 1)
+            next = fb%bem%node(modulo(b, nb) + 1)
+            t = fb%plasma%x(1:2, 1, next) - fb%plasma%x(1:2, 1, prev)
+            slide(:, a, nl + b) = t/norm2(t)
+        end do
+        call move_alloc(slide, fb%slide)
+        call angle_slide_gauge(fb)
+    end subroutine
+
+    subroutine angle_slide_gauge(fb)
+        ! A slide of the interior nodes along the surfaces with the profile of
+        ! an angle harmonic, combined with that harmonic of the angle, is a
+        ! near-null like the f(chi) slides of slide_directions. Fixed in the same
+        ! way: moments M_k(u) = int h_k (DG b_s) . u ds with h_k = Re, Im of
+        ! (u + i v)^m, m = 1..angle_mpol, one per angle unknown.
+        type(ideal_fb_t), intent(inout) :: fb
+        real(dp), allocatable :: slide(:, :, :)
+        real(dp) :: dg(2, 2), flux(2), h
+        integer :: nl, na, e, g, k, m, r, col
+        nl = size(fb%slide, 3)
+        na = 2*fb%plasma%angle_mpol
+        allocate (slide(2, fb%plasma%nodes, nl + na))
+        slide = 0
+        slide(:, :, :nl) = fb%slide
+        associate (map => fb%plasma)
+            do e = 1, map%cells
+                do g = 1, map%nq
+                    dg = matmul(map%reference(:, map%conn(:, e)), &
+                        transpose(map%dshape(:, :, g)))
+                    flux = matmul(dg, map%b(1:2, g, e))*map%weight(g)
+                    do m = 1, map%angle_mpol
+                        do r = 1, 2
+                            col = nl + r + 2*(m - 1)
+                            h = map%angle_power(r, m, g, e)
+                            do k = 1, map%nloc
+                                slide(:, map%conn(k, e), col) = slide(:, map%conn(k, e), col) &
+                                    + h*map%shape(k, g)*flux
+                            end do
+                        end do
+                    end do
+                end do
+            end do
+        end associate
+        do k = nl + 1, nl + na
+            slide(:, :, k) = slide(:, :, k)/norm2(slide(:, :, k))
+        end do
+        call move_alloc(slide, fb%slide)
+    end subroutine
+
     subroutine bem_gradient(fb, grad, status, lagrangian, min_jacobian)
         ! L = W_p + (F^2/2 mu0) int_D |grad phi|^2 + L_v/nfp and its gradient
         ! in the layout (plasma, tau, psi_hat).
@@ -5708,6 +5847,8 @@ contains
         end do
         grad(fb%np + 1:fb%np + nt) = gt/fb%nfp
         grad(fb%np + nt + 1) = gp/fb%nfp
+        if (fb%na0 > 0) grad(fb%na0 + 1:fb%na0 + fb%plasma%nangle) = &
+            gfull(fb%plasma%ndof - fb%plasma%nangle + 1:fb%plasma%ndof)
         if (.not. ieee_is_finite(ev)) status = IDEAL_FB_BEM_FAILED
         if (allocated(fb%shift)) grad = grad - fb%shift
         if (present(lagrangian)) lagrangian = wp + et + ev/fb%nfp
@@ -5728,7 +5869,13 @@ contains
         real(dp) :: ev, gp
         integer :: i, j, p, cnt, cap, nb, nt, b, c
         nb = fb%bem%nb; nt = fb%bem%nt
-        call plasma_hessian(fb, hp)
+        ! with the field angle the plasma block comes from the map's batched
+        ! assembly (position gauge, angle columns after the positions)
+        if (fb%na0 > 0) then
+            call ideal_map_hessian(fb%plasma, fb%plasma%x, hp)
+        else
+            call plasma_hessian(fb, hp)
+        end if
         call toroidal_hessian(fb, ht)
         allocate (gx(2*nb), gt(nt), hxx(2*nb, 2*nb), hxt(2*nb, nt), hxp(2*nb), &
             htt(nt, nt), htp(nt), rows(2*nb))
@@ -5742,10 +5889,12 @@ contains
         cap = size(hp%val) + size(ht%val) + (2*nb + nt + 1)**2
         allocate (ci(cap), cj(cap), cv(cap))
         cnt = 0
-        do i = 1, fb%np
+        do i = 1, size(hp%rowptr) - 1
             do p = hp%rowptr(i), hp%rowptr(i + 1) - 1
-                call push(i, hp%colidx(p), hp%val(p))
+                call push(global(i), global(hp%colidx(p)), hp%val(p))
             end do
+        end do
+        do i = 1, fb%np
             do p = ht%rowptr(i), ht%rowptr(i + 1) - 1
                 call push(i, ht%colidx(p), ht%val(p))
             end do
@@ -5772,6 +5921,11 @@ contains
         call coo_to_csr(fb%n, ci(:cnt), cj(:cnt), cv(:cnt), rowptr, colidx, val)
         call symmetrize_csr(rowptr, colidx, val)
     contains
+        pure integer function global(k)
+            integer, intent(in) :: k
+            global = k
+            if (k > fb%np) global = fb%na0 + k - fb%np
+        end function
         subroutine push(r, col, v)
             integer, intent(in) :: r, col
             real(dp), intent(in) :: v
@@ -5984,18 +6138,25 @@ contains
         real(dp) :: energy, etrial, minjac, gnorm, gtrial_norm, predicted, delta, dmin
         real(dp) :: disp, rot, cap, sscale, gnorm0, last_ratio
         integer :: it, tries, st, nslide, n_pos, n_neg, i, p, growths
-        logical :: accepted, factored, near
+        logical :: accepted, factored, near, tentative
+        type(inertia_watchdog_t) :: watchdog
         status = IDEAL_FB_NOT_CONVERGED
-        if (.not. allocated(fb%bem)) then
-            status = IDEAL_FB_BAD_INPUT; return
-        end if
         last_ratio = 0; growths = 0; gnorm0 = huge(1.0_dp)
         nslide = size(fb%slide, 3)
-        n_pos = fb%np + 1 - fb%unstable
-        n_neg = fb%bem%nt + nslide + fb%unstable
-        call fb_bem_replan(fb%bem, bem_coords(fb), st)
-        if (st /= 0) then
-            status = IDEAL_FB_BEM_FAILED; return
+        if (allocated(fb%bem)) then
+            n_pos = fb%np + 1 - fb%unstable
+            ! the angle block is positive at fixed positions
+            if (fb%na0 > 0) n_pos = n_pos + fb%plasma%nangle
+            n_neg = fb%bem%nt + nslide + fb%unstable
+            call fb_bem_replan(fb%bem, bem_coords(fb), st)
+            if (st /= 0) then
+                status = IDEAL_FB_BEM_FAILED; return
+            end if
+        else
+            ! shell: each shell-map unknown pairs with its constraint row
+            ! (one positive, one negative eigenvalue), Phi~ is negative
+            n_pos = fb%np + fb%nx - fb%unstable
+            n_neg = fb%nx + fb%nf + nslide + fb%unstable
         end if
         cap = 0.02_dp*maxval(maxval(fb%plasma%reference, dim=2) &
             - minval(fb%plasma%reference, dim=2))
@@ -6084,18 +6245,34 @@ contains
                     '   try', tries, ' delta', delta, ' |s|', min(disp, cap), &
                     ' dE', etrial - energy, ' predicted', -predicted, ' status ', st, &
                     ' accepted', accepted
+                ! an undamped step that has to cross a small energy barrier
+                tentative = .not. accepted .and. st == IDEAL_FB_OK .and. delta == 0
+                if (tentative) tentative = inertia_watchdog_start(watchdog, energy, &
+                    predicted, u0, grad)
+                if (tentative) accepted = .true.
+                if (tentative .and. talk) print '(a)', '   watchdog: tentative step'
                 if (accepted) exit
                 call set_state_vector(fb, u0)
                 dmin = max(opt%delta_factor*delta, opt%delta_first)
             end do
             if (.not. accepted) exit
             grad = gtrial; energy = etrial
+            if (.not. tentative) then
+                if (inertia_watchdog_check(watchdog, energy) == WATCHDOG_RESTORE) then
+                    if (talk) print '(a)', '   watchdog: back to the checkpoint'
+                    call set_state_vector(fb, watchdog%state)
+                    call exact_blocks(fb, st)
+                    grad = watchdog%gradient; energy = watchdog%merit
+                end if
+            end if
             report%iterations = it + 1
             report%step = min(disp, cap)
             report%min_jacobian = minjac
             report%damping = delta
         end do
         if (factored) call sparse_destroy(solver)
+        if (talk) print '(a,3(i6,f9.2))', 'bem assembly calls/seconds order 0,1,2:', &
+            (fb_bem_calls(i), fb_bem_seconds(i), i = 0, 2)
     contains
         function csr_apply(x) result(y)
             real(dp), intent(in) :: x(:)
@@ -6114,7 +6291,14 @@ contains
         ! Plasma map, tau and psi_hat of the vacuum on Gamma_p.
         type(ideal_fb_t), intent(in) :: fb
         real(dp), allocatable :: u(:)
-        u = [reshape(fb%plasma%x, [size(fb%plasma%x)]), fb%bem%tau, fb%bem%psi_hat]
+        if (allocated(fb%bem)) then
+            u = [reshape(fb%plasma%x, [size(fb%plasma%x)]), fb%bem%tau, fb%bem%psi_hat]
+            if (fb%na0 > 0) u = [u, fb%plasma%angle]
+        else
+            u = [reshape(fb%plasma%x, [size(fb%plasma%x)]), &
+                reshape(fb%xs, [size(fb%xs)]), reshape(fb%phi, [size(fb%phi)]), &
+                reshape(fb%lam, [size(fb%lam)])]
+        end if
     end function state_vector
 
     subroutine set_state_vector(fb, u)
@@ -6123,8 +6307,17 @@ contains
         integer :: n
         n = size(fb%plasma%x)
         fb%plasma%x = reshape(u(:n), shape(fb%plasma%x))
-        fb%bem%tau = u(n + 1:n + fb%bem%nt)
-        fb%bem%psi_hat = u(n + fb%bem%nt + 1)
+        if (allocated(fb%bem)) then
+            fb%bem%tau = u(n + 1:n + fb%bem%nt)
+            fb%bem%psi_hat = u(n + fb%bem%nt + 1)
+            if (fb%na0 > 0) fb%plasma%angle = u(n + fb%bem%nt + 2:n + fb%bem%nt + 1 + fb%plasma%nangle)
+            return
+        end if
+        fb%xs = reshape(u(n + 1:n + size(fb%xs)), shape(fb%xs))
+        n = n + size(fb%xs)
+        fb%phi = reshape(u(n + 1:n + size(fb%phi)), shape(fb%phi))
+        n = n + size(fb%phi)
+        fb%lam = reshape(u(n + 1:n + size(fb%lam)), shape(fb%lam))
     end subroutine set_state_vector
 
     subroutine symmetrize_csr(rowptr, colidx, val)
@@ -6175,6 +6368,200 @@ contains
         slide(2, :, nl + 1) = 1/sqrt(real(fb%plasma%nodes, dp))
         call move_alloc(slide, fb%slide)
     end subroutine
+
+    subroutine ideal_fb_set_coil_split(fb, coil, status)
+        ! Coils split off: the coil poloidal flux coil enters on Gamma_p only
+        ! (free-boundary-coil-split.md (8)); the Gamma_c traces must then hold
+        ! the plasma filament alone. Axisymmetric (n = 0) shell variant.
+        type(ideal_fb_t), intent(inout) :: fb
+        type(fb_coil_flux_t), intent(in) :: coil
+        integer, intent(out) :: status
+        integer, allocatable :: chain(:), shell_of(:)
+        real(dp) :: area
+        integer :: b, nb, s
+        status = IDEAL_FB_BAD_INPUT
+        if (allocated(fb%bem) .or. fb%ntor /= 0 .or. fb%nmode /= 1) return
+        call chain_of_plasma(fb%plasma, fb%order, chain, s)
+        if (s /= 0) return
+        nb = size(chain)
+        allocate (shell_of(fb%plasma%nodes), source=0)
+        do s = 1, fb%ns
+            if (fb%role(s) == 1) shell_of(fb%plasma_node(s)) = s
+        end do
+        if (any(shell_of(chain) == 0)) return
+        area = 0
+        do b = 1, nb
+            area = area + fb%plasma%x(1, 1, chain(b))*fb%plasma%x(2, 1, chain(modulo(b, nb) + 1)) &
+                - fb%plasma%x(1, 1, chain(modulo(b, nb) + 1))*fb%plasma%x(2, 1, chain(b))
+        end do
+        if (area < 0) chain = [chain(1), chain(nb:2:-1)]
+        fb%split_chain = chain
+        fb%split_shell = shell_of(chain)
+        fb%coil_split = coil
+        status = IDEAL_FB_OK
+    end subroutine ideal_fb_set_coil_split
+
+    subroutine ideal_fb_coil_split_energy(fb, energy, gpos, gphi)
+        ! Coil part of E_v/mu0 per field period on Gamma_p (counterclockwise):
+        !   E = (1/(mu0 nfp)) oint [2 pi Phi~ dpsi_c - c psi_c dtheta
+        !       - pi psi_c (grad psi_c . nu)/R ds],  nu = (Z', -R'),
+        ! theta the reference angle of the shell (fixed per material point).
+        ! gpos(2, b), gphi(b): derivatives in the chain node positions and
+        ! the shell Phi~ at the chain nodes.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), intent(out) :: energy
+        real(dp), allocatable, intent(out) :: gpos(:, :), gphi(:)
+        real(dp), allocatable :: v(:), gl(:)
+        integer :: p, k1, nb, j, b
+        k1 = fb%order + 1
+        nb = size(fb%split_chain)
+        allocate (gpos(2, nb), gphi(nb), v(3*k1), gl(3*k1))
+        gpos = 0; gphi = 0; energy = 0
+        do p = 1, nb/fb%order
+            call panel_state(fb, p, v)
+            block
+                real(dp) :: e
+                call coil_split_panel(fb, p, v, e, gl)
+                energy = energy + e
+            end block
+            do j = 1, k1
+                b = modulo(fb%order*(p - 1) + j - 1, nb) + 1
+                gpos(:, b) = gpos(:, b) + gl(2*j - 1:2*j)
+                gphi(b) = gphi(b) + gl(2*k1 + j)
+            end do
+        end do
+    end subroutine ideal_fb_coil_split_energy
+
+    subroutine coil_split_hessian(fb, hpanel, gidx)
+        ! Per-panel Hessians of the coil part by central differences of the
+        ! analytic panel gradient (third derivatives of psi_c enter only
+        ! here), with the global unknown of each local variable.
+        type(ideal_fb_t), intent(in) :: fb
+        real(dp), allocatable, intent(out) :: hpanel(:, :, :)
+        integer, allocatable, intent(out) :: gidx(:, :)
+        real(dp), allocatable :: v(:), gp(:), gm(:)
+        real(dp) :: e, h, scale
+        integer :: p, k1, nb, j, b, i, npanel
+        k1 = fb%order + 1
+        nb = size(fb%split_chain)
+        npanel = nb/fb%order
+        allocate (hpanel(3*k1, 3*k1, npanel), gidx(3*k1, npanel), v(3*k1), &
+            gp(3*k1), gm(3*k1))
+        do p = 1, npanel
+            do j = 1, k1
+                b = modulo(fb%order*(p - 1) + j - 1, nb) + 1
+                gidx(2*j - 1, p) = pidx(fb, 1, 1, fb%split_chain(b))
+                gidx(2*j, p) = pidx(fb, 2, 1, fb%split_chain(b))
+                gidx(2*k1 + j, p) = iphi(fb, 1, fb%split_shell(b))
+            end do
+            call panel_state(fb, p, v)
+            do i = 1, 3*k1
+                scale = max(abs(v(i)), 1.0_dp)
+                if (i > 2*k1) scale = max(maxval(abs(v(2*k1 + 1:))), 1.0e-3_dp)
+                h = 1.0e-5_dp*scale
+                v(i) = v(i) + h
+                call coil_split_panel(fb, p, v, e, gp)
+                v(i) = v(i) - 2*h
+                call coil_split_panel(fb, p, v, e, gm)
+                v(i) = v(i) + h
+                hpanel(:, i, p) = (gp - gm)/(2*h)
+            end do
+            hpanel(:, :, p) = 0.5_dp*(hpanel(:, :, p) + transpose(hpanel(:, :, p)))
+        end do
+    end subroutine coil_split_hessian
+
+    subroutine panel_state(fb, p, v)
+        ! Local variables of panel p: positions (R, Z) of its nodes, then
+        ! the shell Phi~ at them.
+        type(ideal_fb_t), intent(in) :: fb
+        integer, intent(in) :: p
+        real(dp), intent(out) :: v(:)
+        integer :: j, b, k1, nb
+        k1 = fb%order + 1
+        nb = size(fb%split_chain)
+        do j = 1, k1
+            b = modulo(fb%order*(p - 1) + j - 1, nb) + 1
+            v(2*j - 1:2*j) = fb%plasma%x(1:2, 1, fb%split_chain(b))
+            v(2*k1 + j) = fb%phi(1, fb%split_shell(b))
+        end do
+    end subroutine panel_state
+
+    subroutine coil_split_panel(fb, p, v, energy, g)
+        ! Panel p of ideal_fb_coil_split_energy at the local variables v.
+        type(ideal_fb_t), intent(in) :: fb
+        integer, intent(in) :: p
+        real(dp), intent(in) :: v(:)
+        real(dp), intent(out) :: energy, g(:)
+        integer, parameter :: nq = 10
+        real(dp) :: sq(nq), wq(nq), nodes(fb%order + 1), lag(fb%order + 1), dlag(fb%order + 1)
+        real(dp) :: x(2), xp(2), y(2), yp(2), phi, psi, gpsi(2), hpsi(3), hm(2, 2)
+        real(dp) :: nu(2), tq, f, scale, a, bterm, ct, gth(2)
+        real(dp) :: dfx(2), dfxp(2), dfphi, yref(2, fb%order + 1)
+        integer :: q, j, k1, nb, b
+        k1 = fb%order + 1
+        nb = size(fb%split_chain)
+        call gauss_legendre(nq, sq, wq)
+        sq = 0.5_dp*(sq + 1); wq = 0.5_dp*wq
+        nodes = [(real(j - 1, dp)/fb%order, j = 1, k1)]
+        do j = 1, k1
+            b = modulo(fb%order*(p - 1) + j - 1, nb) + 1
+            yref(:, j) = fb%plasma%reference(:, fb%split_chain(b))
+        end do
+        scale = 1/(fb%mu0*fb%nfp)
+        ct = fb%circulation
+        energy = 0; g = 0
+        do q = 1, nq
+            call lagrange_jet(nodes, sq(q), lag, dlag)
+            x = 0; xp = 0; y = 0; yp = 0; phi = 0
+            do j = 1, k1
+                x = x + lag(j)*v(2*j - 1:2*j)
+                xp = xp + dlag(j)*v(2*j - 1:2*j)
+                y = y + lag(j)*yref(:, j)
+                yp = yp + dlag(j)*yref(:, j)
+                phi = phi + lag(j)*v(2*k1 + j)
+            end do
+            call fb_coil_flux_value(fb%coil_split, x, psi, gpsi, hpsi)
+            hm = reshape([hpsi(1), hpsi(2), hpsi(2), hpsi(3)], [2, 2])
+            nu = [xp(2), -xp(1)]
+            gth = 2*pi*theta_gradient(fb, y)
+            tq = dot_product(gth, yp)
+            a = dot_product(gpsi, nu)
+            bterm = 2*pi*phi*dot_product(gpsi, xp) - ct*psi*tq - pi*psi*a/x(1)
+            energy = energy + wq(q)*scale*bterm
+            ! d/dx at fixed x', d/dx' at fixed x, d/dPhi~
+            dfx = 2*pi*phi*matmul(hm, xp) - ct*tq*gpsi &
+                - pi*(gpsi*a + psi*matmul(hm, nu))/x(1)
+            dfx(1) = dfx(1) + pi*psi*a/x(1)**2
+            dfxp = 2*pi*phi*gpsi - pi*psi*[-gpsi(2), gpsi(1)]/x(1)
+            dfphi = 2*pi*dot_product(gpsi, xp)
+            do j = 1, k1
+                g(2*j - 1:2*j) = g(2*j - 1:2*j) + wq(q)*scale*(lag(j)*dfx + dlag(j)*dfxp)
+                g(2*k1 + j) = g(2*k1 + j) + wq(q)*scale*lag(j)*dfphi
+            end do
+        end do
+        f = 0
+    end subroutine coil_split_panel
+
+    pure subroutine lagrange_jet(nodes, s, l, dl)
+        ! Lagrange basis on nodes and its derivative at s.
+        real(dp), intent(in) :: nodes(:), s
+        real(dp), intent(out) :: l(:), dl(:)
+        real(dp) :: t
+        integer :: i, j, k
+        do i = 1, size(nodes)
+            l(i) = 1; dl(i) = 0
+            do j = 1, size(nodes)
+                if (j == i) cycle
+                l(i) = l(i)*(s - nodes(j))/(nodes(i) - nodes(j))
+                t = 1/(nodes(i) - nodes(j))
+                do k = 1, size(nodes)
+                    if (k == i .or. k == j) cycle
+                    t = t*(s - nodes(k))/(nodes(i) - nodes(k))
+                end do
+                dl(i) = dl(i) + t
+            end do
+        end do
+    end subroutine lagrange_jet
 
     subroutine chain_of_plasma(map, order, chain, status)
         ! Plasma boundary nodes in chain order (order per boundary edge).

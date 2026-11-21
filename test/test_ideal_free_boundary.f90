@@ -134,8 +134,11 @@ program test_ideal_free_boundary
     use milca_equilibrium_chart, only: cylindrical_chart_t
     use milca_ideal_map, only: ideal_frozen_t
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t
+    use milca_inertia_newton, only: inertia_watchdog_t, inertia_watchdog_start, &
+        inertia_watchdog_check, WATCHDOG_IDLE, WATCHDOG_COMMIT, WATCHDOG_RESTORE
     use milca_ideal_free_boundary, only: ideal_fb_init_fixed, ideal_fb_fixed_mode
-    use milca_ideal_free_boundary, only: ideal_fb_init_bem
+    use milca_ideal_free_boundary, only: ideal_fb_init_bem, ideal_fb_enable_angle
+    use milca_ideal_seed_3d, only: toroidal_seed_t, ideal_seed_3d_angle_density
     use milca_ideal_fb_bem, only: fb_coil_flux_t, fb_coil_flux_fit, fb_coil_flux_value
     use milca_ideal_fb_nested, only: fb_nested_plasma_mesh, fb_nested_transfer
     use milca_nested_ring_mesh, only: nested_ring_mesh
@@ -199,8 +202,12 @@ program test_ideal_free_boundary
         call vacuum_3d()
     case ('bem')
         call bem_checks()
+    case ('bem_angle')
+        call bem_angle_checks()
     case ('transfer')
         call transfer_checks()
+    case ('watchdog')
+        call watchdog_checks()
     case ('slide')
         call slide_checks()
     case ('kink')
@@ -225,6 +232,38 @@ program test_ideal_free_boundary
         error stop 'unknown mode'
     end select
 contains
+    subroutine watchdog_checks()
+        ! A tentative step is kept once the merit falls below the checkpoint
+        ! by eta times its predicted decrease, undone after max_steps further
+        ! steps without, and no new watch starts during the cooldown.
+        type(inertia_watchdog_t) :: wd
+        real(dp) :: state(2) = [1, 2], gradient(2) = [3, 4]
+        integer :: k
+        if (.not. inertia_watchdog_start(wd, 1.0_dp, 0.1_dp, state, gradient)) &
+            error stop 'watchdog: no tentative step'
+        if (inertia_watchdog_start(wd, 1.0_dp, 0.1_dp, state, gradient)) &
+            error stop 'watchdog: a second watch started'
+        if (inertia_watchdog_check(wd, 1.05_dp) /= WATCHDOG_IDLE) error stop 'watchdog: step 1'
+        if (inertia_watchdog_check(wd, 0.97_dp) /= WATCHDOG_COMMIT) error stop 'watchdog: commit'
+        if (.not. inertia_watchdog_start(wd, 0.97_dp, 0.1_dp, 2*state, 2*gradient)) &
+            error stop 'watchdog: no watch after a commit'
+        do k = 1, 2
+            if (inertia_watchdog_check(wd, 0.96_dp) /= WATCHDOG_IDLE) &
+                error stop 'watchdog: early return'
+        end do
+        if (inertia_watchdog_check(wd, 0.96_dp) /= WATCHDOG_RESTORE) error stop 'watchdog: return'
+        if (any(wd%state /= 2*state) .or. any(wd%gradient /= 2*gradient) .or. &
+            wd%merit /= 0.97_dp) error stop 'watchdog: checkpoint'
+        do k = 1, wd%cooldown
+            if (inertia_watchdog_start(wd, 1.0_dp, 0.1_dp, state, gradient)) &
+                error stop 'watchdog: watch during the cooldown'
+            if (inertia_watchdog_check(wd, 1.0_dp) /= WATCHDOG_IDLE) error stop 'watchdog: cooldown'
+        end do
+        if (.not. inertia_watchdog_start(wd, 1.0_dp, 0.1_dp, state, gradient)) &
+            error stop 'watchdog: no watch after the cooldown'
+        print '(a)', 'watchdog ok'
+    end subroutine
+
     subroutine spectrum_checks()
         ! Independent dense Schur solve/eigenspectrum, without the production
         ! mode extraction or sparse inertia. The full Hessian is the shared
@@ -1235,6 +1274,92 @@ contains
         if (fitted%misfit > 1.0e-8_dp .or. worst > 1.0e-6_dp) error stop 'coil flux fit'
         print '(a)', 'bem ok'
     end subroutine
+
+    subroutine bem_angle_checks()
+        ! Field-angle relabelling in the vacuum-on-Gamma_p solve: the Lagrangian
+        ! gradient and the Newton matrix with the angle block against central
+        ! differences, and the sampled angle increment of b3 carries no net
+        ! toroidal flux through the reference ellipse (a relabelling).
+        type(ideal_fb_t) :: fb
+        type(gs_state_t) :: mesh
+        type(cylindrical_chart_t) :: chart
+        type(simple_field_t) :: field
+        type(fb_coil_flux_t) :: coil
+        type(toroidal_seed_t) :: seed
+        integer, allocatable :: rowptr(:), colidx(:)
+        real(dp), allocatable :: contour(:, :), val(:), g(:), gp(:), gm(:), v(:), hv(:), du(:)
+        real(dp) :: lp, lm, l0, h, fd, an, err, y(2), dg(2, 2), dcg(2), db3, net, gross
+        real(dp), parameter :: centre(2) = [3.05_dp, 0.0_dp], axes(2) = [0.6_dp, 0.9_dp]
+        integer :: i, j, p, st, nchain, e, q
+        nchain = 12
+        allocate (contour(2, nchain))
+        do j = 1, nchain
+            contour(:, j) = centre + axes*[cos(2*pi*(j - 1)/nchain), sin(2*pi*(j - 1)/nchain)]
+        end do
+        call initialize_gs(mesh, contour, 0.5_dp*(2*pi*0.6_dp/nchain)**2, st, 3, &
+            curved=.true., geometry_only=.true.)
+        if (st /= 0) error stop 'bem angle mesh'
+        coil%source = pf(1:2, :)
+        coil%coef = mu0*pf(3, :)
+        call ideal_fb_init_bem(fb, mesh, chart, field, 1, f_vac, circulation, coil, 2, &
+            st, mu0=mu0)
+        if (st /= IDEAL_FB_OK) error stop 'bem angle init'
+        call ideal_fb_enable_angle(fb, 3, 1.0_dp, centre, axes, st)
+        if (st /= IDEAL_FB_OK) error stop 'bem angle enable'
+        if (fb%n /= fb%na0 + 6) error stop 'bem angle unknowns'
+        allocate (g(fb%n), gp(fb%n), gm(fb%n), v(fb%n), hv(fb%n), du(fb%n))
+        do i = 1, fb%n
+            du(i) = 1.0e-3_dp*sin(1.3_dp*i)
+            v(i) = cos(0.71_dp*i)
+        end do
+        du(fb%np + 1:) = 1.0e-1_dp*du(fb%np + 1:)
+        call ideal_fb_step(fb, du, 1.0_dp)
+        call ideal_fb_gradient(fb, g, st, l0)
+        if (st /= IDEAL_FB_OK) error stop 'bem angle base state'
+        h = 1.0e-6_dp
+        call ideal_fb_step(fb, v, h)
+        call ideal_fb_gradient(fb, gp, st, lp)
+        call ideal_fb_step(fb, v, -2*h)
+        call ideal_fb_gradient(fb, gm, st, lm)
+        call ideal_fb_step(fb, v, h)
+        fd = (lp - lm)/(2*h); an = dot_product(g, v)
+        err = abs(fd - an)/max(sum(abs(g*v)), 1.0e-30_dp)
+        print '(a,2es16.8,a,es9.2)', 'bem angle dL.v fd/an', fd, an, ' rel', err
+        if (err > 1.0e-6_dp) error stop 'bem angle gradient mismatch'
+        call ideal_fb_hessian(fb, rowptr, colidx, val)
+        hv = 0
+        do i = 1, fb%n
+            do p = rowptr(i), rowptr(i + 1) - 1
+                hv(i) = hv(i) + val(p)*v(colidx(p))
+            end do
+        end do
+        gp = (gp - gm)/(2*h)
+        err = maxval(abs(gp - hv))/maxval(abs(hv))
+        print '(a,es9.2)', 'bem angle |Hv - fd|/|Hv|', err
+        call block_report('plasma', gp(1:fb%np), hv(1:fb%np))
+        call block_report('angle', gp(fb%na0 + 1:), hv(fb%na0 + 1:))
+        if (err > 1.0e-5_dp) error stop 'bem angle Hessian mismatch'
+        call check_symmetry(rowptr, colidx, val)
+
+        ! net toroidal flux of the sampled angle increment over the ellipse
+        seed%flux = 1.0_dp; seed%centre = centre; seed%axes = axes
+        do i = 1, fb%plasma%nangle
+            fb%plasma%angle(i) = 0.3_dp*cos(1.7_dp*i)
+        end do
+        net = 0; gross = 0
+        do e = 1, fb%plasma%cells
+            do q = 1, fb%plasma%nq
+                y = matmul(fb%plasma%reference(:, fb%plasma%conn(:, e)), fb%plasma%shape(:, q))
+                dg = matmul(fb%plasma%reference(:, fb%plasma%conn(:, e)), &
+                    transpose(fb%plasma%dshape(:, :, q)))
+                call ideal_seed_3d_angle_density(fb%plasma, seed, y, 0.0_dp, dcg, db3)
+                net = net + fb%plasma%weight(q)*abs(dg(1, 1)*dg(2, 2) - dg(1, 2)*dg(2, 1))*db3
+                gross = gross + fb%plasma%weight(q)*abs(dg(1, 1)*dg(2, 2) - dg(1, 2)*dg(2, 1))*abs(db3)
+            end do
+        end do
+        print '(a,es9.2)', 'bem angle net toroidal flux / gross', abs(net)/gross
+        if (.not. abs(net) <= 1.0e-8_dp*gross) error stop 'angle increment changes the toroidal flux'
+    end subroutine bem_angle_checks
 
     subroutine block_report(name, fd, an)
         character(*), intent(in) :: name

@@ -17,6 +17,8 @@ module milca_ideal_fb_bem
         gs_sl_curve_create, gs_sl_plan_create, gs_sl_assemble, gs_sl_load
     use fortfem_axisymmetric_gs_kernel, only: gs_green_hessian
     implicit none
+    real(dp), public :: fb_bem_seconds(0:2) = 0
+    integer, public :: fb_bem_calls(0:2) = 0
     private
 
     real(dp), parameter :: pi = 3.14159265358979323846264338327950288_dp
@@ -220,12 +222,19 @@ contains
         curve%nodes = x
         allocate (v(nt, nt), dvt(nt, nx), gv(nx), hv(nx, nx), g(nt), dg(nt, nx), &
             gg(nx), hg(nx, nx), s(nt), ds(nt, nx), gs(nx), hs(nx, nx))
-        if (present(hxx)) then
-            call gs_sl_assemble(curve, bem%plan, v, bem%tau, dvt, gv, hv)
-        else
-            call gs_sl_assemble(curve, bem%plan, v, bem%tau, dvt, gv)
-            hv = 0
-        end if
+        block
+            integer(8) :: c0, c1, cr
+            call system_clock(c0, cr)
+            if (present(hxx)) then
+                call gs_sl_assemble(curve, bem%plan, v, bem%tau, dvt, gv, hv)
+            else
+                call gs_sl_assemble(curve, bem%plan, v, bem%tau, dvt, gv)
+                hv = 0
+            end if
+            call system_clock(c1)
+            fb_bem_seconds(merge(2, 1, present(hxx))) = fb_bem_seconds(merge(2, 1, present(hxx))) + real(c1 - c0, dp)/cr
+            fb_bem_calls(merge(2, 1, present(hxx))) = fb_bem_calls(merge(2, 1, present(hxx))) + 1
+        end block
         call gs_sl_load(curve, bem%flux_degree, coil_field, g, bem%tau, dg, gg, hg)
         call gs_sl_load(curve, bem%flux_degree, unit_field, s, bem%tau, ds, gs, hs)
         k = 2*pi/mu0
@@ -280,7 +289,14 @@ contains
         curve%nodes = x
         allocate (v(nt, nt), g(nt), s(nt), a(nt + 1, nt + 1), rhs(nt + 1), &
             ipiv(nt + 1))
-        call gs_sl_assemble(curve, bem%plan, v)
+        block
+            integer(8) :: c0, c1, cr
+            call system_clock(c0, cr)
+            call gs_sl_assemble(curve, bem%plan, v)
+            call system_clock(c1)
+            fb_bem_seconds(0) = fb_bem_seconds(0) + real(c1 - c0, dp)/cr
+            fb_bem_calls(0) = fb_bem_calls(0) + 1
+        end block
         call gs_sl_load(curve, bem%flux_degree, coil_field, g)
         call gs_sl_load(curve, bem%flux_degree, unit_field, s)
         a = 0

@@ -21,7 +21,7 @@ module milca_winslow_seed
         winslow_hessian, winslow_folded_density, winslow_folded_gradient, &
         winslow_folded_hessian
     use fortsparse, only: sparse_solver_t, sparse_factor, sparse_solve, sparse_destroy, &
-        fortsparse_status_t, status_ok, FORTSPARSE_BACKEND_NATIVE, FORTSPARSE_SYM_GENERAL
+        fortsparse_status_t, status_ok, FORTSPARSE_BACKEND_NATIVE, FORTSPARSE_SYM_GENERAL, FORTSPARSE_ORDER_AMD
     implicit none
     private
     public :: winslow_seed, winslow_plane_energy, WINSLOW_OK, WINSLOW_FAILED, &
@@ -522,6 +522,7 @@ contains
         end do
         solver%backend_id = FORTSPARSE_BACKEND_NATIVE
         solver%options%symmetry = FORTSPARSE_SYM_GENERAL
+        solver%options%ordering = FORTSPARSE_ORDER_AMD
         call sparse_factor(solver, plane%n, plane%n, size(shifted), plane%rowptr, &
             plane%colidx, shifted, sstatus)
         if (.not. status_ok(sstatus)) return
