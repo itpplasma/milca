@@ -198,7 +198,8 @@ of a reconstruction from measured profiles and magnetics.
 |---|---|---|
 | E0 | G2a geometry, fixed χ_h, nonlinear label, unknowns g and profiles | B at the interpolation error, no locking at any mesh |
 | E1 | G2: Solov'ev, χ, g, profiles and axis unknown, both labels | B and χ at order p, quadratic Newton, profile error at the 1D spline error |
-| E2a | doublet with fixed labels, g fitted | order p in the lobes and outside, the separatrix band measured |
+| E2a | doublet with fixed labels, g fitted, unaligned mesh | measurement: order p in the lobes and outside, the separatrix band at h^(1/2) |
+| E2b | E2a on a separatrix-aligned mesh, g broken across the separatrix | acceptance below; before any Newton with several O-lines |
 | E2 | Solov'ev doublet (two magnetic axes, one separatrix) | as E1, both axes found, separatrix flux to the interpolation error |
 | E3 | E1 through the 3D complex (M ≥ 2, n = 0 solution) | identical to E1 |
 | E3b | E3 with one axis point per toroidal plane, non-axisymmetric start | identical to E3, axis curve a circle |
@@ -295,6 +296,25 @@ at the separatrix, where g jumps. Remedy: a mesh with the separatrix as block
 edges and the X-point as a vertex, V0 discontinuous across it and graded
 towards it, moving with χ (requested from FortFEM).
 
+E2b acceptance (fixed labels, B against the exact Solov'ev doublet):
+
+| Check | Required |
+|---|---|
+| B away from the separatrix and X | order p, as in E2a |
+| B in a band along the smooth separatrix branches | order p or close to it |
+| B in a disc around the X-point | order p or close to it, B_φ(X) = f0/R_X |
+| jump of B_φ across the separatrix | at the approximation order: no spurious current sheet |
+| labels exact χ, projected χ_h, χ_h constrained to the exact separatrix | separates the error of a misplaced separatrix from that of g |
+
+The exact g is log-singular near X, g ≈ (B_0/2) log|(x + y)/(x − y)| for
+χ − χ_X = (x² − y²)/2. B sees only |∇χ| times its tangential derivative, which
+is bounded, so the aligned, graded, broken space should reach order p. If
+the disc around X falls short, the fallback is a local enrichment
+g = g_sing + g_h with this form, evaluated together with the winding term.
+A smooth carrier B_reg of the guide field is a diagnostic in axisymmetry
+only: in 3D a divergence-free field tangent to χ is again of Clebsch form and
+carries the same singularity.
+
 ## 6. Order of work
 
 1. Literature: done, section 3. Repeat the enrichment search with a
@@ -303,8 +323,8 @@ towards it, moving with χ (requested from FortFEM).
    second derivatives in (χ, g, profile coefficients), with identities.
 3. E0, E1 in axisymmetry (done, `test_eulerian_clebsch_fit`,
    `test_eulerian_clebsch_newton`).
-4. O-line handling for several axes: E2a done, E2 on a separatrix-aligned
-   mesh.
+4. O-line handling for several axes: E2a done, E2b on a separatrix-aligned
+   mesh (layout requested from FortFEM), then E2 with Newton.
 5. 3D: h_θ about an axis curve, θ_X = atan2(Z − Z_X(φ), R − R_X(φ)) per
    toroidal angle, closed away from X. E3, then E4.
 6. Islands and rational surfaces, E5. Open whether Newton from nested
