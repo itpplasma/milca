@@ -106,9 +106,21 @@ Prior work (reading state: R method sections read, A abstract only):
   topology, winding parts or net current.
 - Cheng, GRL 22, 2401 (1995) [A] and Zaharia et al., Ann. Geophys. 22, 251
   (2004) [R]: B = ∇ψ×∇α for the magnetosphere, solved in inverse form.
-- Chodura and Schlüter, J. Comput. Phys. 41, 68 (1981) [A], HINT, PIES,
-  SIESTA [A]: Eulerian or mixed equilibrium codes without a label field.
-  SIESTA's V3FIT coupling uses normalised pressure as a diagnostic label.
+- Chodura and Schlüter, J. Comput. Phys. 41, 68 (1981) [R]: the same
+  argument against flux coordinates (p. 69: nested surfaces as Lagrangian
+  coordinates allow one axis, a space-fixed Eulerian grid several, at the
+  price of flux not attached to the plasma motion). W = ∫(B²/2 + p/(γ − 1))
+  is minimised under δρ = −∇·(ρξ), δB = ∇×(ξ×B) by friction, gradient and
+  conjugate-gradient iterations on a staggered grid (mass at cell centres,
+  magnetic fluxes on faces, E on edges, force from the discrete energy). The
+  Solov'ev test converges at order 2 in the displacement (Fig. 7), ι drifts
+  by flux loss until a 20³ grid (Fig. 8), and a double-star equilibrium with
+  two axes and a separatrix is computed (Fig. 13, quadrupole on an l = 3
+  field, A = 16, β = 0.03). No label: tangency and ι are not preserved
+  discretely, and topology is whatever the relaxation reaches.
+- HINT, PIES, SIESTA [A]: Eulerian or mixed equilibrium codes without a label
+  field. SIESTA's V3FIT coupling uses normalised pressure as a diagnostic
+  label.
 - Degond, Lozinski, Narski and Negulescu, J. Comput. Phys. 231, 2724 (2012)
   [R], and Deluzet and Narski, Multiscale Model. Simul. (2019) [R]: the
   kernel of B·∇ is reached by penalty, multiplier or iteration for a given
@@ -127,11 +139,21 @@ Prior work (reading state: R method sections read, A abstract only):
 - MRX (arXiv:2510.26986, cited in [equilibrium-nonnested.md](equilibrium-nonnested.md)):
   FEEC relaxation in physical space with δB = ∇×(v×B), no label.
 
-Not found in this search (searches of questions on enrichment were thin):
-a discretisation of (2) on a mesh in physical space with Newton, one winding
-form per O-line for several axes and island chains, the O-lines as unknowns,
-and the use of (2) against parallel-constraint locking. Separatrices and
-changes of topology are not treated in any work read.
+Eulerian equilibria with several axes and a separatrix are not new
+(Chodura and Schlüter 1981). Not found in this search (searches of questions
+on enrichment were thin): a discretisation of (2) on a mesh in physical space
+with Newton, which keeps the integrable topology exactly (B·∇χ_h = 0), one
+winding form per O-line for several axes and island chains, the O-lines as
+unknowns, the island flux as a parameter, convergence at order p, and the use
+of (2) against parallel-constraint locking. Each claim stands only with its
+gate (E2b, E5).
+
+Measures beyond the force residual, after Chodura and Schlüter's flux-loss
+experience: enclosed toroidal and poloidal flux per region, ι on the
+surfaces, and the topology (number of O- and X-lines) against the reference.
+Their double star is a candidate nonlinear multi-axis case once E2 runs, and
+the same two-axis equilibrium in the free-field lane would compare the two
+formulations.
 
 ## 4. Discrete spaces
 
