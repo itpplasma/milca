@@ -166,10 +166,43 @@ and (5) per region. The separatrices are region boundaries of the mesh.
 Regions without surfaces (stochastic) have no label and belong to the NN
 lane.
 
-The vacuum and the exterior are those of the NN lane: shell cells between
-Γ_p and Γ_c with a harmonic mesh, the coil field split off as in (2), and
-the map 𝒮 of (3) on Γ_c. With B_coil split off, Γ_c may cross coils and
-vessel.
+The frozen lane has two vacuum variants, which must agree within the
+discretisation error (gate B2b):
+
+| Variant | Unknowns of the vacuum | Dense part | Shared with |
+|---|---|---|---|
+| V1 shell | A_p on shell cells between Γ_p and Γ_c with a harmonic mesh, the map 𝒮 of (3) on the fixed Γ_c | 𝒮, assembled and factored once per Γ_c | NN lane |
+| V2 sheet | the potential φ of the surface current K = n × ∇_s Φ on Γ_p ([derivation](../theory/derivations/free-boundary-plasma-boundary-sheet-3d.md)), eliminated per state | the sheet self-energy on the moving Γ_p, by fast summation | none |
+
+The sheet cannot serve the NN lane: it needs a closed Γ_p with B·n = 0
+outside all plasma current, which islands and stochastic regions at the
+edge do not provide.
+
+In V1 the coil field never enters a shell cell. With J = J_p + J_c and A
+the vector potential of all currents, the field energy is
+
+$$
+\frac12\int \mathbf J\cdot\mathbf A\,dV
+= \frac12\int \mathbf J_p\cdot\mathbf A_p\,dV
++ \int \mathbf J_p\cdot\mathbf A_c\,dV + \text{const} . \tag{7}
+$$
+
+The first term needs only A_p (mesh inside Γ_c, 𝒮 outside), the coupling
+term only A_c where J_p ≠ 0: in D and on Γ_p as the sheet current of the
+pressure jump. Both are free of the coils, so coils and vessel may cross
+the shell and Γ_c. As in the sheet derivation, (7) is evaluated through
+coil fluxes across surfaces spanned inside D, without A_c.
+
+Both variants evaluate B_coil only in D and on Γ_p, directly from the coil
+filaments by Biot–Savart (no mgrid interpolation), and reject every Newton
+step that brings Γ_p closer to a coil than a set distance.
+
+The sheet self-energy is a pair sum over the N_b boundary points, O(N_b²)
+per Hessian-vector product. Above a few thousand points it is summed in
+O(N_b log N_b) by a fast multipole method (FMM) for the Laplace kernel with
+charges and dipoles, which returns potential, gradient and Hessian, so the
+same two passes give the gradient and the Hessian-vector product. The near
+field keeps the corrected trapezoidal rule.
 
 Gates of the frozen lane:
 
@@ -179,6 +212,8 @@ Gates of the frozen lane:
 | B2 coil split | B1 with Γ_c crossing a coil | Γ_c inside the coils | same solution within the discretisation error |
 | B3 DIII-D coarse | 48 boundary nodes, one level | 65 iterations with the watchdog today | at most 10 Newton steps, same energy |
 | B4 3D nested | Landreman–Paul QA free boundary, coarse | VMEC++ on the same coils and profiles | E4 observables within the error estimate |
+| B2b two vacua | DIII-D (2D) and Landreman–Paul QA (3D), coarse | V1 shell against V2 sheet | same equilibrium within the discretisation error; wall time per variant at matched accuracy |
+| B6 fast sheet | sheet self-energy on the W7-X boundary, 10³ to 10⁵ points | FMM against direct pair sum | energy, gradient and Hessian-vector product agree to 10⁻¹⁰ relative; cost O(N log N); faster than direct above 5·10³ points |
 | B5 fixed-topology islands | classical stellarator with 1/2 islands | SIESTA ideal steps, SPEC with prescribed current | E7 observables |
 
 ## 5. Work by repository
@@ -198,7 +233,10 @@ Gates of the frozen lane:
 | M2 alternating mesh loop | MILCA | boundary refit loop of `gs_free` | loop for spline maps and NN2 fields |
 | M3 profile mode B | MILCA | design | fit, freeze, defect report |
 | R1 flux-function form (5) with relabelling (6) in the frozen map, 2D then 3D | MILCA, kernels by fortsym | b per element, toroidal displacement ω, slide gauge | f as unknown, gauge, refreezing on the solved geometry |
-| R2 coil split and fixed Γ_c in the frozen-lane free boundary | MILCA | shell and per-mode exterior on Γ_c | B_coil from C, Γ_c free of the coils |
+| R2 coil split and fixed Γ_c in the frozen-lane free boundary (V1) | MILCA | shell and per-mode exterior on Γ_c | coupling (7), B_coil from C, Γ_c free of the coils |
+| R3 sheet vacuum (V2) | MILCA, kernels by fortsym | 2D on Γ_p (axisymmetric single layer), 3D by the corrected trapezoidal rule | B_coil from the filaments, coil-distance guard, FMM far field |
+| F6 Laplace FMM with charges and dipoles, potential to Hessian, nfp symmetry | FortFEM | none | far field of the sheet self-energy, gate B6 |
+| D dense BLAS and LAPACK from fortnum only, at OpenBLAS speed | fortnum, FortFEM | fortnum_lapack77 under the standard names; GEMM and SYRK at OpenBLAS speed, TRSM and Cholesky within 1.5× | FortFEM without system BLAS; threaded LU and LDLᵀ panels, two-stage symmetric eigensolver |
 
 ## 6. Order
 
@@ -206,11 +244,12 @@ Every step iterates on cases that run in seconds and at most two minutes.
 Larger cases follow only once the step is complete, in rising size, up to
 the decks of the [equilibrium benchmark](https://github.com/itpplasma/benchmark_vmec).
 
-1. B1 with R1 in 2D. Then B2 with R2 and B3.
+1. B1 with R1 in 2D. Then B2 with R2, B2b and B3, all on the DIII-D case
+   against VMEC2000. D in parallel.
 2. A1 and A2 on the existing rectangular-patch complex and `gs_free`. P only
    if A2 fails.
 3. F1, K and F4, then M2 and A3. F5 only if A3 fails.
-4. R1 in 3D, then B4. C, F2, S and M1, with F3 for the axisymmetric Γ_c,
+4. R1 and R3 in 3D, F6 and B6, then B4 with both vacua. C, F2, S and M1, with F3 for the axisymmetric Γ_c,
    then A4.
 5. F3 for a shaped Γ_c, then A5.
 6. B5 and M3, then E4, E5 and, after G7, E8.
