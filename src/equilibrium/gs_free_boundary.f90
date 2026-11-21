@@ -2479,59 +2479,100 @@ contains
                                        a1, a2, status)
         !! Contour integrals on the closed levels psi = levels(j) around the
         !! axis: a1 = oint R dl/|grad psi| (dV/dpsi = 2 pi a1) and
-        !! a2 = oint dl/(R |grad psi|) (q = F a2/(2 pi)), by the trapezoidal
-        !! rule in the index of the n_points traced points (gs_fb_trace_lcfs,
-        !! nearly equal arc length). Levels must lie strictly inside the
-        !! bounding separatrix.
+        !! a2 = oint dl/(R |grad psi|) (q = F a2/(2 pi)). Levels are star
+        !! shaped about the axis; along the ray of angle theta the level sits
+        !! at radius rho(theta) and dl/|grad psi| = rho dtheta/|d psi/d rho|,
+        !! so both are periodic integrals in theta, by the trapezoidal rule on
+        !! n_points rays (spectrally accurate). Each root is found by a
+        !! safeguarded Newton iteration from the root of the previous level
+        !! (levels ordered from the axis outwards) or from a march outwards.
+        !! Levels must lie strictly inside the bounding separatrix.
         type(gs_state_t), intent(in) :: state
         real(dp), intent(in) :: psi(:), axis(2), levels(:), sigma
         integer, intent(in) :: n_points
         real(dp), intent(out) :: a1(:), a2(:)
         integer, intent(out) :: status
         type(gs_fb_grid_t) :: grid
-        real(dp), allocatable :: chain(:, :), w1(:), w2(:)
-        real(dp) :: v, g(2), dl
-        integer :: j, k, stat
-        logical :: found
+        real(dp), allocatable :: radius(:, :), w1(:, :), w2(:, :)
+        real(dp) :: theta, e(2), step, lo, hi, rho, v, g(2), x(2), dvdr, vlo, vhi, trial
+        integer :: j, k, it, nl
+        logical :: found, failed
 
         status = GS_FB_BAD_INPUT
-        if (size(a1) /= size(levels) .or. size(a2) /= size(levels)) return
+        nl = size(levels)
+        if (size(a1) /= nl .or. size(a2) /= nl) return
         if (n_points < 8) return
         call build_grid(state, grid)
-        allocate (w1(n_points), w2(n_points))
-        do j = 1, size(levels)
-            call gs_fb_trace_lcfs(state, psi, axis, levels(j), sigma, n_points, chain, stat)
-            if (stat /= GS_FB_OK) then
-                status = GS_FB_BAD_LCFS
-                return
-            end if
-            do k = 1, n_points
-                call grid_flux(state, grid, psi, chain(1, k), chain(2, k), v, g, found)
-                if (.not. found .or. norm2(g) <= tiny(1.0_dp)) then
-                    status = GS_FB_BAD_LCFS
-                    return
+        step = 0.25_dp*sqrt(sum(state%area)/size(state%area))
+        allocate (radius(nl, n_points), w1(nl, n_points), w2(nl, n_points))
+        failed = .false.
+        !$omp parallel do default(shared) schedule(static) reduction(.or.:failed) &
+        !$omp private(k, j, it, theta, e, lo, hi, rho, v, g, x, dvdr, vlo, vhi, trial, found)
+        do k = 1, n_points
+            theta = 2.0_dp*acos(-1.0_dp)*real(k - 1, dp)/n_points
+            e = [cos(theta), sin(theta)]
+            lo = 0.0_dp
+            vlo = 1.0_dp
+            do j = 1, nl
+                ! bracket [lo, hi] with sigma (psi - level) > 0 at lo, <= 0 at hi
+                hi = lo
+                do
+                    hi = hi + step
+                    x = axis + hi*e
+                    call grid_flux(state, grid, psi, x(1), x(2), v, g, found)
+                    if (.not. found) exit
+                    vhi = sigma*(v - levels(j))
+                    if (vhi <= 0.0_dp) exit
+                    lo = hi
+                    vlo = vhi
+                end do
+                if (.not. found) then
+                    failed = .true.
+                    exit
                 end if
-                w1(k) = chain(1, k)/norm2(g)
-                w2(k) = 1.0_dp/(chain(1, k)*norm2(g))
-            end do
-            ! Trapezoidal rule in the point index with |dx/dk| from the
-            ! fourth-order periodic difference: spectrally accurate for a
-            ! smooth contour (chords would give O(n_points^-2)).
-            a1(j) = 0.0_dp
-            a2(j) = 0.0_dp
-            do k = 1, n_points
-                dl = norm2((8*(chain(:, wrap(k + 1)) - chain(:, wrap(k - 1))) &
-                    - (chain(:, wrap(k + 2)) - chain(:, wrap(k - 2))))/12)
-                a1(j) = a1(j) + dl*w1(k)
-                a2(j) = a2(j) + dl*w2(k)
+                ! safeguarded Newton (secant fallback by bisection) in [lo, hi]
+                rho = 0.5_dp*(lo + hi)
+                do it = 1, 60
+                    x = axis + rho*e
+                    call grid_flux(state, grid, psi, x(1), x(2), v, g, found)
+                    if (.not. found) exit
+                    v = sigma*(v - levels(j))
+                    dvdr = sigma*dot_product(g, e)
+                    if (v > 0.0_dp) then
+                        lo = rho
+                    else
+                        hi = rho
+                    end if
+                    if (abs(v) <= 1.0e-15_dp*max(abs(levels(j)), 1.0_dp) .or. &
+                        hi - lo <= 1.0e-14_dp*max(rho, 1.0_dp)) exit
+                    trial = rho - v/dvdr
+                    if (dvdr < 0.0_dp .and. trial > lo .and. trial < hi) then
+                        rho = trial
+                    else
+                        rho = 0.5_dp*(lo + hi)
+                    end if
+                end do
+                x = axis + rho*e
+                call grid_flux(state, grid, psi, x(1), x(2), v, g, found)
+                dvdr = abs(dot_product(g, e))
+                if (.not. found .or. dvdr <= tiny(1.0_dp)) then
+                    failed = .true.
+                    exit
+                end if
+                radius(j, k) = rho
+                w1(j, k) = x(1)*rho/dvdr
+                w2(j, k) = rho/(x(1)*dvdr)
+                lo = rho
             end do
         end do
+        !$omp end parallel do
+        if (failed) then
+            status = GS_FB_BAD_LCFS
+            return
+        end if
+        a1 = sum(w1, dim=2)*2.0_dp*acos(-1.0_dp)/n_points
+        a2 = sum(w2, dim=2)*2.0_dp*acos(-1.0_dp)/n_points
         status = GS_FB_OK
-    contains
-        pure integer function wrap(i)
-            integer, intent(in) :: i
-            wrap = modulo(i - 1, n_points) + 1
-        end function
     end subroutine gs_fb_surface_integrals
 
     function chain_distance(state, psi, psi_bound, chain) result(distance)
