@@ -143,6 +143,10 @@ the interpolant's):
   stays stable without axisymmetry and near rational surfaces is the open
   part of the inf–sup question (G2, G3).
 
+With the labels as unknowns neither multiplier degree is stable and free of
+locking. The plan that replaces the multiplier by a direct Clebsch
+representation is [eulerian-label-plan.md](eulerian-label-plan.md).
+
 ## 6. Wall and exterior
 
 W_wall depends on A only through B·n = ∇_s×(n×A) on Γ_c (the surface curl
