@@ -379,9 +379,15 @@ carries the same singularity.
 
 ## 7. Open
 
-- Stochastic regions have no label. Candidate: regions with p' = 0, where the
-  plasma part of (5) has no constraint, as in SPEC's relaxed regions, with
-  A ∈ V1 there, matched to (2) by the tangential trace on good surfaces.
+- Stochastic regions have no label. Ideal force balance gives B·∇p = 0, so
+  p is constant on every region one field line fills: ideal pressure
+  gradients sit on surfaces, where the labels are exact. Realistic
+  stochastic regions keep gradients through finite parallel transport and
+  belong to the transport lane (NN2), not to this one. A force-free or
+  Taylor-relaxed unlabelled region with A ∈ V1, matched to (2) by the
+  tangential trace on good surfaces as in SPEC's relaxed volumes, is
+  possible later if a SPEC comparison needs it; it is not planned before
+  E5.
   Check of a label solution: relax with A free from it and trace field
   lines; where layers widen, the region must become unlabelled.
 - Globalisation: the Newton basin for the axis is about 2e-3 of the minor
