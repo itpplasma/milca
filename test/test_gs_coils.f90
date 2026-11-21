@@ -14,6 +14,7 @@ program test_gs_coils
     call test_table_roundtrip()
     call test_table_errors()
     call test_helmholtz()
+    call test_grid_flux()
     if (failures /= 0) error stop 'gs_coils oracle failures'
     print '(a)', 'gs_coils oracles passed'
 
@@ -333,5 +334,52 @@ contains
             deallocate (set%coils, set%circuit_names, set%incidence, set%i_min, set%i_max)
         end do
     end subroutine test_helmholtz
+
+    subroutine test_grid_flux()
+        ! A rectangular coil tabulated on a grid away from it and read back
+        ! as a 'grid' coil: flux and gradient against the direct Gauss
+        ! evaluation at points between the nodes (degree-5 Lagrange error
+        ! O(h^6), h = 0.025 m at 0.4 m from the conductor), NaN off the grid.
+        type(gs_coil_t) :: coil
+        type(gs_circuit_set_t) :: set
+        character(len=200) :: msg
+        real(dp), parameter :: rmin = 1.5_dp, rmax = 3.5_dp, zmin = -1.0_dp, &
+            zmax = 1.0_dp
+        integer, parameter :: nr = 81, nz = 81
+        real(dp) :: r(4), z(4), g(4, 2), gr(4, 2), gz(4, 2), psi, pr, pz
+        integer :: u, i, j, stat
+
+        coil = rect_coil(1.0_dp, 0.0_dp, 0.2_dp, 0.3_dp, 10.0_dp)
+        open (newunit=u, file='gs_coils_grid.psi', status='replace', action='write')
+        write (u, '(2i6,4es24.16)') nr, nz, rmin, rmax, zmin, zmax
+        write (u, '(es24.16)') ((gs_coil_flux(coil, rmin + (rmax - rmin)*i/(nr - 1), &
+            zmin + (zmax - zmin)*j/(nz - 1)), i=0, nr - 1), j=0, nz - 1)
+        close (u)
+        call write_text('gs_coils_grid.tbl', [character(len=60) :: &
+            'milca-coil-table 1', 'coil G grid gs_coils_grid.psi', &
+            'coil H grid gs_coils_grid.psi', 'circuit C -1e9 1e9 G', &
+            'circuit D -1e9 1e9 H*2'])
+        call gs_read_coil_table('gs_coils_grid.tbl', set, stat, msg)
+        call require(stat == 0, 'read grid coil table: '//trim(msg))
+        if (stat /= 0) return
+        call gs_circuit_set_check(set, stat, msg)
+        call require(stat == 0, 'grid coil set is consistent')
+        r = [1.5123_dp, 2.0071_dp, 2.9_dp, 3.4987_dp]
+        z = [0.0137_dp, -0.6213_dp, 0.98_dp, -0.3333_dp]
+        call gs_circuit_flux_vectors(set, r, z, g, gr, gz)
+        do i = 1, size(r)
+            call gs_coil_flux_gradient(coil, r(i), z(i), psi, pr, pz)
+            call rel_check(g(i, 1), psi, 1.0e-8_dp, 'grid coil flux')
+            call rel_check(g(i, 2), 2*psi, 1.0e-8_dp, 'second grid coil flux')
+            call require(abs(gr(i, 1) - pr) <= 1.0e-6_dp*hypot(pr, pz) .and. &
+                abs(gz(i, 1) - pz) <= 1.0e-6_dp*hypot(pr, pz), 'grid coil gradient')
+        end do
+        psi = gs_coil_flux(set%coils(1), 1.4_dp, 0.0_dp)
+        call require(psi /= psi, 'grid coil off the grid is NaN')
+        call gs_write_coil_table('gs_coils_grid_out.tbl', set, stat)
+        call gs_read_coil_table('gs_coils_grid_out.tbl', set, stat, msg)
+        call require(stat == 0 .and. set%coils(1)%kind == gs_coil_grid, &
+            'grid coil table round trip')
+    end subroutine test_grid_flux
 
 end program test_gs_coils
