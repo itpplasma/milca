@@ -23,7 +23,7 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
 include_directories(${CMAKE_Fortran_MODULE_DIRECTORY})
 # Dependency pins: one source used by FetchContent and by result provenance.
 set(MILCA_FORTPLOT_REVISION "1645fa41c11b5786c71bc27e5b41dae7c7bbba23")
-set(MILCA_FORTNUM_REVISION "4285c0e422082bc44a090bbad5d199739153af59")
+set(MILCA_FORTNUM_REVISION "c972c6ef4d9dfe516ea23210efb17ce9a24c355f")
 set(MILCA_FORTIO_REVISION 32a486e1efa507503b456fe49be4b21e32832459)
 set(FORTPLOT_BUILD_FORTARRAY_ADAPTER OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(fortplot
@@ -344,8 +344,9 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # boundary trace projection #152, the toroidal period #154 and its tensor
 # forms #160, factored anisotropic apply, the spline de Rham complex #254
 # with rooted trees #255, parametric mass matrices #256, the tree for one
-# t-node #259 and PCG projections #261).
-set(MILCA_FORTFEM_REVISION "09ecdc4661ed05ba6d2b77c43175b8cd346f5d25")
+# t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
+# symmetry #263 #265 and polar quadrature at point singularities #267).
+set(MILCA_FORTFEM_REVISION "9f8531607e09aa24c0f609a729d9966b686b53f0")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -478,7 +479,7 @@ if(MILCA_ENABLE_CUDA_GS_SOLVE)
     enable_language(CUDA)
     set(FORTSPARSE_ENABLE_NATIVE_CUDA ON CACHE BOOL "" FORCE)
 endif()
-set(MILCA_FORTSPARSE_REVISION "115c195a538016040b84a5384c8b8f6a41ce130c")
+set(MILCA_FORTSPARSE_REVISION "0e79ee763616742ea7e018c4c8aab9a0e9f426e4")
 set(FORTSPARSE_ENABLE_SUPERLU OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_UMFPACK_IPC OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_MUMPS OFF CACHE BOOL "" FORCE)

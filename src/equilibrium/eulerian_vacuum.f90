@@ -106,19 +106,22 @@ contains
     end subroutine eu_constrained_solve
 
     subroutine eu_ams_solve(k, grad, interpolation, n0, fixed, values, fixed_nodes, a, &
-                            rtol, iterations, status)
+                            rtol, iterations, status, mass)
         !! Ungauged solve of K a = 0 with a(fixed) = values by PCG with the AMS
         !! preconditioner on the free edges. Gradients of functions that
         !! vanish on fixed_nodes are the kernel of the free block, and the
         !! right-hand side -K_fd a_d is orthogonal to them, so PCG converges in
-        !! range(K). grad is n1 x n0 and interpolation n1 x 3 n0.
+        !! range(K). grad is n1 x n0 and interpolation n1 x 3 n0. With the
+        !! 1-form mass matrix, AMS solves its nodal components with the vector
+        !! Laplacian G^T M1 G (Hiptmair-Xu) instead of blocks of Pi^T K Pi.
         type(csr_t), intent(in) :: k
         type(csr_matrix_t), intent(in) :: grad, interpolation
         integer, intent(in) :: n0, fixed(:), fixed_nodes(:)
         real(dp), intent(in) :: values(:), rtol
         real(dp), intent(out) :: a(:)
         integer, intent(out) :: iterations, status
-        type(csr_t) :: kf, gf, pf, g, p
+        type(csr_matrix_t), intent(in), optional :: mass
+        type(csr_t) :: kf, gf, pf, g, p, mf, m
         type(pcg_params_t) :: params
         type(pcg_handle_t) :: handle
         type(fortsparse_status_t) :: info
@@ -162,7 +165,14 @@ contains
         rhs = -pack(kd, row_map > 0)
         params%preconditioner = PCG_AMS
         params%rtol = rtol
-        call pcg_setup_ams(kf, gf, pf, params, handle, info)
+        params%ams%smoothing_steps = 2
+        if (present(mass)) then
+            call eu_to_csr(mass, n1, m)
+            call submatrix(m, row_map, row_map, nf, mf)
+            call pcg_setup_ams(kf, gf, pf, params, handle, info, mass=mf)
+        else
+            call pcg_setup_ams(kf, gf, pf, params, handle, info)
+        end if
         status = info%code
         if (status /= 0) return
         x = 0

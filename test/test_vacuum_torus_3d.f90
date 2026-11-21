@@ -13,7 +13,7 @@ module vacuum_torus_fields
     type(spline_space_t), public :: space
     type(curve_chart_t), public :: chart
 
-    public :: full, potential, field_b, metric2, det3, jacobian3
+    public :: full, potential, field_b, metric1, metric2, det3, jacobian3
 
 contains
 
@@ -69,6 +69,28 @@ contains
         jacobian(1:3, 1:3) = j3
     end subroutine jacobian3
 
+    subroutine metric1(block, xi, t, weight)
+        !! |J| G^-1 for the 1-form mass matrix.
+        integer, intent(in) :: block
+        real(dp), intent(in) :: xi(2), t
+        real(dp), intent(out) :: weight(:, :)
+        real(dp) :: x(3), j3(3, 3), gram(3, 3), inv(3, 3), det
+
+        call full(block, xi, t, x, j3)
+        gram = matmul(transpose(j3), j3)
+        det = det3(gram)
+        inv(1, :) = [gram(2, 2)*gram(3, 3) - gram(2, 3)*gram(3, 2), &
+                     gram(1, 3)*gram(3, 2) - gram(1, 2)*gram(3, 3), &
+                     gram(1, 2)*gram(2, 3) - gram(1, 3)*gram(2, 2)]
+        inv(2, :) = [gram(2, 3)*gram(3, 1) - gram(2, 1)*gram(3, 3), &
+                     gram(1, 1)*gram(3, 3) - gram(1, 3)*gram(3, 1), &
+                     gram(1, 3)*gram(2, 1) - gram(1, 1)*gram(2, 3)]
+        inv(3, :) = [gram(2, 1)*gram(3, 2) - gram(2, 2)*gram(3, 1), &
+                     gram(1, 2)*gram(3, 1) - gram(1, 1)*gram(3, 2), &
+                     gram(1, 1)*gram(2, 2) - gram(1, 2)*gram(2, 1)]
+        weight(1:3, 1:3) = abs(det3(j3))*inv/det
+    end subroutine metric1
+
     subroutine metric2(block, xi, t, weight)
         integer, intent(in) :: block
         real(dp), intent(in) :: xi(2), t
@@ -102,11 +124,11 @@ program test_vacuum_torus_3d
     use fortfem_curve_chart, only: curve_chart_cylindrical
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_build, &
         spline_derham_project, spline_derham_boundary_dofs, spline_derham_tree, spline_derham_evaluate, &
-        spline_derham_interpolation
+        spline_derham_interpolation, spline_derham_mass
     use fortsparse_csr, only: csr_t, csr_matvec
     use fortfem_element_to_csr, only: csr_matrix_t
     use milca_eulerian_vacuum, only: eu_curl_curl, eu_constrained_solve, eu_ams_solve
-    use vacuum_torus_fields, only: space, chart, r0, potential, field_b, metric2, full, det3, &
+    use vacuum_torus_fields, only: space, chart, r0, potential, field_b, metric1, metric2, full, det3, &
         jacobian3
     implicit none
     integer, parameter :: modes = 2, degree = 2, levels = 3
@@ -160,7 +182,7 @@ contains
         type(spline_quadrature_t) :: quad
         type(spline_derham_t) :: derham
         type(csr_t) :: k
-        type(csr_matrix_t) :: interpolation
+        type(csr_matrix_t) :: interpolation, m1
         integer, allocatable :: nodes(:), edges(:), tree(:), fixed(:)
         real(dp), allocatable :: a_i(:), a_h(:), kv(:), a_ams(:)
         logical, allocatable :: tree_mask(:)
@@ -202,8 +224,10 @@ contains
         call spline_derham_interpolation(derham, jacobian3, interpolation, st, 1e-4_dp)
         if (st /= 0) error stop 'interpolation'
         allocate (a_ams(size(a_h)))
+        call spline_derham_mass(derham, quad, 1, metric1, m1, st, 2*modes + 4)
+        if (st /= 0) error stop 'M1'
         call eu_ams_solve(k, derham%grad, interpolation, derham%dimension(0), edges, &
-                          a_i(edges), nodes, a_ams, 1e-10_dp, its, st)
+                          a_i(edges), nodes, a_ams, 1e-10_dp, its, st, m1)
         if (st /= 0) print *, 'AMS status', st, ' iterations', its
         err_ams = l2_error(derham, quad, curl(derham, a_ams))
     end subroutine solve
