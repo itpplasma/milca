@@ -26,7 +26,9 @@ program nested_equilibrium
     use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
-        ideal_fb_init_bem, ideal_fb_bem_settle, ideal_fb_fix_vertical
+        ideal_fb_init_bem, ideal_fb_bem_settle, ideal_fb_fix_vertical, ideal_fb_set_coil_split, ideal_fb_enable_angle, &
+        ideal_fb_solve_shell_map, ideal_fb_solve_vacuum, ideal_fb_solve_multipliers, &
+        ideal_fb_hessian, ideal_fb_step
     use milca_ideal_fb_bem, only: fb_coil_flux_t
     use milca_ideal_fb_circuits, only: ideal_fb_circuits_t, ideal_fb_circuits_build
     use milca_ideal_fb_mgrid, only: mgrid_basis_t, mgrid_basis_init, mgrid_current_nodes
@@ -102,12 +104,12 @@ program nested_equilibrium
     type(cylindrical_chart_t) :: chart
     real(dp), allocatable :: filament_drive(:, :), filament_load(:, :)
     real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
-    real(dp), allocatable :: fb_curve(:)
+    real(dp), allocatable :: fb_curve(:), fit_curve(:)
     ! Vacuum of the free boundary: 'bem' (sheet current on Gamma_p, no vacuum
     ! mesh; axisymmetric decks), 'shell' (shell to Gamma_c) or 'auto' (bem for
     ! axisymmetric decks, otherwise shell).
     character(8) :: vacuum
-    logical :: use_bem = .false.
+    logical :: use_bem = .false., split_coils = .false.
     type(fb_coil_flux_t) :: coil_flux
     real(dp) :: bem_f_vac, bem_f_spread
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
@@ -159,8 +161,11 @@ program nested_equilibrium
         error stop 'nested_equilibrium: free_boundary needs mgrid_file'
     if (free_boundary .and. .not. coupling_margin > 0) &
         error stop 'nested_equilibrium: coupling_margin must be positive'
-    if (vacuum /= 'auto' .and. vacuum /= 'shell' .and. vacuum /= 'bem') &
-        error stop 'nested_equilibrium: vacuum is auto, bem or shell'
+    if (vacuum /= 'auto' .and. vacuum /= 'shell' .and. vacuum /= 'bem' .and. &
+        vacuum /= 'split') error stop 'nested_equilibrium: vacuum is auto, bem, shell or split'
+    split_coils = vacuum == 'split'
+    if (free_boundary .and. split_coils .and. (ntor /= 0 .or. map_ntor > 0)) &
+        error stop 'nested_equilibrium: vacuum = split needs an axisymmetric deck'
     use_bem = vacuum == 'bem' .or. (vacuum == 'auto' .and. ntor == 0 .and. map_ntor <= 0)
     if (free_boundary .and. use_bem .and. (ntor /= 0 .or. map_ntor > 0)) &
         error stop 'nested_equilibrium: vacuum = bem needs an axisymmetric deck'
@@ -375,10 +380,24 @@ contains
             grid%rmax, grid%zmin, grid%zmax], coils_inside, fb_centre, fb_axes, &
             fb_curve, margin_used, local, message)
         if (local /= 0) call fail(trim(message))
-        if (use_bem) then
-            ! Gamma_c only selects the coil-free grid nodes of the fit
+        fit_curve = fb_curve
+        if (split_coils) then
+            ! coils split off: Gamma_c only has to enclose the plasma current
+            block
+                real(dp) :: centre(2), axes(2), margin_wide
+                real(dp), allocatable :: none(:, :)
+                allocate (none(2, 0))
+                call fb_nested_geometry(boundary_input, nfp, coupling_margin, [grid%rmin, &
+                    grid%rmax, grid%zmin, grid%zmax], none, centre, axes, fb_curve, &
+                    margin_wide, local, message)
+                if (local /= 0) call fail(trim(message))
+                print '(a,f6.3)', 'coils split off: coupling margin', margin_wide
+            end block
+        end if
+        if (use_bem .or. split_coils .or. split_env()) then
+            ! the fit holds on the coil-free region inside fit_curve
             call fb_nested_coil_flux(coil_basis, extcur(:grid%nextcur), fb_centre, &
-                fb_curve, coil_flux, bem_f_vac, bem_f_spread, local)
+                fit_curve, coil_flux, bem_f_vac, bem_f_spread, local)
             if (local /= 0) call fail('the coil flux fit inside Gamma_c failed')
             print '(a,es10.3,a,es12.4,a,es9.2)', 'coil flux fit misfit ', &
                 coil_flux%misfit, ', F_vac (T m) ', bem_f_vac, ', R B_phi spread ', &
@@ -418,8 +437,12 @@ contains
         else
             call fb_nested_transfer(next, fb, local)
             if (local /= IDEAL_FB_OK) call fail('the resolution level transfer failed')
+            if (next%na0 > 0 .and. fb%na0 > 0) next%plasma%angle = fb%plasma%angle
         end if
-        if (first) then
+        if (first .and. state_cached(next)) then
+            call install_traces(next)
+            call fb_nested_settle(next, local)
+        else if (first) then
             if (prescribe_current) call seed_current(next)
             call interior_equilibrium(next)
             if (.not. prescribe_current) then
@@ -432,10 +455,175 @@ contains
             call fb_nested_settle(next, local)
             if (local /= IDEAL_FB_OK) &
                 call fail('the free-boundary seed is not admitted')
+            call state_store(next)
+            if (split_env() .and. .not. use_bem) call split_check(next)
         end if
         fb = next
         call fb_solve(tolerance)
+        block
+            character(len=8) :: env
+            integer :: n_env, st_env
+            call get_environment_variable('MILCA_FB_FIRST_ONLY', env, n_env, st_env)
+            if (first .and. st_env == 0 .and. n_env > 0) stop
+        end block
     end subroutine
+
+    logical function state_cached(next) result(found)
+        type(ideal_fb_t), intent(inout) :: next
+        character(len=512) :: path
+        integer :: n_env, st_env, unit, io
+        found = .false.
+        call get_environment_variable('MILCA_FB_STATE', path, n_env, st_env)
+        if (st_env /= 0 .or. n_env == 0) return
+        inquire (file=trim(path), exist=found)
+        if (.not. found) return
+        open (newunit=unit, file=trim(path), form='unformatted', access='stream', &
+            status='old', action='read', iostat=io)
+        read (unit, iostat=io) next%plasma%x, next%plasma%b, next%plasma%p, circulation
+        close (unit)
+        found = io == 0
+        if (found) print '(a)', 'state cache: loaded '//trim(path)
+    end function
+
+    subroutine state_store(next)
+        type(ideal_fb_t), intent(in) :: next
+        character(len=512) :: path
+        integer :: n_env, st_env, unit
+        logical :: there
+        call get_environment_variable('MILCA_FB_STATE', path, n_env, st_env)
+        if (st_env /= 0 .or. n_env == 0) return
+        inquire (file=trim(path), exist=there)
+        if (there) return
+        open (newunit=unit, file=trim(path), form='unformatted', access='stream', &
+            status='new', action='write')
+        write (unit) next%plasma%x, next%plasma%b, next%plasma%p, circulation
+        close (unit)
+        print '(a)', 'state cache: stored '//trim(path)
+    end subroutine
+
+    logical function gauge_env()
+        ! position gauge with the field angle; the transversal gauge of the
+        ! seed interior is a testbed option only (it loses the edge current)
+        integer :: n_env, st_env
+        character(len=8) :: env
+        call get_environment_variable('MILCA_TRANSVERSAL', env, n_env, st_env)
+        gauge_env = .not. (st_env == 0 .and. n_env > 0)
+    end function
+
+    logical function split_env()
+        integer :: n_env, st_env
+        character(len=8) :: env
+        call get_environment_variable('MILCA_SPLIT_CHECK', env, n_env, st_env)
+        split_env = st_env == 0 .and. n_env > 0
+    end function
+
+    subroutine split_check(target)
+        ! Reduced gradient (shell map, Phi~, multipliers exact at the plasma
+        ! map) with the coil traces on Gamma_c against the coil split.
+        type(ideal_fb_t), intent(in) :: target
+        type(ideal_fb_t) :: one, two
+        real(dp), allocatable :: g1(:), g2(:), d(:, :), l(:, :)
+        real(dp) :: lag1, lag2
+        integer :: local, np, k
+        allocate (g1(target%n), g2(target%n))
+        one = target
+        two = target
+        d = circulation*filament_drive; l = circulation*filament_load
+        call ideal_fb_set_traces(two, d, l, target%f_vac, local)
+        call ideal_fb_set_coil_split(two, coil_flux, local)
+        if (local /= IDEAL_FB_OK) call fail('coil split set-up failed')
+        do k = 1, 2
+            call ideal_fb_solve_shell_map(one, local); call ideal_fb_solve_vacuum(one, local)
+            call ideal_fb_solve_multipliers(one, local)
+            call ideal_fb_solve_shell_map(two, local); call ideal_fb_solve_vacuum(two, local)
+            call ideal_fb_solve_multipliers(two, local)
+        end do
+        call ideal_fb_gradient(one, g1, local, lag1)
+        call ideal_fb_gradient(two, g2, local, lag2)
+        np = target%np
+        print '(a,4es12.4)', 'reduced plasma |g1| |g2| |g1-g2| cos:', norm2(g1(:np)), &
+            norm2(g2(:np)), norm2(g1(:np) - g2(:np)), &
+            dot_product(g1(:np), g2(:np))/(norm2(g1(:np))*norm2(g2(:np)))
+        print '(a,2es12.4)', 'reduced rest |g1| |g2|:', norm2(g1(np+1:)), norm2(g2(np+1:))
+        print '(a,2es22.14)', 'reduced L1 L2:', lag1, lag2
+        call hvp_check(one, 'traces')
+        call hvp_check(two, 'split ')
+        call reduced_fd(one, 'traces')
+        call reduced_fd(two, 'split ')
+        stop
+    end subroutine
+
+    subroutine hvp_check(state, label)
+        ! H v against the central difference of the gradient along v, per block.
+        type(ideal_fb_t), intent(in) :: state
+        character(*), intent(in) :: label
+        type(ideal_fb_t) :: work
+        integer, allocatable :: rp(:), ci(:)
+        real(dp), allocatable :: val(:), v(:), hv(:), gp(:), gm(:), fd(:)
+        real(dp) :: h
+        integer :: i, p, local, np
+        np = state%np
+        work = state
+        call ideal_fb_hessian(work, rp, ci, val)
+        allocate (v(state%n), hv(state%n), gp(state%n), gm(state%n))
+        v = [(sin(0.37_dp*i), i = 1, state%n)]
+        v(np + 1:) = 0
+        hv = 0
+        do i = 1, state%n
+            do p = rp(i), rp(i + 1) - 1
+                hv(i) = hv(i) + val(p)*v(ci(p))
+            end do
+        end do
+        h = 1.0e-6_dp
+        call ideal_fb_step(work, v, h); call ideal_fb_gradient(work, gp, local)
+        call ideal_fb_step(work, v, -2*h); call ideal_fb_gradient(work, gm, local)
+        fd = (gp - gm)/(2*h)
+        print '(a,a,2es12.4)', label, ' HVP plasma-direction: rel err plasma rows, rest rows', &
+            norm2(fd(:np) - hv(:np))/norm2(fd(:np)), norm2(fd(np+1:) - hv(np+1:))/max(norm2(fd(np+1:)), 1e-300_dp)
+    end subroutine
+
+    subroutine reduced_fd(state, label)
+        ! dE_red/dv by central differences (blocks re-solved) against g.v.
+        type(ideal_fb_t), intent(in) :: state
+        character(*), intent(in) :: label
+        type(ideal_fb_t) :: work
+        real(dp), allocatable :: v(:), g(:)
+        real(dp) :: ep, em, e0, h
+        integer :: i, local, np
+        np = state%np
+        allocate (v(state%n), g(state%n))
+        v = 0
+        v(:np) = [(sin(0.71_dp*i), i = 1, np)]
+        work = state
+        call ideal_fb_gradient(work, g, local, e0)
+        do i = 4, 7
+            h = 10.0_dp**(-i)
+            work = state; call ideal_fb_step(work, v, h); call settle(work)
+            call ideal_fb_gradient(work, g, local, ep)
+            work = state; call ideal_fb_step(work, v, -h); call settle(work)
+            call ideal_fb_gradient(work, g, local, em)
+            work = state
+            call ideal_fb_gradient(work, g, local, e0)
+            print '(a,a,es9.1,2es16.8)', label, ' reduced dE/dv h, FD, g.v:', h, (ep - em)/(2*h), &
+                dot_product(g(:np), v(:np))
+        end do
+    end subroutine
+
+    subroutine settle(w)
+        type(ideal_fb_t), intent(inout) :: w
+        integer :: k, lo
+        do k = 1, 2
+            call ideal_fb_solve_shell_map(w, lo); call ideal_fb_solve_vacuum(w, lo)
+            call ideal_fb_solve_multipliers(w, lo)
+        end do
+    end subroutine
+
+    logical function talk_env()
+        integer :: n_env, st_env
+        character(len=8) :: env
+        call get_environment_variable('MILCA_FB_TALK', env, n_env, st_env)
+        talk_env = st_env == 0 .and. n_env > 0
+    end function
 
     subroutine shell_level(nodes, next)
         ! shell to Gamma_c: mesh, per-n exterior and the coil traces
@@ -451,9 +639,15 @@ contains
         call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, 0.0_dp, &
             circulation, local, nphi=max(1, 4*ntor_level + 1))
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
-        call ideal_fb_circuits_build(next, coil_basis, circuits, local)
-        if (local /= IDEAL_FB_OK) &
-            call fail('the coil field grid does not cover the coupling surface')
+        if (split_coils) then
+            call ideal_fb_set_coil_split(next, coil_flux, local)
+            if (local /= IDEAL_FB_OK) call fail('the coil split set-up failed')
+            if (.not. any(abs(boundary(2:3, :, :)) > 0)) call ideal_fb_fix_vertical(next)
+        else
+            call ideal_fb_circuits_build(next, coil_basis, circuits, local)
+            if (local /= IDEAL_FB_OK) &
+                call fail('the coil field grid does not cover the coupling surface')
+        end if
         allocate (d(next%nt, next%nmode, 1), l(next%nt, next%nmode, 1))
         call ideal_fb_drive_traces(next, filament, [1.0_dp], d, l, closure, f, spread, &
             local)
@@ -461,7 +655,8 @@ contains
         filament_drive = d(:, :, 1); filament_load = l(:, :, 1)
         ! bound of the closure of the summed coil field: a coil inside Gamma_c
         ! (a toroidal current it encloses) shows as an n = 0 closure
-        coil_closure = sum(abs(extcur(:circuits%ncircuit))*circuits%closure)
+        coil_closure = 0
+        if (.not. split_coils) coil_closure = sum(abs(extcur(:circuits%ncircuit))*circuits%closure)
         call install_traces(next)
         print '(a,es12.4,a,es10.2,a,i0,a,i0)', 'F_vac (T m)', next%f_vac, &
             ', coil closure', coil_closure, ', unknowns ', next%n, ', modes ', &
@@ -481,6 +676,10 @@ contains
             circulation, coil_flux, degree - 1, local, nphi=1)
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
         if (.not. any(abs(boundary(2:3, :, :)) > 0)) call ideal_fb_fix_vertical(next)
+        if (angle_mpol > 0 .and. ntor == 0) then
+            call ideal_fb_enable_angle(next, angle_mpol, phiedge, fb_centre, fb_axes, local)
+            if (local /= IDEAL_FB_OK) call fail('the field angle of the free boundary failed')
+        end if
         print '(a,es12.4,a,i0)', 'F_vac (T m)', next%f_vac, ', unknowns ', next%n
     end subroutine
 
@@ -494,7 +693,17 @@ contains
         type(ideal_fb_t), intent(inout) :: target
         integer :: local
         map = target%plasma
-        map%position_gauge = .true.
+        ! transversal gauge with omega: the relabelling along the surfaces is a
+        ! gauge instead of a soft material slide (18 instead of 43 free-boundary
+        ! iterations at 48 boundary nodes; both gauges converge to the same
+        ! volume under refinement)
+        map%position_gauge = gauge_env()
+        block
+            character(len=16) :: env
+            integer :: n_env, st_env
+            call get_environment_variable('MILCA_GAUGE_WEIGHT', env, n_env, st_env)
+            if (st_env == 0 .and. n_env > 0) read (env, *) map%gauge_weight
+        end block
         seed%profile = profile
         call ideal_map_freeze(map, seed, local)
         if (local /= 0) call fail('the seed folded when frozen for its interior')
@@ -561,6 +770,13 @@ contains
             return
         end if
         d = circulation*filament_drive; l = circulation*filament_load; f = 0
+        if (split_coils) f = bem_f_vac
+        if (split_coils) then
+            target%circulation = circulation
+            call ideal_fb_set_traces(target, d, l, f, local)
+            if (local /= IDEAL_FB_OK) call fail('the vacuum traces are not finite')
+            return
+        end if
         do k = 1, circuits%ncircuit
             d = d + extcur(k)*circuits%drive(:, :, k)
             l = l + extcur(k)*circuits%load(:, :, k)
@@ -582,7 +798,7 @@ contains
         last = huge(1.0_dp)
         do restart = 0, 20
             call ideal_fb_solve(fb, 0.1_dp*target, max_iterations, fb_report, &
-                solve_status, verbose=.false., residual_tolerance=target)
+                solve_status, verbose=talk_env(), residual_tolerance=target)
             if (solve_status == IDEAL_FB_OK .or. solve_status == IDEAL_FB_FOLDED) exit
             if (.not. fb_report%residual < 0.75_dp*last) exit
             last = fb_report%residual

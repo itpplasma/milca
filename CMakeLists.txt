@@ -600,8 +600,14 @@ add_test(NAME ideal_fb_derivatives COMMAND test_ideal_free_boundary derivatives)
 add_test(NAME ideal_fb_level_transfer COMMAND test_ideal_free_boundary transfer)
 milca_test_labels(ideal_fb_level_transfer fast CLASSES mhd
     TARGETS test_ideal_free_boundary)
+add_test(NAME ideal_fb_watchdog COMMAND test_ideal_free_boundary watchdog)
+milca_test_labels(ideal_fb_watchdog fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_bem_derivatives COMMAND test_ideal_free_boundary bem)
 milca_test_labels(ideal_fb_bem_derivatives fast CLASSES mhd
+    TARGETS test_ideal_free_boundary)
+add_test(NAME ideal_fb_bem_angle COMMAND test_ideal_free_boundary bem_angle)
+milca_test_labels(ideal_fb_bem_angle fast CLASSES mhd
     TARGETS test_ideal_free_boundary)
 add_test(NAME ideal_fb_vertical_newton COMMAND test_ideal_free_boundary vertical)
 add_executable(test_field_shell test/test_field_shell.f90)

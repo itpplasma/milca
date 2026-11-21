@@ -12,7 +12,12 @@ module milca_inertia_newton
     !! exact values. inertia_newton_accept is the ratio test of a merit:
     !! accepted when the actual decrease is at least eta_accept of the
     !! predicted one, and inside the roundoff band of the merit when the
-    !! stationarity norm decreases.
+    !! stationarity norm decreases. inertia_watchdog_t is the watchdog of
+    !! Chamberlain, Powell, Lemarechal and Pedersen (Math. Program. Stud. 16
+    !! (1982) 1; Nocedal and Wright, Numerical Optimization, sec. 15.6): a full
+    !! step the ratio test rejects is taken anyway when the merit has to cross
+    !! a small barrier, and the iteration returns to the checkpoint unless the
+    !! merit falls below it within max_steps further steps.
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use fortsparse, only: sparse_solver_t, sparse_refactor, sparse_solve, &
@@ -22,8 +27,11 @@ module milca_inertia_newton
     implicit none
     private
     public :: inertia_newton_t, inertia_newton_factor, inertia_newton_solve, &
-        inertia_newton_accept
+        inertia_newton_accept, inertia_watchdog_t, inertia_watchdog_start, &
+        inertia_watchdog_check
     integer, parameter, public :: INERTIA_NEWTON_OK = 0, INERTIA_NEWTON_FAILED = 1
+    integer, parameter, public :: WATCHDOG_IDLE = 0, WATCHDOG_COMMIT = 1, &
+        WATCHDOG_RESTORE = 2
     type :: inertia_newton_t
         real(dp) :: delta_min = 1.0e-20_dp, delta_first = 1.0e-4_dp
         real(dp) :: delta_factor = 8, delta_max = 1.0e20_dp
@@ -34,6 +42,17 @@ module milca_inertia_newton
         real(dp), allocatable :: scale(:)
         ! (positive, negative, zero) of the last factor
         integer :: inertia(3) = -1
+    end type
+    type :: inertia_watchdog_t
+        !> further steps allowed to fall below the checkpoint, steps without a
+        !! new watch after a return, and the decrease required (fraction of the
+        !! predicted decrease of the tentative step)
+        integer :: max_steps = 3, cooldown = 5
+        real(dp) :: eta = 0.25_dp
+        !> > 0: steps since the tentative step; < 0: cooldown left
+        integer :: steps = 0
+        real(dp) :: merit = 0, predicted = 0
+        real(dp), allocatable :: state(:), gradient(:)
     end type
 contains
     subroutine inertia_newton_factor(opt, rowptr, colidx, val, shift, n_pos, n_neg, &
@@ -158,5 +177,38 @@ contains
         end if
         if (.not. predicted > 0) return
         accept = merit - merit_trial >= opt%eta_accept*predicted
+    end function
+
+    logical function inertia_watchdog_start(wd, merit, predicted, state, gradient) &
+            result(start)
+        !! .true.: take the rejected full step tentatively; the checkpoint
+        !! (merit, state, gradient) is kept for a return.
+        type(inertia_watchdog_t), intent(inout) :: wd
+        real(dp), intent(in) :: merit, predicted, state(:), gradient(:)
+        start = wd%steps == 0 .and. predicted > 0
+        if (.not. start) return
+        wd%steps = 1
+        wd%merit = merit; wd%predicted = predicted
+        wd%state = state; wd%gradient = gradient
+    end function
+
+    integer function inertia_watchdog_check(wd, merit) result(action)
+        !! After each accepted step that follows the tentative one: COMMIT
+        !! once the merit is below the checkpoint by eta predicted, RESTORE
+        !! (to wd%state, wd%gradient, wd%merit) after max_steps without.
+        type(inertia_watchdog_t), intent(inout) :: wd
+        real(dp), intent(in) :: merit
+        action = WATCHDOG_IDLE
+        if (wd%steps < 0) wd%steps = wd%steps + 1
+        if (wd%steps <= 0) return
+        if (merit <= wd%merit - wd%eta*wd%predicted) then
+            wd%steps = 0
+            action = WATCHDOG_COMMIT
+        else if (wd%steps >= wd%max_steps) then
+            wd%steps = -wd%cooldown
+            action = WATCHDOG_RESTORE
+        else
+            wd%steps = wd%steps + 1
+        end if
     end function
 end module milca_inertia_newton

@@ -22,7 +22,7 @@ module milca_ideal_seed_3d
         seed_disc_coordinates, seed_disc_pullback
     implicit none
     private
-    public :: toroidal_profile_t, toroidal_seed_t, ideal_seed_3d_init
+    public :: toroidal_profile_t, toroidal_seed_t, ideal_seed_3d_init, ideal_seed_angle_tables
     public :: hermite_profile_evaluate
     public :: ideal_seed_disk_mesh, ideal_seed_boundary_coefficients
     public :: ideal_seed_3d_angle_density
@@ -387,27 +387,48 @@ contains
         call seed_angle_tables(map, flux)
     end subroutine
 
-    subroutine seed_angle_tables(map, flux)
+    subroutine ideal_seed_angle_tables(map, flux, centre, axes)
+        ! seed_angle_tables on a reference ellipse (free boundary): u, v are the
+        ! ellipse coordinates; the increments (grad chi in u, v and the b3
+        ! density) are pulled back like the frozen field (seed_disc_pullback).
+        type(ideal_map_t), intent(inout) :: map
+        real(dp), intent(in) :: flux, centre(2), axes(2)
+        call seed_angle_tables(map, flux, centre, axes)
+    end subroutine
+
+    subroutine seed_angle_tables(map, flux, centre, axes)
         ! Reference harmonics (u + i v)^m and the frozen-form increments of a
         ! unit eta_t and eta_p, pulled back to master coordinates like the
-        ! frozen density itself (ideal_map_freeze).
+        ! frozen density itself (ideal_map_freeze). Without centre and axes the
+        ! reference is the unit disk about (2, 0).
         type(ideal_map_t), intent(inout) :: map
         real(dp), intent(in) :: flux
-        real(dp) :: y(2), dg(2, 2), u, v, s, c(3, 2), b(3)
+        real(dp), intent(in), optional :: centre(2), axes(2)
+        real(dp) :: y(2), dg(2, 2), u, v, s, c(3, 2), b(3), scale(3)
         integer :: e, g, k
+        logical :: ellipse
+        ellipse = present(centre) .and. present(axes)
+        scale = 1
+        if (ellipse) scale = [1/axes(1), 1/axes(2), 1/(axes(1)*axes(2))]
         !$omp parallel do schedule(static) private(e, g, k, y, dg, u, v, s, c, b)
         do e = 1, map%cells
             do g = 1, map%nq
                 y = matmul(map%reference(:, map%conn(:, e)), map%shape(:, g))
                 dg = matmul(map%reference(:, map%conn(:, e)), &
                     transpose(map%dshape(:, :, g)))
-                call seed_disk_coordinates(y(1), y(2), u, v, s)
+                if (ellipse) then
+                    call seed_disc_coordinates(y(1), y(2), centre(1), centre(2), axes(1), &
+                        axes(2), u, v, s)
+                else
+                    call seed_disk_coordinates(y(1), y(2), u, v, s)
+                end if
                 call harmonics(u, v, map%angle_power(:, :, g, e))
                 call field_angle_form(u, v, 1.0_dp, 0.0_dp, flux, pi, &
                     c(1, 1), c(2, 1), c(3, 1))
                 call field_angle_form(u, v, 0.0_dp, 1.0_dp, flux, pi, &
                     c(1, 2), c(2, 2), c(3, 2))
                 do k = 1, 2
+                    c(:, k) = c(:, k)*scale
                     call ideal_reference_form(dg(1, 1), dg(2, 1), dg(1, 2), dg(2, 2), &
                         c(1, k), c(2, k), c(3, k), b(1), b(2), b(3))
                     map%angle_form(:, k, g, e) = b
@@ -437,14 +458,19 @@ contains
         type(toroidal_seed_t), intent(in) :: seed
         real(dp), intent(in) :: point(2), phi
         real(dp), intent(out) :: dcg(2), db3
-        real(dp) :: u, v, s, eta, eta_t, eta_p
+        real(dp) :: u, v, s, eta, eta_t, eta_p, du, dv, dbu
         real(dp), allocatable :: power(:, :)
         dcg = 0; db3 = 0
         if (map%nangle == 0) return
         allocate (power(2, 0:map%angle_mpol))
-        call seed_disk_coordinates(point(1), point(2), u, v, s)
+        ! the seed's reference disc (unit disk about (2, 0), or the free
+        ! boundary's ellipse), pulled back like the frozen field
+        call seed_disc_coordinates(point(1), point(2), seed%centre(1), seed%centre(2), &
+            seed%axes(1), seed%axes(2), u, v, s)
         call harmonics(u, v, power)
         call ideal_map_angle_value(map, map%angle, power, phi, eta, eta_t, eta_p)
-        call field_angle_form(u, v, eta_t, eta_p, seed%flux, pi, dcg(1), dcg(2), db3)
+        call field_angle_form(u, v, eta_t, eta_p, seed%flux, pi, du, dv, dbu)
+        call seed_disc_pullback(du, dv, dbu, seed%axes(1), seed%axes(2), &
+            dcg(1), dcg(2), db3)
     end subroutine
 end module
