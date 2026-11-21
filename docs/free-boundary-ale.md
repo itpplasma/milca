@@ -60,6 +60,40 @@ The material map, its relabelling potential and gauges (section 4 and the
 gates B1–B3) are superseded; [ideal-map-3d.md](ideal-map-3d.md) stays as the
 verified reference until L4 and L5 pass.
 
+### Edge pressure and the edge current (decision of 2026-11-21)
+
+With an edge pressure p_b > 0 against a vacuum, force balance
+[[p + B^2/2 mu0]] = 0 needs a current sheet on the boundary. Its split between
+a toroidal part (a jump in B_pol) and a poloidal part (a jump in F) is fixed by
+one scalar: the net toroidal sheet current, the jump [[F]], or a measured
+poloidal SOL current. The reconstruction codes resolve this current in the
+scrape-off layer instead of using a sheet:
+- CLISTE fits p' and FF' continued onto the open field lines to divertor tile
+  current measurements (Dunne, PhD thesis UCC 2013, pp. 50-53; McCarthy et al.,
+  EPS 2017 P2.131).
+- King et al., Phys. Plasmas 24, 012504 (2017) add the same SOL profiles to
+  EFIT equilibria; the boundary moves by up to 3 cm.
+
+Sheets appear only in sharp-boundary models: SPEC, DESC (optional) and
+VMEC++ after PR #830. VMEC2000 adds p_b on both sides and leaves the jump
+unbalanced. With p_b > 0, an X-point cannot lie on the plasma boundary unless
+the sheet cancels the field there.
+
+MILCA's model:
+1. **SOL blocks:** p(psi) and F(psi) continue into the SOL and private-flux
+   blocks of the X-point layout, with p continuous at the separatrix. The
+   total current includes the SOL current, and the X-point stays a field null.
+   Inputs are the SOL decay length and the poloidal SOL current (zero by
+   default, force-free).
+2. **The sheet as a verified limit:** shrinking the SOL width at fixed p_b and
+   fixed int F must converge to the sheet. This is the test linking 1 to a
+   sharp-boundary reference such as VMEC++.
+3. **Fixed boundary:** the sheet current K is reported for downstream codes
+   and does not enter the solution.
+
+Comparisons with p_b != 0 state the edge model. Against VMEC2000 the
+comparison uses p_b = 0.
+
 ## 1. Reason
 
 The frozen-flux map takes the mesh node positions as unknowns and minimises

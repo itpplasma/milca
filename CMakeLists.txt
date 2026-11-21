@@ -343,7 +343,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # second-kind Nedelec edges #148, exact moment gradients #149 and the
 # boundary trace projection #152, the toroidal period #154 and its tensor
 # forms #160, factored anisotropic apply).
-set(MILCA_FORTFEM_REVISION "6372ba44f320c67ebb8949032668eb7d24175b75")
+set(MILCA_FORTFEM_REVISION "82f11964523a8dc3de97eb76490326a8c6fbc6d1")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -507,7 +507,8 @@ target_sources(milca_fem2d PRIVATE src/fem2d/gs_direct.f90)
 message(STATUS "MILCA sparse direct backend: native FortSparse CPU")
 target_sources(milca_equilibrium PRIVATE src/equilibrium/gs_coils.f90 src/equilibrium/gs_coupling.f90
     src/equilibrium/gs_free_boundary.f90 src/equilibrium/gs_coil_inverse.f90
-    src/equilibrium/gs_free_current.f90 src/equilibrium/gs_spline.f90)
+    src/equilibrium/gs_free_current.f90 src/equilibrium/gs_spline.f90
+    src/equilibrium/gs_spline_current.f90)
 target_sources(milca_equilibrium PRIVATE src/equilibrium/equilibrium_harness.f90)
 add_executable(test_equilibrium_harness test/test_equilibrium_harness.f90)
 target_link_libraries(test_equilibrium_harness PRIVATE milca)
@@ -862,6 +863,9 @@ add_test(NAME gs_free_current_contour_integrals COMMAND test_gs_free_current)
 add_executable(test_gs_spline test/test_gs_spline.f90)
 target_link_libraries(test_gs_spline PRIVATE milca)
 add_test(NAME gs_spline_solovev_rate COMMAND test_gs_spline)
+add_executable(test_gs_spline_free test/test_gs_spline_free.f90)
+target_link_libraries(test_gs_spline_free PRIVATE milca)
+add_test(NAME gs_spline_free_boundary_coupling COMMAND test_gs_spline_free)
 add_executable(test_gs_fb_manufactured test/test_gs_fb_manufactured.f90)
 target_link_libraries(test_gs_fb_manufactured PRIVATE milca_gs_fb_test)
 add_library(milca_gs_ci_test STATIC test/support/gs_ci_fixture.f90)
@@ -2426,6 +2430,8 @@ foreach(degree 2 3)
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/weak_ampere_p${degree}_test
         TIMEOUT 300 ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 endforeach()
+add_executable(gs_spline_free app/gs_spline_free.f90)
+target_link_libraries(gs_spline_free PRIVATE milca)
 add_executable(gs_spline_fixed app/gs_spline_fixed.f90)
 target_link_libraries(gs_spline_fixed PRIVATE milca)
 add_executable(gs_phase1 app/gs_phase1.f90)

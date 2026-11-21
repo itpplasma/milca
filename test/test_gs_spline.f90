@@ -8,7 +8,10 @@ program test_gs_spline
     !! (B/2) Z^2 + c0 on its own zero level set, same rate. Last, the
     !! normalised law p', FF' ~ (1 - s) in s = 1 - psi/psi_a with the
     !! self-consistent axis flux: Newton with the axis term converges in at
-    !! most 6 iterations and R_axis converges at rate >= 3.
+    !! most 6 iterations and R_axis converges at rate >= 3. Finally the ray
+    !! contour integrals a1 = oint R dl/|grad psi| = pi R0/c and
+    !! a2 = oint dl/(R |grad psi|) = pi/(c sqrt(R0^2 - r^2)) of the projected
+    !! field psi0 - c((R - R0)^2 + Z^2), with rays from an off-centre origin.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_spline_layout, only: block_layout_t, layout_ogrid, layout_set_curve, &
         LAYOUT_WALL
@@ -17,7 +20,8 @@ program test_gs_spline
     use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build, &
         spline_evaluate
     use milca_gs_spline, only: gs_spline_kernel_t, gs_spline_dirichlet_solve, GS_SPLINE_OK, &
-        gs_spline_law_kernel_t, gs_spline_newton, gs_spline_newton_axis, gs_spline_extremum
+        gs_spline_law_kernel_t, gs_spline_newton, gs_spline_newton_axis, gs_spline_extremum, &
+        gs_spline_project, gs_spline_level_integrals
     use milca_gs_profile_law, only: gs_profile_law_t
     implicit none
     real(dp), parameter :: pi = acos(-1.0_dp), mu0 = 4.0e-7_dp*pi, r0 = 1.7_dp, &
@@ -53,6 +57,7 @@ program test_gs_spline
         print '(a,f6.2)', 'R_axis rate', rate
         if (rate < 3.0_dp) error stop 'R_axis below rate 3'
     end block
+    call level_integrals()
     print '(a)', 'spline Grad-Shafranov Solov''ev pass'
 contains
     pure function exact(r, z) result(psi)
@@ -220,6 +225,38 @@ contains
         if (abs(psia - kernel%law%axis) > 1.0e-12_dp*abs(psia)) &
             error stop 'law axis flux is not the extremum of psi'
         raxis = axis(1)
+    end subroutine
+
+    subroutine level_integrals()
+        real(dp), parameter :: c = 2.0_dp, psi0 = 1.0_dp
+        type(block_layout_t) :: layout
+        type(spline_space_options_t) :: options
+        type(spline_space_t) :: space
+        type(spline_quadrature_t) :: quad
+        real(dp), allocatable :: coef(:, :), values(:)
+        real(dp) :: radii(4), a1(4), a2(4), e1, e2
+        integer :: st, q
+        call layout_ogrid([r0, 0.0_dp], 0.6_dp, 0.5_dp, layout, st)
+        options%degree = 4
+        options%regularity = SPLINE_C0
+        allocate (options%knots(2, layout%block_count))
+        options%knots(:, :)%element_count = 16
+        call spline_space_build(layout, options, space, st)
+        call spline_quadrature_build(space, 6, quad, st)
+        allocate (values(quad%point_count), coef(1, space%dof_count))
+        do q = 1, quad%point_count
+            values(q) = psi0 - c*((quad%s(1, q) - r0)**2 + quad%s(2, q)**2)
+        end do
+        call gs_spline_project(space, quad, values, coef, st)
+        if (st /= GS_SPLINE_OK) error stop 'projection'
+        radii = [0.1_dp, 0.25_dp, 0.4_dp, 0.5_dp]
+        call gs_spline_level_integrals(space, coef, [r0 + 0.05_dp, 0.03_dp], &
+            psi0 - c*radii**2, 1.0_dp, 256, a1, a2, st)
+        if (st /= GS_SPLINE_OK) error stop 'level integrals'
+        e1 = maxval(abs(a1 - pi*r0/c))/(pi*r0/c)
+        e2 = maxval(abs(a2 - pi/(c*sqrt(r0**2 - radii**2)))/(pi/(c*sqrt(r0**2 - radii**2))))
+        print '(a,2es10.2)', 'ray level integrals: relative errors a1 a2', e1, e2
+        if (max(e1, e2) > 1.0e-7_dp) error stop 'ray level integrals'
     end subroutine
 
     pure function zero(r, z) result(value)
