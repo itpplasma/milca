@@ -65,6 +65,65 @@ carries no current sheet. Physically, [[p + B^2/2 mu0]] = 0 requires a sheet,
 poloidal (F jump), toroidal (B_pol jump) or both. Open item for MILCA: the
 sheet as an interface term in the solver, not a choice made by convention.
 
+### 3.3 VMEC++ and VMEC2000 differ in the edge-pressure model
+
+VMEC++ dropped VMEC2000's `presf_ns` term from the outside pressure
+(upstream #830, `ideal_mhd_model.cc:867-881`). It balances
+B_vac^2/2 mu0 = p + B^2/2 mu0, so p(1) > 0 is a real jump against the vacuum,
+carried by a surface current. VMEC2000 adds p_edge on both sides, so a
+constant pressure shift leaves the equilibrium exactly unchanged.
+
+On DIII-D at 0.95 PHIEDGE with p(1) = 1127 Pa, VMEC++ lies 12 mm from VMEC2000
+on the boundary (R_axis 1.72287 m against 1.71364 m). With p(1) = 0 the two
+agree to 1e-6. MILCA's Grad-Shafranov solve sees only p' and so behaves like
+VMEC2000.
+
+The physical equilibrium with p(1) > 0 against a vacuum needs the sheet, so
+MILCA's pressure-jump term is open (section 3.2). Free-boundary comparisons
+with p(1) != 0 must state the edge model.
+
+### 3.4 Other codes on the same case (audit of 21 November 2026)
+
+Runs and scripts are in `scluster:~/bench/fbx`. Each item gives the defect
+and the fork branch with its test (no pull requests yet).
+
+- **VMEC2000:** bilinear mgrid interpolation (cause 4.1). Fixed with cubic
+  Lagrange on itpplasma/VMEC2000 `fix/mgrid-cubic-interpolation`. The test
+  is an analytic coil field tabulated at 50 mm. The axis is 48.5 mm off
+  without the fix and 0.23 mm off with it. A second free-boundary run in one
+  Python process aborts in `scalpot` (not fixed). PARVMEC and
+  educational_VMEC probably share the bilinear interpolation; not audited.
+- **VMEC++:** already interpolates cubically (upstream #819). The
+  edge-pressure model differs (3.3). BIEST on this kp = 1 case gave no output
+  within 10 min.
+- **DESC:**
+  - The VMEC-input EXTCUR parser read one assignment per line and took the
+    next index as a current, so earlier DIII-D runs had wrong coil currents.
+    Fixed on itpplasma/DESC `fix/vmec-extcur-per-line`.
+  - The free-boundary driver has no sheet current, so with p_edge != 0 the
+    boundary residual cannot vanish.
+  - With p(1) = 0 the proximal least-squares solve stalls at 5e-4. Its
+    pressure residual is normalised by the toroidal B^2, which makes it weak
+    on the poloidal balance. It ends 34 mm off.
+  - Fixed boundary: Z_axis 1 mm and q(0.9) 0.35 % off at L = M = 16.
+- **GVEC:**
+  - The VMEC converter dropped the asymmetric modes for LASYM = T without
+    RBS/ZBC input. Fixed on itpplasma/gvec `fix/vmec-lasym-sincos`.
+  - The free boundary (unmerged `equilibrium/mgrid-free-boundary`) did not
+    move the boundary within its Newton budget.
+  - Fixed boundary agrees with VMEC2000 on its boundary to 0.04 mm in R_axis
+    and 2e-4 in q.
+
+Converged reference: VMEC2000 with cubic mgrid interpolation at ns 256,
+mpol 16. Against it MILCA (96 nodes, P2, input profiles) gives:
+
+| | MILCA | VMEC2000 cubic | MILCA - VMEC2000 |
+|---|---|---|---|
+| V (m^3) | 18.5544 | 18.5568 | -1.3e-4 |
+| R_axis (m) | 1.71350 | 1.71364 | -0.14 mm |
+| q(0.5) | 1.77709 | 1.77634 | +4.2e-4 |
+| q(0.9) | 3.35477 | 3.35270 | +6.2e-4 |
+
 ## 4. Resolution of MILCA or of the reference
 
 ### 4.1 VMEC2000 interpolates the mgrid bilinearly (fixable)
