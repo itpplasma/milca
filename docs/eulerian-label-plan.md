@@ -50,12 +50,33 @@ the topology of the level sets of χ is free:
 
 - several magnetic axes and island chains: one h_θ,j per O-line, profiles
   per region,
-- separatrices: χ has a saddle, g and χ are smooth there, and h_θ,j is
-  smooth away from its own O-line, so the q → ∞ of flux coordinates does
-  not appear in the fields.
+- separatrices: χ has a saddle and is smooth there, h_θ,j is smooth away
+  from its own O-line. The q → ∞ of flux coordinates moves into g: with θ*
+  the straight-field-line angle, g = Φ'(χ)(θ* − θ) + k(χ), and Φ' grows like
+  log|χ − χ_s|. g jumps across the separatrix by a function of this
+  amplitude. B does not see the jump (its gradient is normal to the
+  surfaces), but a continuous g on an unaligned mesh does (E2a).
 
 Clebsch coordinates do not generalise to non-nested surfaces, Clebsch
 fields do.
+
+Relation to flux coordinates. VMEC writes B = ∇ζ×∇Ψ + ∇Φ×∇(θ + λ) with Ψ,
+Φ the poloidal and toroidal flux. With α = g − F'(χ)θ − G'(χ)φ the field-line
+label of (2), F ↔ −Φ/(2π), G ↔ Ψ and g = Φ'(χ) λ up to k(χ):
+
+| | VMEC | label lane |
+|---|---|---|
+| surfaces | R(s, θ, ζ), Z(s, θ, ζ): positions of fixed labels | χ(R, φ, Z): the label at fixed positions |
+| field-line angle | λ(s, θ, ζ) | g(R, φ, Z) |
+| profiles | Φ(s), ι(s) or current, p(s) | F(χ), G(χ), p(χ) |
+
+In axisymmetry the lane is Grad–Shafranov with ψ = G(χ). Straight-field-line
+angles follow from θ* = θ + g/F', Boozer angles from them by the usual
+transform. SPEC keeps a few nested interfaces and relaxed (Beltrami) volumes
+with flat pressure, the lane keeps labels and a continuous p(χ) everywhere.
+Its field is integrable by construction (B·∇χ_h = 0 pointwise): a thin
+chaotic layer at a separatrix is replaced by the separatrix, wide chaos needs
+an unlabelled region (section 7).
 
 ## 3. Place among the lanes and prior work
 
@@ -94,6 +115,15 @@ Prior work (reading state: R method sections read, A abstract only):
   b. The latter name the failure without functions constant along b in the
   discrete space locking (citing Babuška and Suri 1992), the counterpart of
   section 1.
+- Cianciosa, Hirshman, Seal and Shafer, Plasma Phys. Control. Fusion 60,
+  044017 (2018) [R]: V3FIT with VMEC + SIESTA reconstructs DIII-D 154921
+  with islands from 377 signals. The island size is the amplitude of an
+  artificial helical seed perturbation (with artificial resistivity) fitted
+  to the data, the phase follows from fitted n = 1 coil currents, the
+  Jacobian is finite differences, and stellarator island divertors are named
+  out of reach. In (2) the island size is the island toroidal flux, a
+  physical invariant, the nested solution is its zero limit, and Newton gives
+  the derivatives (section 4a).
 - MRX (arXiv:2510.26986, cited in [equilibrium-nonnested.md](equilibrium-nonnested.md)):
   FEEC relaxation in physical space with δB = ∇×(v×B), no label.
 
@@ -135,16 +165,45 @@ Pointwise evaluation of f(χ_h) needs a quadrature that resolves the profile
 splines. Use profiles one degree smoother than V0 and check the quadrature
 error per gate.
 
+## 4a. Regions, islands and the island size
+
+With several O-lines, A = g∇χ + Σ_j F_j^r(χ) h_j + G^r(χ)∇φ in region r
+(each lobe or island, the region between separatrix and wall):
+
+- in region r, F_j^r is constant for every O-line j that the surfaces of r
+  do not enclose (h_j is closed there, so it adds no B), and F_j^r(χ_s) is
+  continuous across the separatrix, so A is continuous,
+- outside a doublet's separatrix the split of the toroidal flux between h_1
+  and h_2 is a gauge choice absorbed by g; up-down symmetry fixes it,
+- region membership of a point is topological (the side of the
+  separatrix), not a value of χ: inside an island χ takes values of the
+  outer region,
+- at an elliptic O-point θ_j is the angle in the frame where the Hessian of
+  χ_h is isotropic, θ_j = atan2 of H^(1/2)(x − X_j). The circular angle
+  leaves θ* − θ = O(1) at the axis, so g is discontinuous there (E2a).
+
+Ideal MHD conserves the flux of each region, so the island size is an input:
+the island toroidal flux ΔΦ_I = −2π F_I(χ_s), with the label inside the island
+the normalised island flux. It is prescribed (from data or from a resistive
+or two-fluid response), zero (ideal response: no island, a shielding current
+sheet at the rational surface), or fixed by ∂W/∂ΔΦ_I = 0 at fixed helicity
+(one scalar equation per chain). ΔΦ_I → 0 joins the nested solution, and the
+Newton factorisation gives the derivatives with respect to ΔΦ_I, the
+profiles and the boundary: island width and O-line phase become parameters
+of a reconstruction from measured profiles and magnetics.
+
 ## 5. Gates (each runs in seconds)
 
 | Gate | Case | Pass criterion |
 |---|---|---|
 | E0 | G2a geometry, fixed χ_h, nonlinear label, unknowns g and profiles | B at the interpolation error, no locking at any mesh |
 | E1 | G2: Solov'ev, χ, g, profiles and axis unknown, both labels | B and χ at order p, quadratic Newton, profile error at the 1D spline error |
+| E2a | doublet with fixed labels, g fitted | order p in the lobes and outside, the separatrix band measured |
 | E2 | Solov'ev doublet (two magnetic axes, one separatrix) | as E1, both axes found, separatrix flux to the interpolation error |
 | E3 | E1 through the 3D complex (M ≥ 2, n = 0 solution) | identical to E1 |
+| E3b | E3 with one axis point per toroidal plane, non-axisymmetric start | identical to E3, axis curve a circle |
 | E4 | low-β stellarator, fixed boundary | VMEC++ and GVEC within their convergence |
-| E5 | tokamak with a resonant boundary perturbation, island chain | island width against a published SPEC or HINT case |
+| E5 | tokamak with a resonant boundary perturbation, island chain, ΔΦ_I as input | continuous to the nested solution at ΔΦ_I → 0, derivatives against finite differences, minimum-energy width against a published SPEC or HINT case |
 | E6 | free boundary: plasma (2) coupled to V1 vacuum and the wall operator | the 2D spline free-boundary results, then Landreman–Paul QA (L5) |
 
 E0 and E1 also run the multiplier formulation with the same enrichment of A
@@ -201,6 +260,41 @@ solutions of Cerfon and Freidberg, Phys. Plasmas 17, 032502 (2010), each
 checked numerically): magnetic axes at (1, ±0.170), X-point at (1, 0), wall
 level ψ_X + 9.3e-4 closed within 0.27 of the X-point.
 
+E3 and E3b (3D leaf `clebsch_energy_3d`, nt = 3 planes):
+
+- E3 reproduces E1 (B error 2.148e-2, 4.443e-3, 9.251e-4 at 2, 4, 8 cells),
+  labels axisymmetric to 1e-11.
+- E3b gives each plane its own axis X_k. The section map is s(ξ, t) =
+  Σ_k L_k(t) s_k(ξ) with V0 node values s_k, the core following X_k, so the
+  axis conditions stay linear in χ. Exact checks: W of g = R, χ = Z is
+  independent of the axis curve to 3e-15, and of a section translated with φ
+  to 1e-14.
+- From labels differing by ±50 % of a 5 % perturbation between planes and
+  axes offset by 2e-3, Newton reaches the E3 errors in 9 (2 cells) and 8
+  (4 cells) steps with a non-monotone line search; the planes agree to
+  1e-11. Axis offsets of 1e-2 leave the basin.
+- A piecewise-cubic profile table (F' jumping between pieces) leaves a
+  Jacobian mismatch of 1e-5 and costs quadratic convergence. A Chebyshev
+  series fixes it (mismatch 1e-9).
+- A wall translated helically by 0.1(cos φ, sin φ), Solov'ev profiles: Newton
+  converges in 6 steps (2 cells), the axis follows with ±5.7e-3 in Z. No
+  reference yet (E4).
+
+E2a (doublet, fixed χ_h, exact profiles per region from level-curve tracing,
+relative L2 error of B_φ, degree 2, O-grid centred at X):
+
+| cells per block side | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|
+| total | 2.20e-1 | 1.53e-1 | 1.11e-1 | 8.47e-2 |
+| lobes (χ < 0.3) | 7.70e-2 | 2.94e-2 | 8.71e-3 | 2.30e-3 |
+| outside (1.7 < χ < 1.95) | 6.10e-2 | 2.47e-2 | 5.27e-3 | 1.25e-3 |
+| lobes, circular winding angle | | | 2.96e-2 | 1.79e-2 |
+
+The total converges at about h^(1/2) (rates 0.52, 0.47, 0.39) from the band
+at the separatrix, where g jumps. Remedy: a mesh with the separatrix as block
+edges and the X-point as a vertex, V0 discontinuous across it and graded
+towards it, moving with χ (requested from FortFEM).
+
 ## 6. Order of work
 
 1. Literature: done, section 3. Repeat the enrichment search with a
@@ -209,7 +303,8 @@ level ψ_X + 9.3e-4 closed within 0.27 of the X-point.
    second derivatives in (χ, g, profile coefficients), with identities.
 3. E0, E1 in axisymmetry (done, `test_eulerian_clebsch_fit`,
    `test_eulerian_clebsch_newton`).
-4. O-line handling for several axes, E2.
+4. O-line handling for several axes: E2a done, E2 on a separatrix-aligned
+   mesh.
 5. 3D: h_θ about an axis curve, θ_X = atan2(Z − Z_X(φ), R − R_X(φ)) per
    toroidal angle, closed away from X. E3, then E4.
 6. Islands and rational surfaces, E5. Open whether Newton from nested
@@ -221,6 +316,11 @@ level ψ_X + 9.3e-4 closed within 0.27 of the X-point.
 ## 7. Open
 
 - Stochastic regions have no label. Candidate: regions with p' = 0, where the
-  plasma part of (5) has no constraint, as in SPEC's relaxed regions.
+  plasma part of (5) has no constraint, as in SPEC's relaxed regions, with
+  A ∈ V1 there, matched to (2) by the tangential trace on good surfaces.
+  Check of a label solution: relax with A free from it and trace field
+  lines; where layers widen, the region must become unlabelled.
+- Globalisation: the Newton basin for the axis is about 2e-3 of the minor
+  radius; continuation in β, boundary and ΔΦ_I.
 - Inf–sup of the δχ equation near O-points and saddles, where ∇χ = 0.
 - Uniqueness of the representation (2) with several O-lines in one region.
