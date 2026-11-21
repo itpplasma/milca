@@ -126,6 +126,17 @@ classes (toroidal, poloidal), and their fluxes are the two numbers of the wall.
 | G3 | 3D low-β stellarator with fixed boundary | VMEC++ and GVEC | E4 observables |
 | L5 | Landreman–Paul QA, free boundary | VMEC++ | as in the plan |
 
+G1 result (direct solve, tree gauge grown from the wall nodes, n×A of the
+exact field on Γ_c, A = (−B0 R0 ln R + 2ε x y) e_z, R0 = 3, a = 1, ε = 0.1,
+M = 2):
+
+| degree | cells per block side | rel. L2 error of B, Galerkin | interpolant | rate |
+|---|---|---|---|---|
+| 2 | 2 / 4 / 8 | 1.39e-2 / 3.38e-3 / 8.16e-4 | 1.40e-2 / 3.39e-3 / 8.16e-4 | 2.04, 2.05 |
+| 3 | 2 / 4 / 8 | 3.12e-3 / 3.55e-4 / 4.33e-5 | 3.15e-3 / 3.78e-4 / 4.48e-5 | 3.14, 3.03 |
+
+The AMS part of G1 waits for the fortsparse preconditioner.
+
 ## 9. Open
 
 - The size of the inf–sup degradation for smooth p on a QA case, and which

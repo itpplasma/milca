@@ -342,8 +342,8 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # Steklov form #144, exact FEEC tables, split stretched BEM fans #145,
 # second-kind Nedelec edges #148, exact moment gradients #149 and the
 # boundary trace projection #152, the toroidal period #154 and its tensor
-# forms #160, factored anisotropic apply).
-set(MILCA_FORTFEM_REVISION "82f11964523a8dc3de97eb76490326a8c6fbc6d1")
+# forms #160, factored anisotropic apply, the spline de Rham complex #254).
+set(MILCA_FORTFEM_REVISION "1db630c0a0da80d0b6bd03414c2886bf8b1d9b65")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -389,7 +389,9 @@ add_library(milca_spatial ${MILCA_TRIANGLE_SOURCES}
     ${fortfem_SOURCE_DIR}/src/discretisation/spline_eval.f90
     ${fortfem_SOURCE_DIR}/src/discretisation/spline_energy.f90
     ${fortfem_SOURCE_DIR}/src/discretisation/spline_xpoint.f90
-    ${fortfem_SOURCE_DIR}/src/discretisation/spline_thb.f90)
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_thb.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/curve_chart.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_derham.f90)
 target_link_libraries(milca_spatial PUBLIC milca_ode milca_intervals milca_field)
 # Field layer: what a client needs to evaluate a MILCA field at physical points
 # (charts, triangle bases, free-boundary shell kernels). FortNum only.
@@ -508,7 +510,8 @@ message(STATUS "MILCA sparse direct backend: native FortSparse CPU")
 target_sources(milca_equilibrium PRIVATE src/equilibrium/gs_coils.f90 src/equilibrium/gs_coupling.f90
     src/equilibrium/gs_free_boundary.f90 src/equilibrium/gs_coil_inverse.f90
     src/equilibrium/gs_free_current.f90 src/equilibrium/gs_spline.f90
-    src/equilibrium/gs_spline_current.f90)
+    src/equilibrium/gs_spline_current.f90
+    src/equilibrium/eulerian_vacuum.f90)
 target_sources(milca_equilibrium PRIVATE src/equilibrium/equilibrium_harness.f90)
 add_executable(test_equilibrium_harness test/test_equilibrium_harness.f90)
 target_link_libraries(test_equilibrium_harness PRIVATE milca)
@@ -866,6 +869,9 @@ add_test(NAME gs_spline_solovev_rate COMMAND test_gs_spline)
 add_executable(test_gs_spline_free test/test_gs_spline_free.f90)
 target_link_libraries(test_gs_spline_free PRIVATE milca)
 add_test(NAME gs_spline_free_boundary_coupling COMMAND test_gs_spline_free)
+add_executable(test_vacuum_torus_3d test/test_vacuum_torus_3d.f90)
+target_link_libraries(test_vacuum_torus_3d PRIVATE milca)
+add_test(NAME vacuum_torus_3d_gate_g1 COMMAND test_vacuum_torus_3d)
 add_executable(test_gs_fb_manufactured test/test_gs_fb_manufactured.f90)
 target_link_libraries(test_gs_fb_manufactured PRIVATE milca_gs_fb_test)
 add_library(milca_gs_ci_test STATIC test/support/gs_ci_fixture.f90)
