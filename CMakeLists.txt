@@ -1170,8 +1170,12 @@ add_test(NAME surface_phi1_axisymmetric COMMAND test_surface_phi1 axisymmetric)
 add_test(NAME surface_phi1_continuity COMMAND test_surface_phi1 continuity)
 add_test(NAME surface_phi1_sfincs COMMAND test_surface_phi1 sfincs
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data/surface_phi1_sfincs.txt)
-foreach(check closure axisymmetric continuity sfincs)
+foreach(check closure axisymmetric)
     milca_test_labels(surface_phi1_${check} fast CLASSES continuum
+        TARGETS test_surface_phi1)
+endforeach()
+foreach(check continuity sfincs)
+    milca_test_labels(surface_phi1_${check} slow CLASSES continuum
         TARGETS test_surface_phi1)
 endforeach()
 add_executable(test_surface_fluxes test/test_surface_fluxes.f90)
@@ -2032,10 +2036,10 @@ add_executable(test_dk_surface_device test/test_dk_surface_device.f90)
 target_link_libraries(test_dk_surface_device PRIVATE milca_ntv_geometry)
 add_test(NAME dk_surface_device_sfincs COMMAND test_dk_surface_device sfincs
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_sfincs.txt)
-milca_test_labels(dk_surface_device_sfincs fast CLASSES apps TARGETS test_dk_surface_device)
+milca_test_labels(dk_surface_device_sfincs slow CLASSES apps TARGETS test_dk_surface_device)
 add_test(NAME dk_surface_device_sfincs_phi1 COMMAND test_dk_surface_device sfincs_phi1
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_ephi1_sfincs.txt)
-milca_test_labels(dk_surface_device_sfincs_phi1 fast CLASSES apps
+milca_test_labels(dk_surface_device_sfincs_phi1 slow CLASSES apps
     TARGETS test_dk_surface_device)
 foreach(check geometry helical)
     add_test(NAME dk_surface_device_${check} COMMAND test_dk_surface_device ${check})
