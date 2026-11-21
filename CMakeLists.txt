@@ -342,8 +342,10 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # Steklov form #144, exact FEEC tables, split stretched BEM fans #145,
 # second-kind Nedelec edges #148, exact moment gradients #149 and the
 # boundary trace projection #152, the toroidal period #154 and its tensor
-# forms #160, factored anisotropic apply, the spline de Rham complex #254).
-set(MILCA_FORTFEM_REVISION "1db630c0a0da80d0b6bd03414c2886bf8b1d9b65")
+# forms #160, factored anisotropic apply, the spline de Rham complex #254
+# with rooted trees #255, parametric mass matrices #256, the tree for one
+# t-node #259 and PCG projections #261).
+set(MILCA_FORTFEM_REVISION "09ecdc4661ed05ba6d2b77c43175b8cd346f5d25")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -391,6 +393,7 @@ add_library(milca_spatial ${MILCA_TRIANGLE_SOURCES}
     ${fortfem_SOURCE_DIR}/src/discretisation/spline_xpoint.f90
     ${fortfem_SOURCE_DIR}/src/discretisation/spline_thb.f90
     ${fortfem_SOURCE_DIR}/src/discretisation/curve_chart.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_toroidal.f90
     ${fortfem_SOURCE_DIR}/src/discretisation/spline_derham.f90)
 target_link_libraries(milca_spatial PUBLIC milca_ode milca_intervals milca_field)
 # Field layer: what a client needs to evaluate a MILCA field at physical points
@@ -475,7 +478,7 @@ if(MILCA_ENABLE_CUDA_GS_SOLVE)
     enable_language(CUDA)
     set(FORTSPARSE_ENABLE_NATIVE_CUDA ON CACHE BOOL "" FORCE)
 endif()
-set(MILCA_FORTSPARSE_REVISION "161faedc1cfa72c95a9073b9b3a4692ccad901f8")
+set(MILCA_FORTSPARSE_REVISION "115c195a538016040b84a5384c8b8f6a41ce130c")
 set(FORTSPARSE_ENABLE_SUPERLU OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_UMFPACK_IPC OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_MUMPS OFF CACHE BOOL "" FORCE)
@@ -501,6 +504,8 @@ endif()
 add_library(milca_sparse_direct
     ${fortfem_SOURCE_DIR}/src/topology/tree_cotree_gauge.f90
     ${fortfem_SOURCE_DIR}/src/solvers/fortfem_sparse_direct.f90)
+# FortFEM's spline THB and projections solve with the fortsparse PCG.
+target_link_libraries(milca_spatial PUBLIC fortsparse)
 target_link_libraries(milca_sparse_direct PUBLIC milca_spatial fortsparse)
 target_link_libraries(milca_fem2d PUBLIC milca_sparse_direct)
 # The local-theta NTV kernel factors its (theta, l) system with FortSparse.
@@ -872,8 +877,10 @@ add_test(NAME gs_spline_free_boundary_coupling COMMAND test_gs_spline_free)
 add_executable(test_vacuum_torus_3d test/test_vacuum_torus_3d.f90)
 target_link_libraries(test_vacuum_torus_3d PRIVATE milca)
 add_test(NAME vacuum_torus_3d_gate_g1 COMMAND test_vacuum_torus_3d)
+add_library(milca_eulerian_test STATIC test/eulerian_solovev_fields.f90)
+target_link_libraries(milca_eulerian_test PUBLIC milca)
 add_executable(test_eulerian_solovev_labels test/test_eulerian_solovev_labels.f90)
-target_link_libraries(test_eulerian_solovev_labels PRIVATE milca)
+target_link_libraries(test_eulerian_solovev_labels PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_solovev_labels_gate_g2a COMMAND test_eulerian_solovev_labels)
 add_test(NAME eulerian_solovev_nonlinear_labels_gate_g2a
     COMMAND test_eulerian_solovev_labels nonlinear)

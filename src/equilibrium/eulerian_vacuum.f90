@@ -1,20 +1,21 @@
 module milca_eulerian_vacuum
     !! Vector-potential vacuum fields on FortFEM's spline de Rham complex
-    !! (docs/eulerian-3d.md, gate G1): curl-curl operator K = C^T M2 C,
-    !! the tree gauge relative to a Dirichlet boundary and the direct solve
-    !! of K a = 0 with n x A given on the boundary.
+    !! (docs/eulerian-3d.md, gate G1): curl-curl operator K = C^T M2 C and
+    !! the direct solve of K a = rhs with fixed (Dirichlet and gauge) dofs.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_element_to_csr, only: csr_matrix_t
     use fortfem_spline_eval, only: spline_quadrature_t
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_mass, derham_metric
     use fortfem_sparse_direct, only: sparse_direct_factor_t, sparse_direct_factor_csc, &
         sparse_direct_solve_factored, sparse_direct_free
-    use fortsparse_csr, only: csr_t, csr_transpose, csr_multiply, csr_budget_t
+    use fortsparse_csr, only: csr_t, csr_transpose, csr_multiply, csr_budget_t, csr_matvec
     use fortsparse_status, only: fortsparse_status_t
+    use fortsparse_pcg, only: pcg_params_t, pcg_handle_t, pcg_setup_ams, pcg_solve, &
+        pcg_destroy, PCG_AMS
     implicit none
     private
 
-    public :: eu_curl_curl, eu_boundary_tree, eu_constrained_solve, eu_to_csr
+    public :: eu_curl_curl, eu_constrained_solve, eu_to_csr, eu_ams_solve
 
 contains
 
@@ -53,50 +54,6 @@ contains
         if (info%code == 0) call csr_multiply(ct, mc, k, budget, info)
         status = info%code
     end subroutine eu_curl_curl
-
-    subroutine eu_boundary_tree(derham, boundary_nodes, tree_edges)
-        !! Gauge edges for A with n x A fixed: a spanning forest of the grad
-        !! graph grown by breadth-first search from all boundary nodes at
-        !! once, so the boundary acts as one root. Its edges (one per
-        !! interior node) carry exactly the gauge A -> A + grad f, f = 0 on
-        !! the boundary.
-        type(spline_derham_t), intent(in) :: derham
-        integer, intent(in) :: boundary_nodes(:)
-        integer, allocatable, intent(out) :: tree_edges(:)
-        type(csr_t) :: g, gt
-        type(csr_budget_t) :: budget
-        type(fortsparse_status_t) :: info
-        logical, allocatable :: seen(:)
-        integer, allocatable :: queue(:), parent(:)
-        integer :: head, tail, v, e, w, p, q, nv
-
-        call eu_to_csr(derham%grad, derham%dimension(0), g)
-        call csr_transpose(g, gt, budget, info)
-        nv = derham%dimension(0)
-        allocate (seen(nv), queue(nv), parent(nv))
-        seen = .false.
-        parent = 0
-        seen(boundary_nodes) = .true.
-        tail = size(boundary_nodes)
-        queue(1:tail) = boundary_nodes
-        head = 0
-        do while (head < tail)
-            head = head + 1
-            v = queue(head)
-            do p = gt%row_ptr(v), gt%row_ptr(v + 1) - 1
-                e = gt%col(p)
-                do q = g%row_ptr(e), g%row_ptr(e + 1) - 1
-                    w = g%col(q)
-                    if (seen(w) .or. g%val(q) == 0) cycle
-                    seen(w) = .true.
-                    parent(w) = e
-                    tail = tail + 1
-                    queue(tail) = w
-                end do
-            end do
-        end do
-        tree_edges = pack(parent, parent > 0)
-    end subroutine eu_boundary_tree
 
     subroutine eu_constrained_solve(k, rhs, fixed, values, a, status)
         !! Solves K a = rhs on the free rows with a(fixed) = values, by a
@@ -147,5 +104,101 @@ contains
         call sparse_direct_free(factor)
         if (status == 0) a(free) = x
     end subroutine eu_constrained_solve
+
+    subroutine eu_ams_solve(k, grad, interpolation, n0, fixed, values, fixed_nodes, a, &
+                            rtol, iterations, status)
+        !! Ungauged solve of K a = 0 with a(fixed) = values by PCG with the AMS
+        !! preconditioner on the free edges. Gradients of functions that
+        !! vanish on fixed_nodes are the kernel of the free block, and the
+        !! right-hand side -K_fd a_d is orthogonal to them, so PCG converges in
+        !! range(K). grad is n1 x n0 and interpolation n1 x 3 n0.
+        type(csr_t), intent(in) :: k
+        type(csr_matrix_t), intent(in) :: grad, interpolation
+        integer, intent(in) :: n0, fixed(:), fixed_nodes(:)
+        real(dp), intent(in) :: values(:), rtol
+        real(dp), intent(out) :: a(:)
+        integer, intent(out) :: iterations, status
+        type(csr_t) :: kf, gf, pf, g, p
+        type(pcg_params_t) :: params
+        type(pcg_handle_t) :: handle
+        type(fortsparse_status_t) :: info
+        integer, allocatable :: row_map(:), node_map(:), pi_map(:)
+        real(dp), allocatable :: rhs(:), x(:), kd(:)
+        integer :: n1, i, d, nf, ni
+
+        n1 = k%nrow
+        allocate (row_map(n1), node_map(n0))
+        row_map = 1
+        row_map(fixed) = 0
+        nf = 0
+        do i = 1, n1
+            if (row_map(i) > 0) then
+                nf = nf + 1
+                row_map(i) = nf
+            end if
+        end do
+        node_map = 1
+        node_map(fixed_nodes) = 0
+        ni = 0
+        do i = 1, n0
+            if (node_map(i) > 0) then
+                ni = ni + 1
+                node_map(i) = ni
+            end if
+        end do
+        allocate (pi_map(3*n0))
+        do d = 1, 3
+            pi_map((d - 1)*n0 + 1:d*n0) = merge(node_map + (d - 1)*ni, 0, node_map > 0)
+        end do
+        call submatrix(k, row_map, row_map, nf, kf)
+        call eu_to_csr(grad, n0, g)
+        call submatrix(g, row_map, node_map, ni, gf)
+        call eu_to_csr(interpolation, 3*n0, p)
+        call submatrix(p, row_map, pi_map, 3*ni, pf)
+        a = 0
+        a(fixed) = values
+        allocate (kd(n1), rhs(nf), x(nf))
+        call csr_matvec(k, a, kd)
+        rhs = -pack(kd, row_map > 0)
+        params%preconditioner = PCG_AMS
+        params%rtol = rtol
+        call pcg_setup_ams(kf, gf, pf, params, handle, info)
+        status = info%code
+        if (status /= 0) return
+        x = 0
+        call pcg_solve(handle, params, rhs, x, info, iterations)
+        status = info%code
+        call pcg_destroy(handle)
+        do i = 1, n1
+            if (row_map(i) > 0) a(i) = x(row_map(i))
+        end do
+    end subroutine eu_ams_solve
+
+    subroutine submatrix(a, row_map, col_map, ncol, b)
+        !! Rows and columns with a positive map entry, renumbered by it.
+        type(csr_t), intent(in) :: a
+        integer, intent(in) :: row_map(:), col_map(:), ncol
+        type(csr_t), intent(out) :: b
+        integer :: i, p, nz, nr
+
+        nr = count(row_map > 0)
+        b%nrow = nr
+        b%ncol = ncol
+        allocate (b%row_ptr(nr + 1), b%col(size(a%val)), b%val(size(a%val)))
+        b%row_ptr(1) = 1
+        nz = 0
+        do i = 1, a%nrow
+            if (row_map(i) == 0) cycle
+            do p = a%row_ptr(i), a%row_ptr(i + 1) - 1
+                if (col_map(a%col(p)) == 0) cycle
+                nz = nz + 1
+                b%col(nz) = col_map(a%col(p))
+                b%val(nz) = a%val(p)
+            end do
+            b%row_ptr(row_map(i) + 1) = nz + 1
+        end do
+        b%col = b%col(:nz)
+        b%val = b%val(:nz)
+    end subroutine submatrix
 
 end module milca_eulerian_vacuum

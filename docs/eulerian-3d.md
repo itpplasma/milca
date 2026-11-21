@@ -188,7 +188,11 @@ M = 2):
 | 2 | 2 / 4 / 8 | 1.39e-2 / 3.38e-3 / 8.16e-4 | 1.40e-2 / 3.39e-3 / 8.16e-4 | 2.04, 2.05 |
 | 3 | 2 / 4 / 8 | 3.12e-3 / 3.55e-4 / 4.33e-5 | 3.15e-3 / 3.78e-4 / 4.48e-5 | 3.14, 3.03 |
 
-The AMS part of G1 waits for the fortsparse preconditioner.
+Ungauged solve of the same problem by PCG with AMS (fortsparse, free
+edges and interior nodes, Π truncated at 1e-4, relative residual 1e-10):
+18, 26 and 40 iterations at 2, 4 and 8 cells (degree 2), with the field of
+the gauged direct solve. The count is not yet independent of the mesh. The
+G1 criterion stays open until it is.
 
 G2a result (ψ = α(R² − R0²)² + βR²Z², α = 1/4, β = 1, R0 = 3, wall
 ψ = 6.25, μ0 = 1, F = 3, A and χ of degree 2, λ̃ and ν of degree 1, no
