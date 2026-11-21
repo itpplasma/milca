@@ -10,7 +10,7 @@ module milca_frozen_map_spline
     use fortfem_spline_layout, only: block_layout_t, layout_ogrid, LAYOUT_BOUNDARY
     use fortfem_spline_space, only: spline_space_t, spline_space_options_t, &
         spline_space_build, spline_boundary_dofs, SPLINE_C0
-    use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build
+    use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build, spline_evaluate
     use fortfem_spline_energy, only: pointwise_energy_t, spline_energy, &
         spline_energy_hessian_csr, SPLINE_HESSIAN_DENSE
     use fortfem_element_to_csr, only: csr_matrix_t
@@ -59,6 +59,8 @@ module milca_frozen_map_spline
     type :: frozen_spline_map_t
         type(spline_space_t) :: space
         type(spline_quadrature_t) :: quad
+        ! denser points for the fold guard between the energy quadrature points
+        type(spline_quadrature_t) :: check
         type(frozen_spline_kernel_t) :: kernel
         real(dp), allocatable :: coef(:, :) ! (NF, dof)
         logical, allocatable :: fixed(:) ! (NF*dof)
@@ -97,6 +99,8 @@ contains
         call spline_space_build(layout, options, m%space, k)
         if (k /= 0) return
         call spline_quadrature_build(m%space, degree + 1, m%quad, k)
+        if (k /= 0) return
+        call spline_quadrature_build(m%space, 2*degree + 2, m%check, k)
         if (k /= 0) return
         n = m%quad%point_count
         allocate (m%kernel%b0(3, n), m%kernel%dchi(2, n), m%kernel%p(n), target(2, n))
@@ -421,6 +425,19 @@ contains
         end do
     end subroutine
 
+    logical function frozen_spline_folded(m) result(folded)
+        ! sigma det d(q1, q2)/d(s1, s2) > 0 and R > 0 on the dense check points
+        type(frozen_spline_map_t), intent(in) :: m
+        real(dp), allocatable :: jet(:, :), det(:)
+        integer :: st
+        allocate (jet(3*NF, m%check%point_count))
+        call spline_evaluate(m%space, m%check, m%coef, 1, jet, st)
+        folded = st /= 0
+        if (folded) return
+        det = jet(4, :)*jet(8, :) - jet(7, :)*jet(5, :)
+        folded = any(.not. det*sign(1.0_dp, det(1)) > 0) .or. any(.not. jet(1, :) > 0)
+    end function
+
     subroutine frozen_spline_energy(m, energy, status, gradient)
         ! energy per field period; gradient flattened as coef(field, dof)
         type(frozen_spline_map_t), intent(in) :: m
@@ -490,6 +507,9 @@ contains
                 alpha = 1
                 m%coef = c0 + alpha*reshape(du, shape(c0))
                 call frozen_spline_energy(m, e1, st)
+                if (st == 0) then
+                    if (frozen_spline_folded(m)) st = FROZEN_SPLINE_FOLDED
+                end if
                 if (st == 0 .and. e1 <= e0 + 1.0e-4_dp*alpha*dot_product(g, du)) exit
                 m%coef = c0
                 mu = max(4*mu, 1.0e-8_dp)
