@@ -106,6 +106,11 @@ module milca_gs_free_boundary
         integer :: axis_sign = 1 !< +1: the axis is the flux maximum, -1 minimum
         real(dp) :: axis_guess(2) = 0.0_dp !< first guess of the magnetic axis
         real(dp) :: xpoint_guess(2) = 0.0_dp !< first guess of the X point
+        !> Double null: with two_xpoints the saddles near xpoint_guess and
+        !> xpoint_guess2 (fixed hints) are both found and the bounding one,
+        !> the larger axis_sign*psi, sets psi_b.
+        real(dp) :: xpoint_guess2(2) = 0.0_dp
+        logical :: two_xpoints = .false.
         real(dp) :: search_radius = 0.5_dp !< window of the stationary-point search
         real(dp) :: cut_fraction = 1.0_dp !< psi_b = psi_a + c (psi_X - psi_a)
         real(dp), allocatable :: points(:, :) !< limiter / target points (2, m)
@@ -211,7 +216,7 @@ module milca_gs_free_boundary
     public :: gs_fb_factor, gs_fb_solve, gs_fb_solve_block, gs_fb_release, gs_fb_newton
     public :: gs_fb_law_tangent
     public :: gs_fb_interface_mass, gs_fb_lcfs_levels
-    public :: gs_fb_locate
+    public :: gs_fb_locate, gs_fb_surface_integrals
 
 contains
 
@@ -605,9 +610,10 @@ contains
         real(dp) :: local_shape(10), local_psi
         real(dp), parameter :: tolerance(2) = [1.0e-12_dp, 0.1_dp]
         integer :: local_cell, pass
-        real(dp), allocatable :: shape_x(:)
-        integer :: e, ndof, n, k, cell_best, stat, c, element
-        logical :: found, any_found, near
+        real(dp), allocatable :: shape_x(:), shape_b(:)
+        real(dp) :: hint(2), xpoint_b(2), psi_b_x
+        integer :: e, ndof, n, k, cell_best, stat, c, element, nh, ih, element_b
+        logical :: found, any_found, near, chosen
 
         status = GS_FB_NO_AXIS
         ndof = size(state%triangles, 1)
@@ -668,61 +674,84 @@ contains
         select case (cfg%mode)
         case (GS_FB_XPOINT)
             status = GS_FB_NO_XPOINT
-            best_dist = huge(1.0_dp)
-            any_found = .false.
-            element = 0
-            allocate (shape_x(ndof))
-            ! A refitted mesh puts the X-point of the previous pass on a vertex, where
-            ! the saddle of each adjacent cell polynomial can fall just outside its
-            ! cell; the second pass accepts such a saddle on the nearest cell edge.
-            do pass = 1, 2
-                !$omp parallel default(shared) private(e, k, near, values, xi, found, &
-                !$omp& shape, point, stat, dist, local_dist, local_cell, local_point, &
-                !$omp& local_shape, local_psi)
-                local_dist = huge(1.0_dp)
-                local_cell = 0
-                local_point = 0.0_dp
-                local_shape = 0.0_dp
-                local_psi = 0.0_dp
-                !$omp do schedule(static)
-                do e = 1, size(state%triangles, 2)
-                    near = .false.
-                    do k = 1, ndof
-                        if (norm2(state%points(:, state%triangles(k, e)) - xpoint_hint) &
-                            <= cfg%search_radius) near = .true.
+            allocate (shape_x(ndof), shape_b(ndof))
+            nh = merge(2, 1, cfg%two_xpoints)
+            chosen = .false.
+            do ih = 1, nh
+                hint = xpoint_hint
+                if (nh == 2) hint = merge(cfg%xpoint_guess, cfg%xpoint_guess2, ih == 1)
+                best_dist = huge(1.0_dp)
+                any_found = .false.
+                element = 0
+                ! A refitted mesh puts the X-point of the previous pass on a vertex, where
+                ! the saddle of each adjacent cell polynomial can fall just outside its
+                ! cell; the second pass accepts such a saddle on the nearest cell edge.
+                do pass = 1, 2
+                    !$omp parallel default(shared) private(e, k, near, values, xi, found, &
+                    !$omp& shape, point, stat, dist, local_dist, local_cell, local_point, &
+                    !$omp& local_shape, local_psi)
+                    local_dist = huge(1.0_dp)
+                    local_cell = 0
+                    local_point = 0.0_dp
+                    local_shape = 0.0_dp
+                    local_psi = 0.0_dp
+                    !$omp do schedule(static)
+                    do e = 1, size(state%triangles, 2)
+                        near = .false.
+                        do k = 1, ndof
+                            if (norm2(state%points(:, state%triangles(k, e)) - hint) &
+                                <= cfg%search_radius) near = .true.
+                        end do
+                        if (.not. near) cycle
+                        values(:ndof) = psi(state%triangles(:, e))
+                        call cell_saddle(values(:ndof), xi, found, tolerance(pass))
+                        if (.not. found) cycle
+                        call point_shape(state, e, xi, shape, point, stat)
+                        if (stat /= 0) cycle
+                        dist = norm2(point - hint)
+                        if (dist < local_dist) then
+                            local_dist = dist
+                            local_cell = e
+                            local_point = point
+                            local_shape(:ndof) = shape(:ndof)
+                            local_psi = dot_product(shape(:ndof), values(:ndof))
+                        end if
                     end do
-                    if (.not. near) cycle
-                    values(:ndof) = psi(state%triangles(:, e))
-                    call cell_saddle(values(:ndof), xi, found, tolerance(pass))
-                    if (.not. found) cycle
-                    call point_shape(state, e, xi, shape, point, stat)
-                    if (stat /= 0) cycle
-                    dist = norm2(point - xpoint_hint)
-                    if (dist < local_dist) then
-                        local_dist = dist
-                        local_cell = e
-                        local_point = point
-                        local_shape(:ndof) = shape(:ndof)
-                        local_psi = dot_product(shape(:ndof), values(:ndof))
+                    !$omp end do nowait
+                    !$omp critical(gs_fb_saddle_scan)
+                    if (local_cell /= 0) then
+                        if (local_dist < best_dist .or. &
+                            (local_dist <= best_dist .and. local_cell < element)) then
+                            best_dist = local_dist
+                            any_found = .true.
+                            element = local_cell
+                            xpoint = local_point
+                            shape_x = local_shape(:ndof)
+                            psi_x = local_psi
+                        end if
                     end if
+                    !$omp end critical(gs_fb_saddle_scan)
+                    !$omp end parallel
+                    if (any_found) exit
                 end do
-                !$omp end do nowait
-                !$omp critical(gs_fb_saddle_scan)
-                if (local_cell /= 0) then
-                    if (local_dist < best_dist .or. &
-                        (local_dist <= best_dist .and. local_cell < element)) then
-                        best_dist = local_dist
-                        any_found = .true.
-                        element = local_cell
-                        xpoint = local_point
-                        shape_x = local_shape(:ndof)
-                        psi_x = local_psi
+                if (any_found) then
+                    if (.not. chosen .or. real(cfg%axis_sign, dp)*psi_x > &
+                        real(cfg%axis_sign, dp)*psi_b_x) then
+                        chosen = .true.
+                        element_b = element
+                        xpoint_b = xpoint
+                        shape_b = shape_x
+                        psi_b_x = psi_x
                     end if
                 end if
-                !$omp end critical(gs_fb_saddle_scan)
-                !$omp end parallel
-                if (any_found) exit
             end do
+            any_found = chosen
+            if (chosen) then
+                element = element_b
+                xpoint = xpoint_b
+                shape_x = shape_b
+                psi_x = psi_b_x
+            end if
             if (.not. any_found) return
             level = cfg%cut_fraction
             psi_bound = psi_axis + level*(psi_x - psi_axis)
@@ -2445,6 +2474,65 @@ contains
         end if
         status = GS_FB_OK
     end subroutine gs_fb_trace_lcfs
+
+    subroutine gs_fb_surface_integrals(state, psi, axis, levels, sigma, n_points, &
+                                       a1, a2, status)
+        !! Contour integrals on the closed levels psi = levels(j) around the
+        !! axis: a1 = oint R dl/|grad psi| (dV/dpsi = 2 pi a1) and
+        !! a2 = oint dl/(R |grad psi|) (q = F a2/(2 pi)), by the trapezoidal
+        !! rule in the index of the n_points traced points (gs_fb_trace_lcfs,
+        !! nearly equal arc length). Levels must lie strictly inside the
+        !! bounding separatrix.
+        type(gs_state_t), intent(in) :: state
+        real(dp), intent(in) :: psi(:), axis(2), levels(:), sigma
+        integer, intent(in) :: n_points
+        real(dp), intent(out) :: a1(:), a2(:)
+        integer, intent(out) :: status
+        type(gs_fb_grid_t) :: grid
+        real(dp), allocatable :: chain(:, :), w1(:), w2(:)
+        real(dp) :: v, g(2), dl
+        integer :: j, k, stat
+        logical :: found
+
+        status = GS_FB_BAD_INPUT
+        if (size(a1) /= size(levels) .or. size(a2) /= size(levels)) return
+        if (n_points < 8) return
+        call build_grid(state, grid)
+        allocate (w1(n_points), w2(n_points))
+        do j = 1, size(levels)
+            call gs_fb_trace_lcfs(state, psi, axis, levels(j), sigma, n_points, chain, stat)
+            if (stat /= GS_FB_OK) then
+                status = GS_FB_BAD_LCFS
+                return
+            end if
+            do k = 1, n_points
+                call grid_flux(state, grid, psi, chain(1, k), chain(2, k), v, g, found)
+                if (.not. found .or. norm2(g) <= tiny(1.0_dp)) then
+                    status = GS_FB_BAD_LCFS
+                    return
+                end if
+                w1(k) = chain(1, k)/norm2(g)
+                w2(k) = 1.0_dp/(chain(1, k)*norm2(g))
+            end do
+            ! Trapezoidal rule in the point index with |dx/dk| from the
+            ! fourth-order periodic difference: spectrally accurate for a
+            ! smooth contour (chords would give O(n_points^-2)).
+            a1(j) = 0.0_dp
+            a2(j) = 0.0_dp
+            do k = 1, n_points
+                dl = norm2((8*(chain(:, wrap(k + 1)) - chain(:, wrap(k - 1))) &
+                    - (chain(:, wrap(k + 2)) - chain(:, wrap(k - 2))))/12)
+                a1(j) = a1(j) + dl*w1(k)
+                a2(j) = a2(j) + dl*w2(k)
+            end do
+        end do
+        status = GS_FB_OK
+    contains
+        pure integer function wrap(i)
+            integer, intent(in) :: i
+            wrap = modulo(i - 1, n_points) + 1
+        end function
+    end subroutine gs_fb_surface_integrals
 
     function chain_distance(state, psi, psi_bound, chain) result(distance)
         !! Largest first-order distance |psi - psi_b| / |grad psi| of the chain

@@ -497,7 +497,8 @@ target_link_libraries(milca_continuum PUBLIC fortsparse)
 target_sources(milca_fem2d PRIVATE src/fem2d/gs_direct.f90)
 message(STATUS "MILCA sparse direct backend: native FortSparse CPU")
 target_sources(milca_equilibrium PRIVATE src/equilibrium/gs_coils.f90 src/equilibrium/gs_coupling.f90
-    src/equilibrium/gs_free_boundary.f90 src/equilibrium/gs_coil_inverse.f90)
+    src/equilibrium/gs_free_boundary.f90 src/equilibrium/gs_coil_inverse.f90
+    src/equilibrium/gs_free_current.f90)
 target_sources(milca_equilibrium PRIVATE src/equilibrium/equilibrium_harness.f90)
 add_executable(test_equilibrium_harness test/test_equilibrium_harness.f90)
 target_link_libraries(test_equilibrium_harness PRIVATE milca)
@@ -846,6 +847,9 @@ set_tests_properties(gs_free_boundary_t7_jacobian_finite_differences PROPERTIES 
 add_executable(test_gs_fb_law_tangent test/test_gs_fb_law_tangent.f90)
 target_link_libraries(test_gs_fb_law_tangent PRIVATE milca_gs_fb_test)
 add_test(NAME gs_free_boundary_law_tangent_finite_differences COMMAND test_gs_fb_law_tangent)
+add_executable(test_gs_free_current test/test_gs_free_current.f90)
+target_link_libraries(test_gs_free_current PRIVATE milca)
+add_test(NAME gs_free_current_contour_integrals COMMAND test_gs_free_current)
 add_executable(test_gs_fb_manufactured test/test_gs_fb_manufactured.f90)
 target_link_libraries(test_gs_fb_manufactured PRIVATE milca_gs_fb_test)
 add_library(milca_gs_ci_test STATIC test/support/gs_ci_fixture.f90)
@@ -1036,6 +1040,9 @@ add_test(NAME grad_shafranov_phase1_inverse_app COMMAND ${CMAKE_COMMAND}
     -DAPP=$<TARGET_FILE:gs_phase1> -DDECK=$<TARGET_FILE:test_gs_prescribed_q_circle>
     -DWORK=${CMAKE_BINARY_DIR}/phase1_inverse_app
     -P ${CMAKE_SOURCE_DIR}/test/gs_phase1_inverse.cmake)
+add_test(NAME grad_shafranov_phase1_edge_readback_app COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:gs_phase1> -DWORK=${CMAKE_BINARY_DIR}/phase1_edge_readback_app
+    -P ${CMAKE_SOURCE_DIR}/test/gs_phase1_edge_readback.cmake)
 add_test(NAME grad_shafranov_phase1_inverse_pressure_law_app COMMAND ${CMAKE_COMMAND}
     -DAPP=$<TARGET_FILE:gs_phase1> -DDECK=$<TARGET_FILE:test_gs_prescribed_q_circle>
     -DWORK=${CMAKE_BINARY_DIR}/phase1_inverse_pressure_law_app

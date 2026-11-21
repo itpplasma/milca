@@ -32,6 +32,9 @@ program gs_free_main
         claim_name
     use milca_result_io, only: run_t, result_file_t, runtime_git
     use fortnum_polynomial, only: lagrange_weights
+    use milca_gs_free_current, only: gs_current_target_t, gs_current_report_t, &
+        gs_read_current_target, gs_fb_current_solve, gs_current_profiles, &
+        gs_write_current_target, GS_CUR_OK
     use fortplot_system_runtime, only: create_directory_runtime
     !$ use omp_lib, only: omp_get_max_threads
     implicit none
@@ -62,6 +65,8 @@ program gs_free_main
     real(dp), allocatable :: cur(:), lcfs(:, :), seed(:), vac(:, :)
     real(dp) :: max_area = 0.0_dp, mu0 = 1.2566370614359173e-6_dp
     real(dp) :: plasma_ellipse(3) = 0.0_dp, axis_guess(2) = 0.0_dp
+    real(dp) :: xpoint_guess2(2) = 0.0_dp
+    logical :: two_xpoints = .false.
     real(dp) :: xpoint_guess(2) = 0.0_dp, search_radius = 0.4_dp, cut_fraction = 1.0_dp
     real(dp) :: refit_tolerance = 1.0e-3_dp, newton_tolerance = 1.0e-10_dp
     real(dp) :: quadrature_tolerance = 1.0e-9_dp, seed_amplitude = 1.0_dp
@@ -82,6 +87,15 @@ program gs_free_main
     character(512) :: boundary_file = '', coil_file = '', profile_file = ''
     character(512) :: constraints_file = '', points_file = '', mesh_file = 'mesh.dat'
     character(512) :: seed_file = ''
+    character(512) :: current_file = '', current_out_file = '', law_out_file = ''
+    integer :: readback_points = 49
+    logical :: current_fixed_cut = .false.
+    real(dp), allocatable :: rho_levels(:)
+    integer :: current_passes = 40, contour_points = 512
+    real(dp) :: current_tolerance = 1.0e-7_dp, current_deepest = 0.995_dp, &
+        current_relaxation = 1.0_dp
+    type(gs_current_target_t) :: current_target
+    type(gs_current_report_t) :: current_report
     character(512) :: argument
     character(32) :: lcfs_mode = 'xpoint', fit = 'none'
     character(32) :: error_claim = 'unavailable-not-requested'
@@ -89,12 +103,13 @@ program gs_free_main
     character(:), allocatable :: commit, dirty
     namelist /gs_free/ boundary_file, boundary_nodes, max_area, degree, curved, &
         coil_file, profile_file, mu0, plasma_ellipse, chain_nodes, lcfs_mode, &
-        axis_sign, axis_guess, xpoint_guess, search_radius, cut_fraction, points_file, &
+        axis_sign, axis_guess, xpoint_guess, xpoint_guess2, two_xpoints, search_radius, cut_fraction, points_file, &
         max_refits, refit_tolerance, newton_tolerance, quadrature_tolerance, &
         max_newton_iterations, seed_amplitude, currents, fit, constraints_file, &
         lambda, reference_currents, n_reference, tie_a, tie_b, emulate_freegs, &
         relaxation, max_fit_iterations, fit_step_tolerance, mesh_file, profile_points, &
-        seed_file, error_estimate
+        seed_file, error_estimate, current_file, current_out_file, law_out_file, readback_points, current_fixed_cut, current_passes, contour_points, &
+        current_tolerance, current_deepest, current_relaxation
 
     call run%start('gs_free')
     wall_start = wall_clock()
@@ -140,6 +155,8 @@ program gs_free_main
     cfg%axis_sign = axis_sign
     cfg%axis_guess = axis_guess
     cfg%xpoint_guess = xpoint_guess
+    cfg%xpoint_guess2 = xpoint_guess2
+    cfg%two_xpoints = two_xpoints
     cfg%search_radius = search_radius
     cfg%cut_fraction = cut_fraction
     cfg%quadrature_tolerance = quadrature_tolerance
@@ -202,6 +219,22 @@ program gs_free_main
         if (.not. allocated(report%movement) .or. &
             (status /= GS_FB_OK .and. status /= 10)) &
             error stop 'free-boundary solve failed'
+        if (len_trim(current_file) > 0) then
+            call gs_read_current_target(trim(current_file), current_target, stat)
+            if (stat /= GS_CUR_OK) error stop 'invalid current_file'
+            call gs_fb_current_solve(state, sys, cur, current_target, stat, &
+                current_report, current_passes, current_tolerance, contour_points, &
+                current_deepest, current_relaxation, verbose=.true., &
+                fixed_cut=current_fixed_cut)
+            write (output_unit, '(a,i0,a,i0,a,es10.3,a,f10.7,a,f10.6)') &
+                'current profiles: status ', stat, ' passes ', current_report%passes, &
+                ' change ', current_report%change, ' cut fraction ', &
+                current_report%cut_fraction, ' Phi(deepest) ', current_report%phi_deepest
+            write (output_unit, '(a,f12.7)') 'current profiles: Phi_edge ', &
+                current_report%phi_edge
+            if (stat /= GS_CUR_OK) error stop 'current-profile iteration failed'
+            law = sys%law
+        end if
     else
         call read_rows(trim(constraints_file), rows)
         ccfg%lambda = lambda
@@ -269,6 +302,13 @@ program gs_free_main
     if (status /= GS_FB_OK) error stop 'final evaluation failed'
     psi_a = ev%psi_axis
     psi_b = ev%psi_bound
+    if (len_trim(law_out_file) > 0) call write_gs_profile_law(trim(law_out_file), law)
+    if (len_trim(current_out_file) > 0) then
+        call gs_current_profiles(state, state%psi, ev%axis, psi_a, psi_b, &
+            real(axis_sign, dp), sys%mu0, law, 200, contour_points, current_target, stat)
+        if (stat /= GS_CUR_OK) error stop 'current profiles of the solution failed'
+        call gs_write_current_target(trim(current_out_file), current_target)
+    end if
     call gs_fb_trace_lcfs(state, state%psi, ev%axis, psi_b, real(axis_sign, dp), 256, &
                           lcfs, stat)
     if (stat /= GS_FB_OK) error stop 'plasma boundary trace failed'
@@ -507,9 +547,18 @@ contains
         ! diverges there, and on a refitted mesh the level runs through the
         ! chain vertices and the X-point. At 1e-4 the contour of the diverted
         ! test case left the plasma cells in some threaded runs.
+        ! rho_j = sin(pi x_j/2): levels packed towards the boundary, where q
+        ! grows and Phi = int 2 pi q dpsi needs them (24 uniform rho levels
+        ! put s_tor 1 % low near a separatrix).
+        if (readback_points > 0) then
+            rho_levels = [(sin(0.5_dp*acos(-1.0_dp)*real(k - 1, dp)/(readback_points - 1)), &
+                k=1, readback_points)]
+        else
+            rho_levels = [(real(k - 1, dp)/24, k=1, 25)]
+        end if
         call read_gs_equilibrium(state, executed%f_edge, 0.0_dp, 0, 0, surfaces, &
                                  q_status, law=executed, psi_bound=psi_b, &
-                                 plasma_cell=ev%plasma_cell, &
+                                 plasma_cell=ev%plasma_cell, rho_grid=rho_levels, &
                                  boundary_inset=merge(1.0e-3_dp, 0.0_dp, lcfs_mode == 'xpoint'))
         if (q_status /= 0) write (output_unit, '(a,i0)') &
             'flux-surface readback failed, status ', q_status
