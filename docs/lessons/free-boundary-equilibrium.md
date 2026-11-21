@@ -189,6 +189,27 @@ Check: `grad_shafranov_phase1_edge_readback_app` requires the contour and
 region toroidal fluxes to agree to 8e-6 on a steep-edge D shape. Packed
 levels give 2.9e-6, uniform ones 2.0e-5.
 
+### 4.4 Resolution of the profile law (MILCA)
+
+In the current mode the law p'(psi_N), FF'(psi_N) is rebuilt from VMEC's
+p(s), I(s) on knots in psi_N. Its knots limit the accuracy:
+- 41 knots without axis packing put R_axis 0.27 mm low, through the steep
+  near-axis p' (1.54e5 to 2.1e5 Pa/(Wb/rad) over s_pol 0 to 0.05);
+- moving the law to n knots packed at both ends,
+  s_j = (1 - cos(pi j/(n - 1)))/2, makes the knot count a resolution
+  parameter: 65 to 129 knots change R_axis by 0.02 mm.
+
+The spline free-boundary solver (`gs_spline_free`, 16 cells per block side,
+129 knots, 7 s on 16 threads) converges on DIII-D at 0.95 PHIEDGE to
+R_axis = 1.7135 m and V = 18.5539 m^3, with I_p 1.9e-5 from CURTOR. Phi_edge
+is met to 9e-6 by an independent area integral over the fitted plasma blocks.
+VMEC2000 with cubic mgrid interpolation, extrapolated in ns, gives
+1.71356-1.71361 m and 18.5559-18.5565 m^3: within one to two of its own ns
+refinement steps.
+
+Rule: a law rebuilt from another code's profiles is converged in its knot
+count like any other resolution.
+
 ## 6. Inconsistent input data
 
 ### 6.1 Profiles rebuilt from the wout file (comparison procedure)

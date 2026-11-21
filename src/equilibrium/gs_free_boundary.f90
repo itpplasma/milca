@@ -77,6 +77,7 @@ module milca_gs_free_boundary
                                  gs_coupling_coil_load, GS_COUPLING_OK
     use milca_gs_nonlinear, only: gs_cubic_load, gs_profile_jacobian_t
     use milca_gs_profile_law, only: gs_profile_law_t, gs_law_sources
+    use milca_grad_shafranov_leaves, only: gs_ray_coarea_weights
     use milca_triangle_basis, only: triangle_basis_jet, cubic_segment_roots, &
                                     cubic_segment_stationary, &
                                     triangle_bernstein_controls
@@ -2560,8 +2561,7 @@ contains
                     exit
                 end if
                 radius(j, k) = rho
-                w1(j, k) = x(1)*rho/dvdr
-                w2(j, k) = rho/(x(1)*dvdr)
+                call gs_ray_coarea_weights(x(1), rho, dvdr, w1(j, k), w2(j, k))
                 lo = rho
             end do
         end do

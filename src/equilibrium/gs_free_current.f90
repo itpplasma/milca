@@ -22,6 +22,8 @@ module milca_gs_free_current
     !! CHEASE and HELENA).
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortnum_polynomial, only: lagrange_weights
+    use milca_grad_shafranov_leaves, only: gs_current_profile_update, gs_three_point_slope, &
+        gs_hermite_cubic, gs_hermite_end_slope, gs_linear_extrapolation, gs_current_moment
     use milca_grad_shafranov, only: gs_state_t
     use milca_gs_profile_law, only: gs_profile_law_t, gs_law_primitives, gs_law_sources
     use milca_gs_free_boundary, only: gs_fb_system_t, gs_fb_eval_t, gs_fb_newton, &
@@ -32,6 +34,9 @@ module milca_gs_free_current
     public :: gs_current_target_t, gs_current_report_t, gs_read_current_target, &
         gs_current_update, gs_fb_current_solve, gs_current_profiles, &
         gs_write_current_target
+    ! shared with the spline current mode (milca_gs_spline_current)
+    public :: hermite_law, hermite_end, interpolate4, cubic_integral, flux_function, &
+        push_history, least_squares
     integer, parameter, public :: GS_CUR_OK = 0, GS_CUR_BAD_INPUT = 1, &
         GS_CUR_SOLVE_FAILED = 2, GS_CUR_CONTOUR_FAILED = 3, &
         GS_CUR_NOT_CONVERGED = 4, GS_CUR_FLUX_UNREACHABLE = 5
@@ -114,7 +119,7 @@ contains
         type(gs_profile_law_t) :: current
         real(dp) :: t(table), u(table), a1(table), a2(table), f(table), phi(table)
         real(dp), allocatable :: uk(:), k1(:), k2(:), fk(:), sk(:), pp(:), ff(:)
-        real(dp) :: ux, ub, ub_old, s_tor, dsdu, dpds, dids
+        real(dp) :: ux, ub, ub_old, s_tor, dpds, dids
         integer :: j, nk, stat, attempt
         real(dp) :: top
 
@@ -190,16 +195,15 @@ contains
         sk(nk) = 1
         do j = 1, nk
             s_tor = min(max(sk(j), 0.0_dp), 1.0_dp)
-            dsdu = fk(j)*k2(j)/goal%phi_edge
             dpds = interpolate4(goal%s, goal%dp, s_tor, count(goal%s < s_tor))
             dids = interpolate4(goal%s, goal%dcurrent, s_tor, count(goal%s < s_tor))
-            pp(j) = -sigma*dpds*dsdu
-            ff(j) = mu0*(sigma*dids*dsdu - k1(j)*pp(j))/k2(j)
+            call gs_current_profile_update(sigma, mu0, fk(j), k1(j), k2(j), goal%phi_edge, &
+                                           dpds, dids, pp(j), ff(j))
         end do
         ! The axis knot was evaluated at the small depth uk(1); linear
         ! extrapolation to u = 0 (error O(uk(1) uk(2)))
-        pp(1) = pp(1) - (pp(2) - pp(1))*uk(1)/(uk(2) - uk(1))
-        ff(1) = ff(1) - (ff(2) - ff(1))*uk(1)/(uk(2) - uk(1))
+        call gs_linear_extrapolation(0.0_dp, uk(1), uk(2), pp(1), pp(2), pp(1))
+        call gs_linear_extrapolation(0.0_dp, uk(1), uk(2), ff(1), ff(2), ff(1))
         next = law
         call hermite_law(law%knots, pp, next%pp)
         call hermite_law(law%knots, ff, next%ff)
@@ -239,8 +243,8 @@ contains
                                      contour_points, a1, a2, st)
         if (st /= GS_FB_OK) return
         u(1) = 0
-        a1(1) = a1(1) - (a1(2) - a1(1))*1.0e-2_dp/0.99_dp
-        a2(1) = a2(1) - (a2(2) - a2(1))*1.0e-2_dp/0.99_dp
+        call gs_linear_extrapolation(0.0_dp, 1.0e-2_dp*u(2), u(2), a1(1), a1(2), a1(1))
+        call gs_linear_extrapolation(0.0_dp, 1.0e-2_dp*u(2), u(2), a2(1), a2(2), a2(1))
         allocate (target%s(levels + 1), target%p(levels + 1), target%dp(levels + 1), &
             target%current(levels + 1), target%dcurrent(levels + 1))
         do j = 1, levels + 1
@@ -249,7 +253,7 @@ contains
             target%p(j) = pressure
             call gs_law_sources(current, current%axis*(1 - u(j)/ub), pp, ff)
             dpdu(j) = -sigma*pp ! dp/du
-            didu(j) = sigma*(a1(j)*pp + a2(j)*ff/mu0) ! dI/du
+            call gs_current_moment(sigma, mu0, a1(j), a2(j), pp, ff, didu(j))
         end do
         phi(1) = 0; cur(1) = 0
         do j = 2, levels + 1
@@ -493,22 +497,20 @@ contains
         !! three-point (non-uniform) difference, one-sided at the ends.
         real(dp), intent(in) :: knots(:), y(:)
         real(dp), intent(inout) :: c(:, :)
-        real(dp) :: m(size(y)), h, d, h0, h1
+        real(dp) :: m(size(y))
         integer :: i, n
         n = size(knots)
         do i = 2, n - 1
-            h0 = knots(i) - knots(i - 1); h1 = knots(i + 1) - knots(i)
-            m(i) = (h0*h0*(y(i + 1) - y(i)) + h1*h1*(y(i) - y(i - 1)))/(h0*h1*(h0 + h1))
+            call gs_three_point_slope(knots(i) - knots(i - 1), knots(i + 1) - knots(i), &
+                                      y(i - 1), y(i), y(i + 1), m(i))
         end do
-        m(1) = 2*(y(2) - y(1))/(knots(2) - knots(1)) - m(2)
-        m(n) = 2*(y(n) - y(n - 1))/(knots(n) - knots(n - 1)) - m(n - 1)
+        ! slope at the end node from the neighbour's value and slope; at the
+        ! right end the step is negative
+        call gs_hermite_end_slope(knots(2) - knots(1), y(1), y(2), m(2), m(1))
+        call gs_hermite_end_slope(knots(n - 1) - knots(n), y(n), y(n - 1), m(n - 1), m(n))
         do i = 1, n - 1
-            h = knots(i + 1) - knots(i)
-            d = (y(i + 1) - y(i))/h
-            c(1, i) = y(i)
-            c(2, i) = m(i)
-            c(3, i) = (3*d - 2*m(i) - m(i + 1))/h
-            c(4, i) = (m(i) + m(i + 1) - 2*d)/(h*h)
+            call gs_hermite_cubic(knots(i + 1) - knots(i), y(i), y(i + 1), m(i), m(i + 1), &
+                                  c(1, i), c(2, i), c(3, i), c(4, i))
         end do
     end subroutine
 
