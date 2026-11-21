@@ -35,9 +35,8 @@ program test_eulerian_clebsch_newton
     use milca_gs_spline, only: gs_spline_extremum
     use solovev_label_fields
     implicit none
-    integer, parameter :: degree = 2, levels = 3, table_size = 1100
-    real(dp), parameter :: table_step = 1e-3_dp
-    real(dp) :: table(0:table_size), amplitude = 0.05_dp, ridge = 1e-12_dp
+    integer, parameter :: degree = 2, levels = 3
+    real(dp) :: amplitude = 0.05_dp, ridge = 1e-12_dp
     integer :: max_steps = 12, extra_points = 8, base_cells = 0
     type(block_layout_t) :: base_layout
     integer :: level, cells(levels) = [2, 4, 8], failures, steps
@@ -64,9 +63,6 @@ program test_eulerian_clebsch_newton
         read (arg, *) extra_points
     end if
     call curve_chart_cylindrical(chart, 1)
-    do k = 0, table_size
-        table(k) = -toroidal_flux(k*table_step)/(2*pi)
-    end do
     do level = 1, levels
         call solve(cells(level), error(level), chi_error(level), steps, history)
         print '(a,i3,a,es10.3,a,es10.3,a,i0)', 'cells', cells(level), ' L2 error of B', &
@@ -99,71 +95,6 @@ contains
             failures = failures + 1
         end if
     end subroutine check
-
-    pure real(dp) function toroidal_flux(chi) result(phi)
-        !! f0 int_{S(chi)} dA/R by rays from the axis, 8-point Gauss in rho.
-        real(dp), intent(in) :: chi
-        real(dp), parameter :: x8(8) = [-0.9602898564975363_dp, -0.7966664774136267_dp, &
-                                         -0.5255324099163290_dp, -0.1834346424956498_dp, &
-                                         0.1834346424956498_dp, 0.5255324099163290_dp, &
-                                         0.7966664774136267_dp, 0.9602898564975363_dp]
-        real(dp), parameter :: w8(8) = [0.1012285362903763_dp, 0.2223810344533745_dp, &
-                                         0.3137066458778873_dp, 0.3626837833783620_dp, &
-                                         0.3626837833783620_dp, 0.3137066458778873_dp, &
-                                         0.2223810344533745_dp, 0.1012285362903763_dp]
-        integer, parameter :: rays = 128
-        real(dp) :: theta, rho1, rho
-        integer :: i, j
-
-        phi = 0
-        if (chi <= 0) return
-        do i = 1, rays
-            theta = 2*pi*(i - 1)/rays
-            rho1 = ray_radius(chi*psi_b, theta)
-            do j = 1, 8
-                rho = rho1*(x8(j) + 1)/2
-                phi = phi + w8(j)*rho1/2*rho/(r0 + rho*cos(theta))
-            end do
-        end do
-        phi = f0*phi*2*pi/rays
-    end function toroidal_flux
-
-    real(dp) function cubic(i0, x)
-        integer, intent(in) :: i0
-        real(dp), intent(in) :: x
-        real(dp) :: l
-        integer :: i, j
-
-        cubic = 0
-        do i = 0, 3
-            l = 1
-            do j = 0, 3
-                if (j /= i) l = l*(x/table_step - i0 - j)/(i - j)
-            end do
-            cubic = cubic + l*table(i0 + i)
-        end do
-    end function cubic
-
-    subroutine profiles(chi, f, g, p)
-        !! F from the table (cubic pieces, F''' exact per piece, linear below
-        !! the axis label 0), G and p of the Solov'ev equilibrium.
-        real(dp), intent(in) :: chi
-        real(dp), intent(out) :: f(3), g(3), p(3)
-        real(dp), parameter :: h = 1e-4_dp
-        integer :: i0
-
-        g = [psi_b, 0.0_dp, 0.0_dp]
-        p = [source*psi_b*(1 - chi), -source*psi_b, 0.0_dp]
-        if (chi <= 0) then
-            f = [(-11*table(0) + 18*table(1) - 9*table(2) + 2*table(3))/(6*table_step), &
-                 0.0_dp, 0.0_dp]
-            return
-        end if
-        i0 = min(max(int(chi/table_step) - 1, 0), table_size - 3)
-        f(1) = (cubic(i0, chi + h) - cubic(i0, chi - h))/(2*h)
-        f(2) = (cubic(i0, chi + h) - 2*cubic(i0, chi) + cubic(i0, chi - h))/h**2
-        f(3) = (table(i0 + 3) - 3*table(i0 + 2) + 3*table(i0 + 1) - table(i0))/table_step**3
-    end subroutine profiles
 
     subroutine perturbed_label(block, xi, t, values)
         integer, intent(in) :: block
@@ -231,7 +162,7 @@ contains
 
         call build_mesh(n, x, samples, quad, aquad, derham)
         call axis_jets(derham, x, nrow, ngrad)
-        call clebsch_axisym_system(derham, aquad, profiles, x, chi, g, energy, grad, hessian)
+        call clebsch_axisym_system(derham, aquad, solovev_profiles, x, chi, g, energy, grad, hessian)
         r = [grad + mu*[nrow, 0*nrow], matmul(chi, ngrad), dot_product(nrow, chi)]
         r(wall) = 0
     end subroutine ale_residual
@@ -263,7 +194,7 @@ contains
         call spline_derham_boundary_dofs(derham, LAYOUT_WALL, 0, wall)
         chi(wall) = 1
         ! initial g: W is quadratic and convex in g at fixed labels
-        call clebsch_axisym_system(derham, aquad, profiles, axis, chi, g, energy, grad, hessian)
+        call clebsch_axisym_system(derham, aquad, solovev_profiles, axis, chi, g, energy, grad, hessian)
         call add_g_ridge(hessian, n0)
         allocate (delta(2*n0))
         call eu_constrained_solve(hessian, -grad, [(i, i=1, n0)], 0*chi, delta, st)
@@ -278,7 +209,7 @@ contains
         do it = 1, max_steps
             call build_mesh(n, axis, samples, quad, aquad, derham)
             call axis_jets(derham, axis, nrow, ngrad)
-            call clebsch_axisym_system(derham, aquad, profiles, axis, chi, g, energy, grad, &
+            call clebsch_axisym_system(derham, aquad, solovev_profiles, axis, chi, g, energy, grad, &
                                        hessian)
             r = [grad + mu*[nrow, 0*nrow], matmul(chi, ngrad), dot_product(nrow, chi)]
             r(wall) = 0
@@ -431,7 +362,7 @@ contains
                 gg = matmul(gn(:, :, q), g(d0))
                 th = [-(s(2) - axis(2)), s(1) - axis(1)]/((s(1) - axis(1))**2 + &
                                                             (s(2) - axis(2))**2)
-                call profiles(c, f, gp, pr)
+                call solovev_profiles(c, f, gp, pr)
                 bphi = gg(2)*gc(1) - gg(1)*gc(2) - f(1)*(gc(1)*th(2) - gc(2)*th(1))
                 bpol = gp(1)*[-gc(2), gc(1)]/s(1)
                 b_ex = exact_b(x)

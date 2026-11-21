@@ -1,12 +1,12 @@
 program test_eulerian_clebsch_3d
-    !! Gate E3 of docs/eulerian-label-plan.md: gate E1 through the 3D label
-    !! lane. chi and g are node values on nt = 2M + 1 toroidal planes of the
-    !! section x trigonometric-nodal complex (M = 1), the energy comes from
-    !! the 3D FortSym leaf clebsch_energy_3d in physical (R, phi, Z)
-    !! components. The solution is axisymmetric, so the axis X is one point
-    !! and its constraints act on the toroidal average of chi:
-    !! chi_avg(X) = 0 and grad chi_avg(X) = 0. The result must equal E1 and
-    !! stay axisymmetric.
+    !! Gates E3 and E3b of docs/eulerian-label-plan.md: gate E1 through the
+    !! 3D label lane. chi and g are node values on nt = 2M + 1 toroidal
+    !! planes of the section x trigonometric-nodal complex (M = 1), the
+    !! energy comes from the 3D FortSym leaf clebsch_energy_3d in physical
+    !! (R, phi, Z) components. The axis is a curve X(t) with a point X_k per
+    !! plane, and the section core moves with it (ALE), so chi_k(X_k) = 0
+    !! and grad chi_k(X_k) = 0 are linear in chi. From labels and axes that
+    !! differ per plane, Newton must reach E1 with an axisymmetric solution.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_spline_layout, only: block_layout_t, layout_ogrid, layout_set_curve, &
         LAYOUT_WALL
@@ -19,22 +19,22 @@ program test_eulerian_clebsch_3d
         spline_derham_project, spline_derham_boundary_dofs, spline_derham_evaluate
     use fortsparse_csr, only: csr_t, csr_matvec
     use milca_eulerian_vacuum, only: eu_constrained_solve
-    use milca_eulerian_clebsch, only: clebsch_axisym_system, clebsch_node_gradients, &
-        clebsch_3d_system
+    use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_3d_system
     use milca_gs_spline, only: gs_spline_extremum
     use solovev_label_fields
     implicit none
-    integer, parameter :: degree = 2, levels = 2, table_size = 1100, nt = 3
-    real(dp), parameter :: table_step = 1e-3_dp
-    real(dp) :: table(0:table_size), amplitude = 0.05_dp, ridge = 1e-12_dp
-    integer :: max_steps = 12, extra_points = 8, base_cells = 0
+    integer, parameter :: degree = 2, levels = 2, nt = 3
+    real(dp) :: amplitude = 0.05_dp, ridge = 1e-12_dp, label_amplitude, axis_offset = 2e-3_dp, wall_shift = 0
+    integer :: max_steps = 12, extra_points = 8, base_cells = 0, component = 1
     type(block_layout_t) :: base_layout
-    integer :: level, cells(levels) = [2, 4], failures, steps
+    real(dp), allocatable :: rv_base(:), zv_base(:)
+    integer :: level, cells(levels) = [2, 4], failures, steps, top = levels
     real(dp) :: error(levels), chi_error(levels), rate
     ! interpolation error of B on these meshes (G2a, projection of the exact A)
     real(dp), parameter :: interp(2) = [2.196e-2_dp, 4.367e-3_dp]
     real(dp), allocatable :: history(:)
     character(16) :: arg
+    real(dp) :: shift_arg
     integer :: k
 
     failures = 0
@@ -52,11 +52,25 @@ program test_eulerian_clebsch_3d
         call get_command_argument(3, arg)
         read (arg, *) extra_points
     end if
+    if (command_argument_count() >= 4) then
+        call get_command_argument(4, arg)
+        read (arg, *) axis_offset
+    end if
+    if (command_argument_count() >= 5) then
+        call get_command_argument(5, arg)
+        read (arg, *) top
+    end if
+    if (command_argument_count() >= 6) then
+        call get_command_argument(6, arg)
+        read (arg, *) wall_shift
+    end if
     call curve_chart_cylindrical(chart, 1)
-    do k = 0, table_size
-        table(k) = -toroidal_flux(k*table_step)/(2*pi)
-    end do
-    do level = 1, levels
+    ! the identities hold for the unshifted wall; the shift is exploration only
+    shift_arg = wall_shift
+    wall_shift = 0
+    call geometry_identity(2, samples_once())
+    wall_shift = shift_arg
+    do level = 1, top
         call solve(cells(level), error(level), chi_error(level), steps, history)
         print '(a,i3,a,es10.3,a,es10.3,a,i0)', 'cells', cells(level), ' L2 error of B', &
             error(level), ' max |chi - Pi0 psi_N|', chi_error(level), ' Newton steps ', steps
@@ -65,7 +79,7 @@ program test_eulerian_clebsch_3d
         call check(error(level) < 1.1_dp*interp(level), &
                    'B within 10 % of the interpolation error')
     end do
-    do level = 2, levels
+    do level = 2, top
         rate = log(error(level - 1)/error(level))/log(2.0_dp)
         print '(a,f6.2,a,f6.2)', 'rate of B', rate, '  rate of chi', &
             log(chi_error(level - 1)/chi_error(level))/log(2.0_dp)
@@ -73,9 +87,15 @@ program test_eulerian_clebsch_3d
         call check(log(chi_error(level - 1)/chi_error(level))/log(2.0_dp) > degree, &
                    'labels converge faster than order p')
     end do
-    if (failures > 0) error stop 'Clebsch Newton gate E1 failed'
+    if (failures > 0) error stop 'Clebsch 3D gate E3b failed'
 
 contains
+
+    function samples_once() result(samples)
+        real(dp), allocatable :: samples(:, :)
+
+        call boundary_samples(samples)
+    end function samples_once
 
     subroutine check(ok, what)
         logical, intent(in) :: ok
@@ -89,71 +109,6 @@ contains
         end if
     end subroutine check
 
-    pure real(dp) function toroidal_flux(chi) result(phi)
-        !! f0 int_{S(chi)} dA/R by rays from the axis, 8-point Gauss in rho.
-        real(dp), intent(in) :: chi
-        real(dp), parameter :: x8(8) = [-0.9602898564975363_dp, -0.7966664774136267_dp, &
-                                         -0.5255324099163290_dp, -0.1834346424956498_dp, &
-                                         0.1834346424956498_dp, 0.5255324099163290_dp, &
-                                         0.7966664774136267_dp, 0.9602898564975363_dp]
-        real(dp), parameter :: w8(8) = [0.1012285362903763_dp, 0.2223810344533745_dp, &
-                                         0.3137066458778873_dp, 0.3626837833783620_dp, &
-                                         0.3626837833783620_dp, 0.3137066458778873_dp, &
-                                         0.2223810344533745_dp, 0.1012285362903763_dp]
-        integer, parameter :: rays = 128
-        real(dp) :: theta, rho1, rho
-        integer :: i, j
-
-        phi = 0
-        if (chi <= 0) return
-        do i = 1, rays
-            theta = 2*pi*(i - 1)/rays
-            rho1 = ray_radius(chi*psi_b, theta)
-            do j = 1, 8
-                rho = rho1*(x8(j) + 1)/2
-                phi = phi + w8(j)*rho1/2*rho/(r0 + rho*cos(theta))
-            end do
-        end do
-        phi = f0*phi*2*pi/rays
-    end function toroidal_flux
-
-    real(dp) function cubic(i0, x)
-        integer, intent(in) :: i0
-        real(dp), intent(in) :: x
-        real(dp) :: l
-        integer :: i, j
-
-        cubic = 0
-        do i = 0, 3
-            l = 1
-            do j = 0, 3
-                if (j /= i) l = l*(x/table_step - i0 - j)/(i - j)
-            end do
-            cubic = cubic + l*table(i0 + i)
-        end do
-    end function cubic
-
-    subroutine profiles(chi, f, g, p)
-        !! F from the table (cubic pieces, F''' exact per piece, linear below
-        !! the axis label 0), G and p of the Solov'ev equilibrium.
-        real(dp), intent(in) :: chi
-        real(dp), intent(out) :: f(3), g(3), p(3)
-        real(dp), parameter :: h = 1e-4_dp
-        integer :: i0
-
-        g = [psi_b, 0.0_dp, 0.0_dp]
-        p = [source*psi_b*(1 - chi), -source*psi_b, 0.0_dp]
-        if (chi <= 0) then
-            f = [(-11*table(0) + 18*table(1) - 9*table(2) + 2*table(3))/(6*table_step), &
-                 0.0_dp, 0.0_dp]
-            return
-        end if
-        i0 = min(max(int(chi/table_step) - 1, 0), table_size - 3)
-        f(1) = (cubic(i0, chi + h) - cubic(i0, chi - h))/(2*h)
-        f(2) = (cubic(i0, chi + h) - 2*cubic(i0, chi) + cubic(i0, chi - h))/h**2
-        f(3) = (table(i0 + 3) - 3*table(i0 + 2) + 3*table(i0 + 1) - table(i0))/table_step**3
-    end subroutine profiles
-
     subroutine perturbed_label(block, xi, t, values)
         integer, intent(in) :: block
         real(dp), intent(in) :: xi(2), t
@@ -162,16 +117,37 @@ contains
 
         call section_jet(block, xi, s, js)
         pn = psi(s(1), s(2))/psi_b
-        values(1) = pn + amplitude*pn*(1 - pn)*(s(1) - r0 + s(2))
+        values(1) = pn + label_amplitude*pn*(1 - pn)*(s(1) - r0 + s(2))
         associate (unused => t)
         end associate
     end subroutine perturbed_label
 
+    subroutine coordinate(block, xi, t, values)
+        !! R or Z of the current section geometry, in V0 by isoparametry.
+        integer, intent(in) :: block
+        real(dp), intent(in) :: xi(2), t
+        real(dp), intent(out) :: values(:)
+        real(dp) :: s(2), js(2, 2)
+
+        call section_jet(block, xi, s, js)
+        values(1) = s(component)
+        associate (unused => t)
+        end associate
+    end subroutine coordinate
+
+    subroutine zero_profiles(chi, f, g, p)
+        real(dp), intent(in) :: chi
+        real(dp), intent(out) :: f(3), g(3), p(3)
+
+        f = 0*chi
+        g = 0
+        p = 0
+    end subroutine zero_profiles
+
     subroutine build_mesh(n, x, samples, quad, aquad, derham)
-        !! ALE: the four core corners of the O-grid follow the axis, so X stays
-        !! the central vertex of the core block (n even) and the polar and
-        !! graded cells are the same for every X. The wall corners and the
-        !! wall curve stay fixed, the ruled blocks blend between them.
+        !! The four core corners of the O-grid sit at x, so x is the central
+        !! vertex of the core block (n even). The wall corners and the wall
+        !! curve stay fixed, the ruled blocks blend between them.
         integer, intent(in) :: n
         real(dp), intent(in) :: x(2), samples(:, :)
         type(spline_quadrature_t), intent(out) :: quad, aquad
@@ -206,42 +182,147 @@ contains
         if (st /= 0) error stop 'axis quadrature'
     end subroutine build_mesh
 
-    subroutine ale_residual(n, x, samples, chi, g, mu, wall, r)
-        !! Newton residual on the mesh centred at x.
+    subroutine motion_weights(n, samples, axis0, w, rv, zv)
+        !! V0 node values w of the section displacement per unit axis shift
+        !! (1 on the core block, 0 on the wall), and the node values rv, zv
+        !! of R and Z on the mesh centred at axis0. The displacement is the
+        !! same for shifts in R and in Z.
         integer, intent(in) :: n
-        real(dp), intent(in) :: x(2), samples(:, :), chi(:), g(:), mu
-        integer, intent(in) :: wall(:)
-        real(dp), allocatable, intent(out) :: r(:)
+        real(dp), intent(in) :: samples(:, :), axis0(2)
+        real(dp), allocatable, intent(out) :: w(:), rv(:), zv(:)
+        real(dp), parameter :: shift = 1e-2_dp
+        type(spline_quadrature_t) :: quad, aquad
+        type(spline_derham_t) :: derham
+        real(dp), allocatable :: rs(:), zs(:)
+        integer :: st
+
+        call build_mesh(n, axis0 + [shift, 0.0_dp], samples, quad, aquad, derham)
+        allocate (rs(derham%dimension(0)), zs(derham%dimension(0)), &
+                  rv(derham%dimension(0)), zv(derham%dimension(0)))
+        component = 1
+        call spline_derham_project(derham, 0, coordinate, rs, st, 12)
+        call build_mesh(n, axis0 + [0.0_dp, shift], samples, quad, aquad, derham)
+        component = 2
+        call spline_derham_project(derham, 0, coordinate, zs, st, 12)
+        call build_mesh(n, axis0, samples, quad, aquad, derham)
+        call spline_derham_project(derham, 0, coordinate, zv, st, 12)
+        component = 1
+        call spline_derham_project(derham, 0, coordinate, rv, st, 12)
+        w = (rs - rv)/shift
+        rv_base = rv
+        zv_base = zv
+        call check(maxval(abs((zs - zv)/shift - w)) < 1e-8_dp, &
+                   'the mesh moves rigidly with the axis in R and in Z')
+    end subroutine motion_weights
+
+    function wall_offset(k) result(dk)
+        !! Helical translation of the whole section on plane k (exploration
+        !! of a 3D equilibrium; zero in the gate).
+        integer, intent(in) :: k
+        real(dp) :: dk(2)
+
+        dk = wall_shift*[cos(2*pi*(k - 1)/nt), sin(2*pi*(k - 1)/nt)]
+    end function wall_offset
+
+    function core_nodes(axis0, w, x) result(nodes)
+        !! (R, Z) node values per plane of the mesh whose core follows X_k.
+        real(dp), intent(in) :: axis0(2), w(:), x(:, :)
+        real(dp) :: nodes(2, size(w), size(x, 2))
+        integer :: k
+
+        real(dp) :: dk(2)
+
+        do k = 1, size(x, 2)
+            dk = wall_offset(k)
+            nodes(1, :, k) = rv_base + dk(1) + w*(x(1, k) - axis0(1) - dk(1))
+            nodes(2, :, k) = zv_base + dk(2) + w*(x(2, k) - axis0(2) - dk(2))
+        end do
+    end function core_nodes
+
+    subroutine geometry_identity(n, samples)
+        !! g = R and chi = Z on the moving mesh are exact in V0 x trig, so
+        !! B = grad g x grad chi = -e_phi and W = int R/2 dR dZ dphi for every
+        !! axis curve: the moved Jacobian, the mesh velocity in d/dphi and
+        !! the volume weight are exact.
+        integer, intent(in) :: n
+        real(dp), intent(in) :: samples(:, :)
         type(spline_quadrature_t) :: quad, aquad
         type(spline_derham_t) :: derham
         type(csr_t) :: hessian
-        real(dp), allocatable :: nrow(:), ngrad(:, :), grad(:)
-        real(dp) :: energy
+        real(dp), allocatable :: w(:), rv(:), zv(:), chi(:), g(:), grad(:)
+        real(dp) :: axis0(2), plane_axis(2, nt), e_base, e_moved, tk
+        real(dp), allocatable :: nodes(:, :, :)
+        integer :: k
 
-        call build_mesh(n, x, samples, quad, aquad, derham)
-        call average_jets(derham, x, nrow, ngrad)
-        call clebsch_3d_system(derham, aquad, nt, profiles, x, chi, g, energy, grad, hessian)
-        r = [grad + mu*[nrow, 0*nrow], matmul(chi, ngrad), dot_product(nrow, chi)]
-        r(wall) = 0
-    end subroutine ale_residual
-
-    subroutine average_jets(derham, x, nrow, ngrad)
-        !! Values and X derivatives at X of the toroidal average of the
-        !! plane node functions: the average of L_k over t is 1/nt.
-        type(spline_derham_t), intent(in) :: derham
-        real(dp), intent(in) :: x(2)
-        real(dp), allocatable, intent(out) :: nrow(:), ngrad(:, :)
-        real(dp), allocatable :: row(:), grad2(:, :)
-        integer :: k, n0
-
-        call axis_jets(derham, x, row, grad2)
-        n0 = size(row)
-        allocate (nrow(n0*nt), ngrad(n0*nt, 2))
+        axis0 = [r0, 0.0_dp]
+        call motion_weights(n, samples, axis0, w, rv, zv)
+        call build_mesh(n, axis0, samples, quad, aquad, derham)
+        allocate (nodes(2, size(w), nt))
         do k = 1, nt
-            nrow((k - 1)*n0 + 1:k*n0) = row/nt
-            ngrad((k - 1)*n0 + 1:k*n0, :) = grad2/nt
+            tk = (k - 1)/real(nt, dp)
+            plane_axis(:, k) = axis0 + 0.1_dp*[cos(2*pi*tk), sin(2*pi*tk)]
         end do
-    end subroutine average_jets
+        chi = [(zv, k=1, nt)]
+        g = [(rv, k=1, nt)]
+        call clebsch_3d_system(derham, aquad, nt, zero_profiles, axis0, chi, g, e_base, &
+                               grad, hessian)
+        chi = [(zv + w*(plane_axis(2, k) - axis0(2)), k=1, nt)]
+        g = [(rv + w*(plane_axis(1, k) - axis0(1)), k=1, nt)]
+        call clebsch_3d_system(derham, aquad, nt, zero_profiles, axis0, chi, g, e_moved, &
+                               grad, hessian, plane_axis, core_nodes(axis0, w, plane_axis))
+        print '(a,es10.2)', 'moving mesh: relative change of int R/2 dV', &
+            e_moved/e_base - 1
+        call check(abs(e_moved/e_base - 1) < 1e-12_dp, &
+                   'energy of an exact field is independent of the axis curve')
+        ! the whole section, wall included, translated by 0.1 (cos phi, sin
+        ! phi): int R dA per plane is A R_c(phi), whose phi average is A r0
+        do k = 1, nt
+            nodes(1, :, k) = rv + plane_axis(1, k) - axis0(1)
+            nodes(2, :, k) = zv + plane_axis(2, k) - axis0(2)
+        end do
+        chi = [(nodes(2, :, k), k=1, nt)]
+        g = [(nodes(1, :, k), k=1, nt)]
+        call clebsch_3d_system(derham, aquad, nt, zero_profiles, axis0, chi, g, e_moved, &
+                               grad, hessian, plane_axis, nodes)
+        print '(a,es10.2)', 'helical section: relative change of int R/2 dV', &
+            e_moved/e_base - 1
+        call check(abs(e_moved/e_base - 1) < 1e-12_dp, &
+                   'energy of an exact field in a section that moves with phi')
+    end subroutine geometry_identity
+
+    subroutine residual(derham, quad, axis0, w, nrow, ngrad, wall, chi, g, x, mu, r, hessian)
+        !! Newton residual in (chi, g, X_k, mu_k): stationarity with the
+        !! multipliers of chi_k(X_k) = 0, then grad chi_k(X_k) = 0 and
+        !! chi_k(X_k) = 0 per plane. X_k is the central vertex of the moving
+        !! core, so the rows nrow and ngrad of the base mesh hold for all X.
+        type(spline_derham_t), intent(in) :: derham
+        type(spline_quadrature_t), intent(in) :: quad
+        real(dp), intent(in) :: axis0(2), w(:), nrow(:), ngrad(:, :), chi(:), g(:), &
+                                x(:, :), mu(:)
+        integer, intent(in) :: wall(:)
+        real(dp), allocatable, intent(out) :: r(:)
+        type(csr_t), intent(out), optional :: hessian
+        real(dp), allocatable :: grad(:)
+        real(dp) :: energy
+        integer :: n0, k, a, nf
+
+        n0 = size(nrow)
+        nf = 2*n0*nt
+        call clebsch_3d_system(derham, quad, nt, solovev_profiles, axis0, chi, g, energy, grad, &
+                               hessian, x, core_nodes(axis0, w, x))
+        allocate (r(nf + 3*nt))
+        r(1:nf) = grad
+        do k = 1, nt
+            associate (chik => chi((k - 1)*n0 + 1:k*n0))
+                r((k - 1)*n0 + 1:k*n0) = r((k - 1)*n0 + 1:k*n0) + mu(k)*nrow
+                do a = 1, 2
+                    r(nf + 2*(k - 1) + a) = dot_product(ngrad(:, a), chik)
+                end do
+                r(nf + 2*nt + k) = dot_product(nrow, chik)
+            end associate
+        end do
+        r(wall) = 0
+    end subroutine residual
 
     subroutine solve(n, err, chi_err, steps, history)
         integer, intent(in) :: n
@@ -253,117 +334,156 @@ contains
         type(csr_t) :: hessian, jac_t
         real(dp), allocatable :: samples(:, :), chi2(:), chi(:), g(:), chi_exact(:), grad(:), &
                                  delta(:), nrow(:), ngrad(:, :), r(:), rp(:), rm(:), dgdx(:, :), &
-                                 rt(:), chi_avg(:), g_avg(:)
+                                 rt(:), chi_avg(:), g_avg(:), w(:), rv(:), zv(:)
         integer, allocatable :: wall2(:), wall(:)
-        real(dp) :: energy, axis(2), mu, alpha, spread_planes
-        real(dp), parameter :: hx = 1e-6_dp, unit2(2, 2) = reshape([1.0_dp, 0.0_dp, &
-                                                                    0.0_dp, 1.0_dp], [2, 2])
-        integer :: st, n0, ntot, it, i, k
+        real(dp) :: energy, axis0(2), x(2, nt), xp(2, nt), mu(nt), alpha, spread_planes, &
+                    axis_mean(2), tk
+        real(dp), parameter :: hx = 1e-6_dp
+        integer :: st, n0, ntot, nf, it, i, k, j
 
         call boundary_samples(samples)
-        axis = [r0, 0.0_dp]
-        call build_mesh(n, axis, samples, quad, aquad, derham)
+        axis0 = [r0, 0.0_dp]
+        call motion_weights(n, samples, axis0, w, rv, zv)
+        call build_mesh(n, axis0, samples, quad, aquad, derham)
+        call axis_jets(derham, axis0, nrow, ngrad)
         n0 = derham%dimension(0)
         ntot = n0*nt
+        nf = 2*ntot
         allocate (chi2(n0), chi_exact(n0), chi(ntot), g(ntot))
-        call spline_derham_project(derham, 0, perturbed_label, chi2, st, 12)
-        chi = [(chi2, k=1, nt)]
+        ! a non-axisymmetric start: labels and axes differ per plane
+        do k = 1, nt
+            tk = (k - 1)/real(nt, dp)
+            label_amplitude = amplitude*(1 + 0.5_dp*cos(2*pi*tk))
+            call spline_derham_project(derham, 0, perturbed_label, chi2, st, 12)
+            chi((k - 1)*n0 + 1:k*n0) = chi2
+            x(:, k) = axis0 + wall_offset(k) + axis_offset*[cos(2*pi*tk), sin(2*pi*tk)]
+        end do
         g = 0
         call spline_derham_boundary_dofs(derham, LAYOUT_WALL, 0, wall2)
         wall = [((k - 1)*n0 + wall2, k=1, nt)]
         chi(wall) = 1
         ! initial g: W is quadratic and convex in g at fixed labels
-        call clebsch_3d_system(derham, aquad, nt, profiles, axis, chi, g, energy, grad, hessian)
+        call clebsch_3d_system(derham, aquad, nt, solovev_profiles, axis0, chi, g, energy, grad, &
+                               hessian, x, core_nodes(axis0, w, x))
         call add_g_ridge(hessian, ntot)
-        allocate (delta(2*ntot))
+        allocate (delta(nf))
         call eu_constrained_solve(hessian, -grad, [(i, i=1, ntot)], 0*chi, delta, st)
         if (st /= 0) error stop 'g solve'
         g = g + delta(ntot + 1:)
         deallocate (delta)
         mu = 0
-        allocate (history(0), dgdx(2*ntot + 3, 2))
+        allocate (history(0), dgdx(nf + 3*nt, 2*nt))
         steps = 0
         do it = 1, max_steps
-            call build_mesh(n, axis, samples, quad, aquad, derham)
-            call average_jets(derham, axis, nrow, ngrad)
-            call clebsch_3d_system(derham, aquad, nt, profiles, axis, chi, g, energy, grad, &
-                                   hessian)
-            r = [grad + mu*[nrow, 0*nrow], matmul(chi, ngrad), dot_product(nrow, chi)]
-            r(wall) = 0
+            call residual(derham, aquad, axis0, w, nrow, ngrad, wall, chi, g, x, mu, r, hessian)
             history = [history, norm2(r)]
             if (it > 1) then
                 ! the X columns are central differences: 1e-8 is their floor
                 if (history(it) < 1e-8_dp*history(1)) exit
             end if
-            do k = 1, 2
-                call ale_residual(n, axis + hx*unit2(:, k), samples, chi, g, mu, wall, rp)
-                call ale_residual(n, axis - hx*unit2(:, k), samples, chi, g, mu, wall, rm)
-                dgdx(:, k) = (rp - rm)/(2*hx)
+            do j = 1, 2*nt
+                xp = x
+                xp(mod(j - 1, 2) + 1, (j + 1)/2) = x(mod(j - 1, 2) + 1, (j + 1)/2) + hx
+                call residual(derham, aquad, axis0, w, nrow, ngrad, wall, chi, g, xp, mu, rp)
+                xp(mod(j - 1, 2) + 1, (j + 1)/2) = x(mod(j - 1, 2) + 1, (j + 1)/2) - hx
+                call residual(derham, aquad, axis0, w, nrow, ngrad, wall, chi, g, xp, mu, rm)
+                dgdx(:, j) = (rp - rm)/(2*hx)
             end do
             call add_g_ridge(hessian, ntot)
-            call ale_system(hessian, nrow, ngrad, dgdx, jac_t)
-            allocate (delta(2*ntot + 3))
+            call ale_system(hessian, n0, nrow, ngrad, dgdx, jac_t)
+            allocate (delta(nf + 3*nt))
             call eu_constrained_solve(jac_t, -r, wall, 0*chi(wall), delta, st)
             if (st /= 0) error stop 'Newton solve'
+            ! non-monotone: from labels that differ per plane, |r| rises once
+            ! before the quadratic phase, and a monotone search stalls
             alpha = 1
             do k = 1, 8
-                call ale_residual(n, axis + alpha*delta(2*ntot + 1:2*ntot + 2), samples, &
-                                  chi + alpha*delta(1:ntot), g + alpha*delta(ntot + 1:2*ntot), &
-                                  mu + alpha*delta(2*ntot + 3), wall, rt)
-                if (norm2(rt) < (1 - alpha/4)*history(it)) exit
+                call residual(derham, aquad, axis0, w, nrow, ngrad, wall, &
+                              chi + alpha*delta(1:ntot), g + alpha*delta(ntot + 1:nf), &
+                              x + alpha*reshape(delta(nf + 1:nf + 2*nt), [2, nt]), &
+                              mu + alpha*delta(nf + 2*nt + 1:), rt)
+                if (norm2(rt) < 10*maxval(history)) exit
                 alpha = alpha/2
             end do
             chi = chi + alpha*delta(1:ntot)
-            g = g + alpha*delta(ntot + 1:2*ntot)
-            axis = axis + alpha*delta(2*ntot + 1:2*ntot + 2)
-            mu = mu + alpha*delta(2*ntot + 3)
+            g = g + alpha*delta(ntot + 1:nf)
+            x = x + alpha*reshape(delta(nf + 1:nf + 2*nt), [2, nt])
+            mu = mu + alpha*delta(nf + 2*nt + 1:)
             deallocate (delta)
             steps = steps + 1
         end do
-        call build_mesh(n, axis, samples, quad, aquad, derham)
+        if (wall_shift /= 0) then
+            do k = 1, nt
+                print '(a,i2,a,2f12.7,a,es12.4)', '  plane', k, ' X - wall offset', &
+                    x(:, k) - wall_offset(k), '  chi spread', &
+                    maxval(abs(chi((k - 1)*n0 + 1:k*n0) - chi(1:n0)))
+            end do
+            print '(a,es24.15)', '  energy', energy_at(derham, aquad, axis0, w, chi, g, x)
+            err = 0
+            chi_err = 0
+            return
+        end if
+        axis_mean = sum(x, 2)/nt
+        ! all X_k equal: the moved mesh is the mesh centred at their mean
+        call build_mesh(n, axis_mean, samples, quad, aquad, derham)
         call spline_derham_project(derham, 0, label, chi_exact, st, 12)
         chi_avg = sum(reshape(chi, [n0, nt]), 2)/nt
         g_avg = sum(reshape(g, [n0, nt]), 2)/nt
         spread_planes = maxval(abs(reshape(chi, [n0, nt]) - spread(chi_avg, 2, nt)))
-        err = field_error(derham, aquad, chi_avg, g_avg, axis)
+        err = field_error(derham, aquad, chi_avg, g_avg, axis_mean)
         chi_err = maxval(abs(chi_avg - chi_exact))
-        print '(a,2es11.3,a,es10.2)', '  axis - exact axis', axis - [r0, 0.0_dp], &
-            '  max plane deviation of chi', spread_planes
-        call check(spread_planes < 1e-8_dp, 'labels stay axisymmetric')
+        print '(a,2es11.3,a,es10.2,a,es10.2)', '  axis - exact axis', axis_mean - axis0, &
+            '  max plane deviation of X', maxval(abs(x - spread(axis_mean, 2, nt))), &
+            ' of chi', spread_planes
+        call check(spread_planes < 1e-8_dp, 'labels become axisymmetric')
+        call check(maxval(abs(x - spread(axis_mean, 2, nt))) < 1e-8_dp, &
+                   'the axis curve becomes a circle')
     end subroutine solve
 
-    subroutine ale_system(hessian, nrow, ngrad, dgdx, jac_t)
-        !! Transpose of the Newton matrix in (chi, g, X_R, X_Z, mu): the (chi, g)
+    real(dp) function energy_at(derham, quad, axis0, w, chi, g, x) result(energy)
+        type(spline_derham_t), intent(in) :: derham
+        type(spline_quadrature_t), intent(in) :: quad
+        real(dp), intent(in) :: axis0(2), w(:), chi(:), g(:), x(:, :)
+        real(dp), allocatable :: grad(:)
+
+        call clebsch_3d_system(derham, quad, nt, solovev_profiles, axis0, chi, g, energy, &
+                               grad, plane_axis=x, plane_nodes=core_nodes(axis0, w, x))
+    end function energy_at
+
+    subroutine ale_system(hessian, n0, nrow, ngrad, dgdx, jac_t)
+        !! Transpose of the Newton matrix in (chi, g, X_k, mu_k): the (chi, g)
         !! block is the Hessian, the X columns are dgdx (all rows, with the
-        !! mesh motion), the mu column is [N(X); 0; 0].
+        !! mesh motion), the mu_k column is N(X) on plane k.
         type(csr_t), intent(in) :: hessian
+        integer, intent(in) :: n0
         real(dp), intent(in) :: nrow(:), ngrad(:, :), dgdx(:, :)
         type(csr_t), intent(out) :: jac_t
         type(triplet_list) :: t
-        integer :: n0, nf, i, k
+        integer :: nf, nx, i, j, k, a
 
-        n0 = size(nrow)
-        nf = 2*n0
-        call t%init(size(hessian%val) + 4*size(dgdx, 1) + 2*n0 + 4)
+        nf = 2*n0*nt
+        nx = 2*nt
+        call t%init(size(hessian%val) + nx*size(dgdx, 1) + 6*n0*nt + 4*nt)
         call t%add_csr(hessian, 0, 0)
-        do k = 1, 2
-            do i = 1, nf + 3
-                ! J(i, X_k) = dgdx(i, k); in the transpose: row X_k, column i
-                if (dgdx(i, k) /= 0) call t%add(nf + k, i, dgdx(i, k))
+        do j = 1, nx
+            do i = 1, nf + 3*nt
+                ! J(i, X_j) = dgdx(i, j); in the transpose: row X_j, column i
+                if (dgdx(i, j) /= 0) call t%add(nf + j, i, dgdx(i, j))
             end do
-            call t%add(nf + k, nf + k, 0.0_dp)
+            call t%add(nf + j, nf + j, 0.0_dp)
+        end do
+        do k = 1, nt
             do i = 1, n0
-                ! J(X_k, chi_i) = dN_i/dX_k (the X rows of the residual)
-                call t%add(i, nf + k, ngrad(i, k))
+                do a = 1, 2
+                    ! J(X_k rows, chi_i on plane k) = d N_i/dX at X
+                    call t%add((k - 1)*n0 + i, nf + 2*(k - 1) + a, ngrad(i, a))
+                end do
+                call t%add(nf + nx + k, (k - 1)*n0 + i, nrow(i))
+                call t%add((k - 1)*n0 + i, nf + nx + k, nrow(i))
             end do
+            call t%add(nf + nx + k, nf + nx + k, 0.0_dp)
         end do
-        do i = 1, n0
-            ! J(chi_i, mu) = N_i(X) and J(mu, chi_i) = N_i(X)
-            call t%add(nf + 3, i, nrow(i))
-            call t%add(i, nf + 3, nrow(i))
-        end do
-        call t%add(nf + 3, nf + 3, 0.0_dp)
-        call t%to_csr(nf + 3, nf + 3, jac_t)
+        call t%to_csr(nf + 3*nt, nf + 3*nt, jac_t)
     end subroutine ale_system
 
     subroutine axis_jets(derham, axis, nrow, ngrad)
@@ -443,7 +563,7 @@ contains
                 gg = matmul(gn(:, :, q), g(d0))
                 th = [-(s(2) - axis(2)), s(1) - axis(1)]/((s(1) - axis(1))**2 + &
                                                             (s(2) - axis(2))**2)
-                call profiles(c, f, gp, pr)
+                call solovev_profiles(c, f, gp, pr)
                 bphi = gg(2)*gc(1) - gg(1)*gc(2) - f(1)*(gc(1)*th(2) - gc(2)*th(1))
                 bpol = gp(1)*[-gc(2), gc(1)]/s(1)
                 b_ex = exact_b(x)

@@ -21,6 +21,11 @@ module solovev_label_fields
     real(dp), parameter, public :: pi = acos(-1.0_dp), source = 8*alpha + 2*beta
     integer, parameter :: rays = 128
     logical, public :: nonlinear_label = .false.
+    ! Chebyshev coefficients of F(chi) on [0, cheb_top] and of its x derivatives
+    integer, parameter :: cheb_n = 40
+    real(dp), parameter :: cheb_top = 1.1_dp
+    real(dp) :: cheb(0:cheb_n - 1, 0:3)
+    logical :: cheb_ready = .false.
     type(spline_space_t), public :: space
     type(curve_chart_t), public :: chart
 
@@ -38,7 +43,7 @@ module solovev_label_fields
 
     public :: psi, grad_psi, full, section_jet, potential, exact_b, metric2, det3, &
               ray_radius, enclosed_current, winding, label, label_inverse, &
-              boundary_samples, l2_error, apply, curl
+              boundary_samples, l2_error, apply, curl, toroidal_flux, solovev_profiles
 
 contains
 
@@ -319,5 +324,88 @@ contains
         a%col = m%row_idx
         a%val = m%val
     end subroutine triplet_to_csr
+
+    pure real(dp) function toroidal_flux(chi) result(phi)
+        !! f0 int_{S(chi)} dA/R by rays from the axis, 8-point Gauss in rho.
+        real(dp), intent(in) :: chi
+        real(dp), parameter :: x8(8) = [-0.9602898564975363_dp, -0.7966664774136267_dp, &
+                                         -0.5255324099163290_dp, -0.1834346424956498_dp, &
+                                         0.1834346424956498_dp, 0.5255324099163290_dp, &
+                                         0.7966664774136267_dp, 0.9602898564975363_dp]
+        real(dp), parameter :: w8(8) = [0.1012285362903763_dp, 0.2223810344533745_dp, &
+                                         0.3137066458778873_dp, 0.3626837833783620_dp, &
+                                         0.3626837833783620_dp, 0.3137066458778873_dp, &
+                                         0.2223810344533745_dp, 0.1012285362903763_dp]
+        real(dp) :: theta, rho1, rho
+        integer :: i, j
+
+        phi = 0
+        if (chi <= 0) return
+        do i = 1, rays
+            theta = 2*pi*(i - 1)/rays
+            rho1 = ray_radius(chi*psi_b, theta)
+            do j = 1, 8
+                rho = rho1*(x8(j) + 1)/2
+                phi = phi + w8(j)*rho1/2*rho/(r0 + rho*cos(theta))
+            end do
+        end do
+        phi = f0*phi*2*pi/rays
+    end function toroidal_flux
+
+    subroutine solovev_profiles(chi, f, g, p)
+        !! Profiles of the Solov'ev label lane: F = -Phi(chi)/(2 pi) with Phi
+        !! the toroidal flux, G = psi_b chi, p = source psi_b (1 - chi).
+        !! f, g hold the first three chi derivatives of F and G, p holds p and
+        !! its first two. F is a Chebyshev series on [0, 1.1], so the Newton
+        !! residual is smooth in chi; below the axis label 0 it continues as
+        !! the same polynomial.
+        real(dp), intent(in) :: chi
+        real(dp), intent(out) :: f(3), g(3), p(3)
+        real(dp) :: x, b0, b1, b2
+        integer :: m, k
+
+        if (.not. cheb_ready) call fit_flux()
+        x = 2*chi/cheb_top - 1
+        do m = 1, 3
+            b1 = 0
+            b2 = 0
+            do k = cheb_n - 1, 1, -1
+                b0 = 2*x*b1 - b2 + cheb(k, m)
+                b2 = b1
+                b1 = b0
+            end do
+            f(m) = (x*b1 - b2 + cheb(0, m)/2)*(2/cheb_top)**m
+        end do
+        g = [psi_b, 0.0_dp, 0.0_dp]
+        p = [source*psi_b*(1 - chi), -source*psi_b, 0.0_dp]
+    end subroutine solovev_profiles
+
+    subroutine fit_flux()
+        !! Chebyshev coefficients of F at the Chebyshev points and of its
+        !! first three x derivatives, term by term.
+        real(dp) :: values(0:cheb_n - 1), x
+        integer :: j, k, m
+
+        do j = 0, cheb_n - 1
+            x = cos(pi*(j + 0.5_dp)/cheb_n)
+            values(j) = -toroidal_flux(cheb_top*(x + 1)/2)/(2*pi)
+        end do
+        do k = 0, cheb_n - 1
+            cheb(k, 0) = 2*sum(values*cos(pi*k*([(j, j=0, cheb_n - 1)] + 0.5_dp)/cheb_n)) &
+                         /cheb_n
+        end do
+        do m = 1, 3
+            cheb(:, m) = 0
+            do k = cheb_n - 1, 1, -1
+                ! c'_(k-1) = c'_(k+1) + 2 k c_k, c_0 counted half
+                if (k + 1 <= cheb_n - 1) then
+                    cheb(k - 1, m) = cheb(k + 1, m) + 2*k*cheb(k, m - 1)
+                else
+                    cheb(k - 1, m) = 2*k*cheb(k, m - 1)
+                end if
+            end do
+        end do
+        cheb_ready = .true.
+    end subroutine fit_flux
 
 end module solovev_label_fields
