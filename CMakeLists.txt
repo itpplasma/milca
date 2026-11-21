@@ -2291,9 +2291,11 @@ target_link_libraries(test_gs_nonlinear PRIVATE milca)
 add_test(NAME grad_shafranov_p2_nonlinear_convergence COMMAND test_gs_nonlinear 2)
 add_test(NAME grad_shafranov_p3_nonlinear_convergence COMMAND test_gs_nonlinear 3)
 add_test(NAME grad_shafranov_p3_spline_knot_convergence COMMAND test_gs_nonlinear 3 knots)
+add_test(NAME grad_shafranov_p3_pedestal_seed_convergence COMMAND test_gs_nonlinear 3 pedestal)
 set_tests_properties(grad_shafranov_p2_nonlinear_convergence
     grad_shafranov_p3_nonlinear_convergence
-    grad_shafranov_p3_spline_knot_convergence PROPERTIES
+    grad_shafranov_p3_spline_knot_convergence
+    grad_shafranov_p3_pedestal_seed_convergence PROPERTIES
     TIMEOUT 300 ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 target_link_libraries(test_gs_p3 PRIVATE milca)
 add_test(NAME grad_shafranov_p3_physical_oracles COMMAND test_gs_p3)

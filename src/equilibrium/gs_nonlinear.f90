@@ -400,152 +400,152 @@ contains
         status = 0
         message = ''
         scr%values = 0
-            cell_points(:, :ndof) = state%points(:, state%triangles(:, e))
-            local_psi(:ndof) = state%psi(state%triangles(:, e))
-            if (present(cell_psi)) local_psi(:ndof) = cell_psi(:ndof, e)
-            if (maxval(abs(local_psi(:ndof) - local_psi(1))) <= 0) then
-                if (gs_law_kink(law, local_psi(1))) then
-                    status = 4
-                    return
-                end if
+        cell_points(:, :ndof) = state%points(:, state%triangles(:, e))
+        local_psi(:ndof) = state%psi(state%triangles(:, e))
+        if (present(cell_psi)) local_psi(:ndof) = cell_psi(:ndof, e)
+        if (maxval(abs(local_psi(:ndof) - local_psi(1))) <= 0) then
+            if (gs_law_kink(law, local_psi(1))) then
+                status = 4
+                return
             end if
-            call triangle_bernstein_controls(local_psi(:ndof), controls(:ndof))
-            low = minval(controls(:ndof)); high = maxval(controls(:ndof))
-            left = count(levels <= low) + 1; right = count(levels < high)
-            nlevels = max(0, right - left + 1)
-            ! A load-only evaluation with no extra forcing gets nothing from a cell
-            ! whose flux range touches only intervals where both laws vanish
-            ! identically: skip it exactly (boundary lifting is in the gather).
-            if (.not. need_jacobian .and. .not. present(forcing) &
+        end if
+        call triangle_bernstein_controls(local_psi(:ndof), controls(:ndof))
+        low = minval(controls(:ndof)); high = maxval(controls(:ndof))
+        left = count(levels <= low) + 1; right = count(levels < high)
+        nlevels = max(0, right - left + 1)
+        ! A load-only evaluation with no extra forcing gets nothing from a cell
+        ! whose flux range touches only intervals where both laws vanish
+        ! identically: skip it exactly (boundary lifting is in the gather).
+        if (.not. need_jacobian .and. .not. present(forcing) &
             .and. .not. free_mode .and. state%symmetry%kind /= GS_SCREW) then
-                if (law_vanishes(left - 1, right)) return
-            end if
-            closed_cut = .false.
-            if (nlevels > 0 .and. smooth_law) closed_cut = possible_closed_cut()
+            if (law_vanishes(left - 1, right)) return
+        end if
+        closed_cut = .false.
+        if (nlevels > 0 .and. smooth_law) closed_cut = possible_closed_cut()
+        scr%values = 0
+        scale = max(1.0_dp, mu0*maxval(abs(law%pp(1, :))) &
+                    + maxval(abs(law%ff(1, :))))*2*state%area(e)
+        scr%epsabs = scr%rtol*scale
+        integrated = .false.
+        if (nlevels > 0 .and. smooth_law .and. .not. closed_cut) then
             scr%values = 0
-            scale = max(1.0_dp, mu0*maxval(abs(law%pp(1, :))) &
-                        + maxval(abs(law%ff(1, :))))*2*state%area(e)
-            scr%epsabs = scr%rtol*scale
-            integrated = .false.
-            if (nlevels > 0 .and. smooth_law .and. .not. closed_cut) then
-                scr%values = 0
-                do rule = 1, size(scr%rules)
-                    call smooth_rule(rule, scr%high_values)
-                    if (status /= 0) return
-                    if (need_jacobian) call jacobian_epsabs()
-                    if (rule > 1) then
-                        if (all(abs(scr%high_values - scr%values) <= scr%epsabs + &
-                            scr%rtol*abs(scr%high_values))) then
-                            integrated = .true.
-                            exit
-                        end if
-                    end if
-                    scr%values = scr%high_values
-                end do
-                scr%values = scr%high_values
-            end if
-            if (integrated) then
-                continue
-            else if (nlevels == 0) then
-                call rule_integral(tables%w, tables%grads, tables%shapes_t, &
-                                   scr%values)
-                if (status /= 0) return
-                call rule_integral(tables%wh, tables%grads_h, tables%shapes_ht, &
-                                   scr%high_values)
+            do rule = 1, size(scr%rules)
+                call smooth_rule(rule, scr%high_values)
                 if (status /= 0) return
                 if (need_jacobian) call jacobian_epsabs()
-                if (any(abs(scr%high_values - scr%values) > scr%epsabs + tol*0.1_dp &
-                        *abs(scr%high_values))) then
-                    coefficients = 0
-                    call integrate_triangle_levels(coefficients, [real(dp) ::], &
-                        source_products, scr%epsabs, tol*0.1_dp, scr%workspace, &
-                        scr%values, scr%errors, status, message)
-                    if (status /= 0) then
-                        print *, 'smooth profile quadrature cell:', e, trim(message)
-                        return
+                if (rule > 1) then
+                    if (all(abs(scr%high_values - scr%values) <= scr%epsabs + &
+                        scr%rtol*abs(scr%high_values))) then
+                        integrated = .true.
+                        exit
                     end if
-                else
-                    scr%values = scr%high_values
                 end if
-            else
-                if (state%element_order >= 2 .and. smooth_law .and. &
-                    .not. closed_cut) then
-                    band_lower = -huge(1.0_dp); band_upper = huge(1.0_dp)
-                    ne = 2; scr%events(:2) = [0.0_dp, 1.0_dp]
-                    coefficients = [0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp]
-                    last_x = -1
-                    call integrate_triangle_levels(coefficients, scr%events(:ne), &
-                        cut_products, scr%epsabs, tol, scr%workspace, scr%values, &
-                        scr%errors, status, message)
-                else if (state%element_order <= 1) then
-                    call triangle_level_coefficients(state%element_order, &
-                                                 local_psi(:ndof), coefficients, status)
-                    if (status /= 0) return
-                    call integrate_triangle_levels(coefficients, levels(left:right), &
-                        source_products, scr%epsabs, tol*0.1_dp, scr%workspace, &
-                        scr%values, scr%errors, status, message)
-                else
-                    ! P2 and P3 share this path. One flux band at a time: work grows with the number of
-                    ! knots rather than repeating all bands at every event.
-                    ! FortFEM owns the positive paired adaptive integration.
-                    cell_left = left; cell_right = right; scr%cell_values = 0
-                    do band = 0, nlevels
-                        band_lower = -huge(1.0_dp); band_upper = huge(1.0_dp)
-                        if (band > 0) band_lower = levels(cell_left + band - 1)
-                        if (band < nlevels) band_upper = levels(cell_left + band)
-                        left = max(cell_left, cell_left + band - 1)
-                        right = min(cell_right, cell_left + band)
-                        scr%events(:2) = [0.0_dp, 1.0_dp]; ne = 2
-                        do ix = 1, 2
-                            do i = 1, 4
-                                actual = [real(i - 1, dp)/3, 0.0_dp]
-                                if (ix == 2) actual(2) = 1 - actual(1)
-                                edge_values(i) = flux_value(actual)
-                            end do
-                            do j = left, right
-                             call cubic_segment_roots(edge_values, levels(j), roots, nr)
-                                scr%events(ne + 1:ne + nr) = roots(:nr); ne = ne + nr
-                            end do
-                        end do
-                        call tangency_events()
-                        if (status /= 0) return
-                        call sort_cuts(scr%events, ne)
-                        call cut_rule(4, scr%values)
-                        if (status /= 0) return
-                        call cut_rule(8, scr%high_values)
-                        if (status /= 0) return
-                        scr%errors = abs(scr%high_values - scr%values)
-                        scr%epsabs(:ndof) = max(tol*scale*0.01_dp/(nlevels + 1), &
-                            tol*0.1_dp*maxval(abs(scr%high_values(:ndof))))
-                        if (need_jacobian) then
-                            scr%epsabs(ndof + 1:) = &
-                                max(jtol*scale*0.01_dp/(nlevels + 1), &
-                                    jtol*0.1_dp*maxval(abs(scr%high_values(ndof + 1:))))
-                        end if
-                        coefficients = [0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp]
-                        last_x = -1
-                        if (all(scr%errors <= scr%epsabs &
-                                + tol*0.1_dp*abs(scr%high_values))) then
-                            scr%values = scr%high_values
-                        else
-                            call integrate_triangle_levels(coefficients, &
-                                  scr%events(:ne), cut_products, scr%epsabs, &
-                                  tol*0.1_dp, scr%workspace, scr%values, &
-                                  scr%errors, status, message)
-                        end if
-                        if (status /= 0) exit
-                        scr%cell_values = scr%cell_values + scr%values
-                    end do
-                    scr%values = scr%cell_values
-                end if
+                scr%values = scr%high_values
+            end do
+            scr%values = scr%high_values
+        end if
+        if (integrated) then
+            continue
+        else if (nlevels == 0) then
+            call rule_integral(tables%w, tables%grads, tables%shapes_t, &
+                               scr%values)
+            if (status /= 0) return
+            call rule_integral(tables%wh, tables%grads_h, tables%shapes_ht, &
+                               scr%high_values)
+            if (status /= 0) return
+            if (need_jacobian) call jacobian_epsabs()
+            if (any(abs(scr%high_values - scr%values) > scr%epsabs + tol*0.1_dp &
+                    *abs(scr%high_values))) then
+                coefficients = 0
+                call integrate_triangle_levels(coefficients, [real(dp) ::], &
+                    source_products, scr%epsabs, tol*0.1_dp, scr%workspace, &
+                    scr%values, scr%errors, status, message)
                 if (status /= 0) then
-                   print *, 'profile quadrature cell/status: ', e, status, trim(message)
-                    print *, 'cuts, panels, evaluations, depth:', nlevels, &
-                        scr%workspace%npanels, scr%workspace%nevaluations, &
-                        scr%workspace%inner_depth
+                    print *, 'smooth profile quadrature cell:', e, trim(message)
                     return
                 end if
+            else
+                scr%values = scr%high_values
             end if
+        else
+            if (state%element_order >= 2 .and. smooth_law .and. &
+                .not. closed_cut) then
+                band_lower = -huge(1.0_dp); band_upper = huge(1.0_dp)
+                ne = 2; scr%events(:2) = [0.0_dp, 1.0_dp]
+                coefficients = [0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp]
+                last_x = -1
+                call integrate_triangle_levels(coefficients, scr%events(:ne), &
+                    cut_products, scr%epsabs, tol, scr%workspace, scr%values, &
+                    scr%errors, status, message)
+            else if (state%element_order <= 1) then
+                call triangle_level_coefficients(state%element_order, &
+                                             local_psi(:ndof), coefficients, status)
+                if (status /= 0) return
+                call integrate_triangle_levels(coefficients, levels(left:right), &
+                    source_products, scr%epsabs, tol*0.1_dp, scr%workspace, &
+                    scr%values, scr%errors, status, message)
+            else
+                ! P2 and P3 share this path. One flux band at a time: work grows with the number of
+                ! knots rather than repeating all bands at every event.
+                ! FortFEM owns the positive paired adaptive integration.
+                cell_left = left; cell_right = right; scr%cell_values = 0
+                do band = 0, nlevels
+                    band_lower = -huge(1.0_dp); band_upper = huge(1.0_dp)
+                    if (band > 0) band_lower = levels(cell_left + band - 1)
+                    if (band < nlevels) band_upper = levels(cell_left + band)
+                    left = max(cell_left, cell_left + band - 1)
+                    right = min(cell_right, cell_left + band)
+                    scr%events(:2) = [0.0_dp, 1.0_dp]; ne = 2
+                    do ix = 1, 2
+                        do i = 1, 4
+                            actual = [real(i - 1, dp)/3, 0.0_dp]
+                            if (ix == 2) actual(2) = 1 - actual(1)
+                            edge_values(i) = flux_value(actual)
+                        end do
+                        do j = left, right
+                            call cubic_segment_roots(edge_values, levels(j), roots, nr)
+                            scr%events(ne + 1:ne + nr) = roots(:nr); ne = ne + nr
+                        end do
+                    end do
+                    call tangency_events()
+                    if (status /= 0) return
+                    call sort_cuts(scr%events, ne)
+                    call cut_rule(4, scr%values)
+                    if (status /= 0) return
+                    call cut_rule(8, scr%high_values)
+                    if (status /= 0) return
+                    scr%errors = abs(scr%high_values - scr%values)
+                    scr%epsabs(:ndof) = max(tol*scale*0.01_dp/(nlevels + 1), &
+                        tol*0.1_dp*maxval(abs(scr%high_values(:ndof))))
+                    if (need_jacobian) then
+                        scr%epsabs(ndof + 1:) = &
+                            max(jtol*scale*0.01_dp/(nlevels + 1), &
+                                jtol*0.1_dp*maxval(abs(scr%high_values(ndof + 1:))))
+                    end if
+                    coefficients = [0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp]
+                    last_x = -1
+                    if (all(scr%errors <= scr%epsabs &
+                            + tol*0.1_dp*abs(scr%high_values))) then
+                        scr%values = scr%high_values
+                    else
+                        call integrate_triangle_levels(coefficients, &
+                              scr%events(:ne), cut_products, scr%epsabs, &
+                              tol*0.1_dp, scr%workspace, scr%values, &
+                              scr%errors, status, message)
+                    end if
+                    if (status /= 0) exit
+                    scr%cell_values = scr%cell_values + scr%values
+                end do
+                scr%values = scr%cell_values
+            end if
+            if (status /= 0) then
+                print *, 'profile quadrature cell/status: ', e, status, trim(message)
+                print *, 'cuts, panels, evaluations, depth:', nlevels, &
+                    scr%workspace%npanels, scr%workspace%nevaluations, &
+                    scr%workspace%inner_depth
+                return
+            end if
+        end if
     contains
         subroutine jacobian_epsabs()
             ! The Jacobian entries (source derivative times shape products) are
@@ -694,15 +694,15 @@ contains
                     scr%batch%af(node) = 0
                 end do
             else
-            if (need_jacobian) then
-                call gs_source_tangents_batch(np, scr%batch%r(:np), mu0, &
-                    scr%batch%pp(:np), scr%batch%ff(:np), scr%batch%dpp(:np), &
-                    scr%batch%dff(:np), scr%batch%app(:np), scr%batch%aff(:np), &
-                    scr%batch%f(:np), scr%batch%df(:np), scr%batch%af(:np))
-            else
-                call gs_source_batch(np, scr%batch%r(:np), mu0, scr%batch%pp(:np), &
-                                     scr%batch%ff(:np), scr%batch%f(:np))
-            end if
+                if (need_jacobian) then
+                    call gs_source_tangents_batch(np, scr%batch%r(:np), mu0, &
+                        scr%batch%pp(:np), scr%batch%ff(:np), scr%batch%dpp(:np), &
+                        scr%batch%dff(:np), scr%batch%app(:np), scr%batch%aff(:np), &
+                        scr%batch%f(:np), scr%batch%df(:np), scr%batch%af(:np))
+                else
+                    call gs_source_batch(np, scr%batch%r(:np), mu0, scr%batch%pp(:np), &
+                                         scr%batch%ff(:np), scr%batch%f(:np))
+                end if
             end if
             if (present(forcing)) then
                 do node = 1, np
@@ -1214,15 +1214,24 @@ contains
         if (tol <= 0 .or. tol >= 1) return
         if (maxval(abs(state%psi)) <= tiny(1.0_dp) &
             .and. state%symmetry%kind /= GS_SCREW) then
-            call gs_law_sources(law, 0.0_dp, pp, ff)
-            if (abs(pp) + abs(ff) <= tiny(1.0_dp)) &
-                call gs_law_sources(law, 0.5_dp*law%axis, pp, ff)
+            ! linear seed from the mean sources over the flux range: the edge
+            ! values alone may have the opposite sign (a pressure that rises
+            ! towards a pedestal) and seed the unsupported branch
+            block
+                real(dp) :: pk, fk
+                integer :: k
+                pp = 0; ff = 0
+                do k = 1, 16
+                    call gs_law_sources(law, law%axis*(1 - (k - 0.5_dp)/16), pk, fk)
+                    pp = pp + pk/16; ff = ff + fk/16
+                end do
+            end block
             call solve_gs(state, mu0, pp, ff, status)
             if (status /= 0) return
 
         end if
         allocate (rhs(size(state%psi)), action(size(state%psi)), &
-           step(size(state%psi)), previous(size(state%psi)), trial_rhs(size(state%psi)))
+            step(size(state%psi)), previous(size(state%psi)), trial_rhs(size(state%psi)))
         state%iterations = 0
         stalled = 0; stall_norm = 0
         ! Algebraic convergence and source integration are separate controls.

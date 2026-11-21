@@ -240,6 +240,16 @@ contains
         call solve_gs_prescribed_q(trial, mu0, 0.0_dp, sq, qq, ph, ok_law, st, &
                                    pressure_law=bad)
         if (st == 0) error stop 'negative pressure accepted'
+        ! The same law above an edge pressure that keeps p >= 0 is physical:
+        ! only p' enters, and the edge pressure reaches the returned law.
+        call circle_state(trial, n)
+        bad%p_edge = 10*abs(pp_scale)*a*a*5.3_dp/3
+        call solve_gs_prescribed_q(trial, mu0, 0.0_dp, sq, qq, ph, ok_law, st, &
+                                   pressure_law=bad)
+        if (st /= 0) error stop 'pressure above its edge value rejected'
+        if (abs(ok_law%p_edge - bad%p_edge) > 0) error stop 'edge pressure not carried'
+        bad%p_edge = 0
+        call circle_state(trial, n)
         ! Positive pprime on the constant path is the same negative pressure.
         call solve_gs_prescribed_q(trial, mu0, 1.0e3_dp, sq, qq, ph, ok_law, st)
         if (st == 0) error stop 'positive scalar pprime accepted'

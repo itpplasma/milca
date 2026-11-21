@@ -8,12 +8,12 @@ the supported branch has an interior minimum of psi and nonnegative pressure.
 The pressure source is either the scalar `pprime` (a constant law) or the
 optional `pressure_law`, a normalized piecewise-cubic `gs_profile_law_t` whose
 knots span 0..1 and whose `pp` coefficients are physical dp/dpsi in Pa/(Wb/rad)
-as a function of s_pol (0 axis, 1 edge). Only its knots and `pp` are used;
-`pprime` is then ignored. The recovered law lives on the union of the FFprime
+as a function of s_pol (0 axis, 1 edge). Its knots, `pp` and `p_edge` are
+used; `pprime` is then ignored. The recovered law lives on the union of the FFprime
 spline breaks and the pressure knots (exact Taylor re-expansion). A constant
 pressure law on [0,1] reproduces the scalar path bit for bit. The sign
 guard is per point: with psi_axis<0 and psi_edge=0 the pressure
-p(s)=psi_axis*integral_s^1 pp ds' must be nonnegative on a 32-point probe of
+p(s)=p_edge+psi_axis*integral_s^1 pp ds' must be nonnegative on a 32-point probe of
 every interval, evaluated with the law's own primitive (`gs_law_primitives`).
 For a constant law this is pprime<=0; a variable p' may be positive on part
 of the interval while p stays nonnegative. A discontinuous, unnormalized or

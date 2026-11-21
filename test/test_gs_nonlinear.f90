@@ -11,7 +11,7 @@ program test_gs_nonlinear
     real(dp) :: a, level
     real(dp), parameter :: c = f/(12*r0**3)
     type(gs_state_t) :: state
-    type(gs_profile_law_t) :: law, absolute_law
+    type(gs_profile_law_t) :: law, absolute_law, edge_law
     real(dp), allocatable :: boundary(:, :), x(:), y(:), w(:)
     real(dp) :: errors(3, 3), rates(2), point(2), det, shape(10)
     real(dp) :: gradients(2, 10), hessians(2, 2, 10), grad(2), exact_grad(2)
@@ -19,14 +19,14 @@ program test_gs_nonlinear
     real(dp) :: s, base, majorant, flux_defect, balance_defect, effectivity, alpha
     real(dp), parameter :: knot_width = 1.0_dp/512, frequency = 7.4_dp
     real(dp), parameter :: positive_slope = 0.02_dp
-    logical :: knot_case
+    logical :: knot_case, pedestal_case
     integer :: segments
     integer :: counts(3)
     integer :: mesh, n, j, e, q, status, degree, ndof
     character(8) :: argument
     integer(int64) :: start, finish, clock_rate
     degree = 3
-    knot_case = .false.
+    knot_case = .false.; pedestal_case = .false.
     if (command_argument_count() > 0) then
         call get_command_argument(1, argument)
         read (argument, *) degree
@@ -34,6 +34,9 @@ program test_gs_nonlinear
     if (command_argument_count() > 1) then
         call get_command_argument(2, argument)
         knot_case = trim(argument) == 'knots'
+        ! a source that changes sign at the edge (mean positive): the seed
+        ! must not take the edge value alone
+        pedestal_case = trim(argument) == 'pedestal'
     end if
     a = r0/3
     level = 4*r0*r0*a*a
@@ -46,6 +49,8 @@ program test_gs_nonlinear
     do j = 1, segments
         s = law%knots(j)
         law%pp(:, j) = base*[1 + 0.2_dp*s*s, 0.4_dp*s, 0.2_dp, 0.0_dp]
+        if (pedestal_case) law%pp(:, j) = base*[source_shape(s), &
+            0.4_dp*s - 7.5_dp*s*s, 0.2_dp - 7.5_dp*s, -2.5_dp]
         if (knot_case) law%pp(:, j) = base*[source_shape(s), &
             0.4_dp*s + 0.07_dp*cos(frequency*s), &
             0.2_dp + 0.035_dp*(cos(frequency*(s + knot_width)) &
@@ -107,7 +112,7 @@ program test_gs_nonlinear
         errors(:, mesh) = sqrt(errors(:, mesh))
         print '(i4,1x,i7,4(1x,es13.5))', n, &
             count(.not. state%boundary), elapsed, errors(:, mesh)
-        if (mesh == 1) then
+        if (mesh == 1 .and. .not. pedestal_case) then
             ! The exact manufactured problem also has an absolute-flux law
             ! with nonpositive source derivative: alpha=1 by monotonicity.
             absolute_law = law
@@ -158,6 +163,36 @@ program test_gs_nonlinear
         if (abs(rates(2) - degree) > 0.5_dp) error stop 'curved B L2 rate'
     end do
     if (maxval(counts) - minval(counts) > 2) error stop 'Newton mesh dependence'
+    if (pedestal_case) then
+        ! Unforced, from psi = 0: the seed must come from the mean sources,
+        ! not from the edge value, whose sign is reversed here.
+        n = 32
+        allocate (boundary(2, n))
+        do j = 1, n
+            call exact_boundary(real(j - 1, dp)/n, boundary(:, j))
+        end do
+        h = 2*acos(-1.0_dp)*a/n
+        call initialize_gs(state, boundary, h*h/2, status, degree, curve=exact_boundary)
+        if (status /= 0) error stop 'mesh initialization'
+        ! p' constant up to s = 0.97, then a C1 cubic to the opposite sign at
+        ! the edge (the shape of a pressure polynomial rising to its edge value)
+        edge_law%knots = [0.0_dp, 0.97_dp, 1.0_dp]
+        allocate (edge_law%pp(4, 2), edge_law%ff(4, 2))
+        edge_law%normalized = .true.; edge_law%axis = -c*level
+        edge_law%p_edge = 0; edge_law%f_edge = f
+        edge_law%ff = 0; edge_law%pp = 0
+        edge_law%pp(1, 1) = base
+        edge_law%pp(:, 2) = [base, 0.0_dp, -6*base/0.03_dp**2, 4*base/0.03_dp**3]
+        ! FF' rising to r0^2 base at the edge, so that the edge source R p' +
+        ! FF'/R changes sign across the plasma (as on DIII-D)
+        edge_law%ff(:, 2) = r0*r0*base*[0.0_dp, 0.0_dp, 3/0.03_dp**2, -2/0.03_dp**3]
+        call solve_gs_cubic_profiles(state, 1.0_dp, edge_law, status, &
+                                     relative_tolerance=1.0e-10_dp)
+        print *, 'unforced edge-reversal status/iterations/axis:', status, &
+            state%iterations, edge_law%axis
+        if (status /= 0) error stop 'edge-reversed source from psi = 0'
+        if (.not. edge_law%axis < 0) error stop 'edge-reversed source axis branch'
+    end if
 contains
     function positive_source_forcing(r, z) result(source)
         real(dp), intent(in) :: r, z
@@ -177,6 +212,7 @@ contains
         real(dp) :: t, d, integral
         integer :: k
         value = 1 + 0.2_dp*s*s
+        if (pedestal_case) value = value - 2.5_dp*s**3
         if (.not. knot_case) return
         k = min(511, max(0, int(s/knot_width)))
         t = k*knot_width; d = s - t
