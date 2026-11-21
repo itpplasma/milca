@@ -23,7 +23,7 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
 include_directories(${CMAKE_Fortran_MODULE_DIRECTORY})
 # Dependency pins: one source used by FetchContent and by result provenance.
 set(MILCA_FORTPLOT_REVISION "1645fa41c11b5786c71bc27e5b41dae7c7bbba23")
-set(MILCA_FORTNUM_REVISION "9a62001569b30c055634391ffedfec0dd8350b22")
+set(MILCA_FORTNUM_REVISION "d21fe359a90ad8de2ba919e78eeb1784bbf3b38e")
 set(MILCA_FORTIO_REVISION 32a486e1efa507503b456fe49be4b21e32832459)
 set(FORTPLOT_BUILD_FORTARRAY_ADAPTER OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(fortplot
@@ -343,7 +343,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # second-kind Nedelec edges #148, exact moment gradients #149 and the
 # boundary trace projection #152, the toroidal period #154 and its tensor
 # forms #160, factored anisotropic apply).
-set(MILCA_FORTFEM_REVISION "9ef980ed1d1e83b82e4002ae5b6b2256a5d36298")
+set(MILCA_FORTFEM_REVISION "5e8af5309bc885ccc33df755d3af1831466ee189")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -376,7 +376,18 @@ add_library(milca_spatial ${MILCA_TRIANGLE_SOURCES}
     ${fortfem_SOURCE_DIR}/src/bem/axisymmetric_gs_single_layer_shape_2d.f90
     ${fortfem_SOURCE_DIR}/src/estimators/bem_residual_energy.f90
     ${fortfem_SOURCE_DIR}/src/generated/fortfem_nurbs_geometry_products.f90
-    ${fortfem_SOURCE_DIR}/src/elements/bspline_feec.f90)
+    ${fortfem_SOURCE_DIR}/src/elements/bspline_feec.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/tensor_line_tables.f90
+    ${fortfem_SOURCE_DIR}/src/generated/fortfem_interval_bernstein_jets.f90
+    ${fortfem_SOURCE_DIR}/src/elements/interval_bernstein_jets.f90
+    ${fortfem_SOURCE_DIR}/src/elements/multipatch_dof_graph.f90
+    ${fortfem_SOURCE_DIR}/src/elements/spline_extraction_1d.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_layout.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_c1.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_space.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/gll_line.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_eval.f90
+    ${fortfem_SOURCE_DIR}/src/discretisation/spline_energy.f90)
 target_link_libraries(milca_spatial PUBLIC milca_ode milca_intervals milca_field)
 # Field layer: what a client needs to evaluate a MILCA field at physical points
 # (charts, triangle bases, free-boundary shell kernels). FortNum only.
@@ -460,7 +471,7 @@ if(MILCA_ENABLE_CUDA_GS_SOLVE)
     enable_language(CUDA)
     set(FORTSPARSE_ENABLE_NATIVE_CUDA ON CACHE BOOL "" FORCE)
 endif()
-set(MILCA_FORTSPARSE_REVISION "514bade92fed2ecc0a9abf0510e0e59c30919438")
+set(MILCA_FORTSPARSE_REVISION "5a659fed1f33db2d753a4fa4f8f00e830b033a87")
 set(FORTSPARSE_ENABLE_SUPERLU OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_UMFPACK_IPC OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_MUMPS OFF CACHE BOOL "" FORCE)
@@ -510,6 +521,7 @@ target_sources(milca_mhd PRIVATE src/generated/milca_ideal_map_leaves.f90
     src/generated/milca_ideal_field_angle_leaves.f90
     src/generated/milca_ideal_seed_3d_leaves.f90
     src/generated/milca_winslow_seed_leaves.f90 src/mhd/winslow_seed.f90 src/mhd/ideal_seed_3d.f90
+    src/mhd/frozen_map_spline.f90
     src/mhd/map_3d_loop.f90 src/mhd/nested_seed_input.f90)
 set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
@@ -575,6 +587,12 @@ set_tests_properties(ideal_fb_landreman_bem3d16_axisymmetric PROPERTIES
     TIMEOUT 600 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 set_tests_properties(ideal_fb_landreman_bem3d_axisymmetric PROPERTIES
     TIMEOUT 1800 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+add_executable(test_frozen_map_spline test/test_frozen_map_spline.f90)
+target_link_libraries(test_frozen_map_spline PRIVATE milca)
+add_test(NAME frozen_map_spline COMMAND test_frozen_map_spline)
+milca_test_labels(frozen_map_spline fast CLASSES mhd
+    TARGETS test_frozen_map_spline)
+
 add_executable(test_ideal_free_boundary test/test_ideal_free_boundary.f90
     test/generated/ideal_fb_kink_leaves.f90)
 target_link_libraries(test_ideal_free_boundary PRIVATE milca)

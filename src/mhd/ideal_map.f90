@@ -67,6 +67,7 @@ module milca_ideal_map
     private
     public :: ideal_map_t, ideal_frozen_t
     public :: ideal_map_init, ideal_map_freeze, ideal_map_energy, ideal_map_hessian
+    public :: hessian_packed_pair
     public :: ideal_map_hvp, ideal_map_point_hessian, ideal_map_angle_diagonal
     public :: ideal_map_hessian_store_t, ideal_map_store_hessians
     public :: ideal_map_solve, ideal_map_point, ideal_map_dof, ideal_map_mode_norms
