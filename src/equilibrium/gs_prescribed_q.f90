@@ -50,9 +50,10 @@ contains
         ! Pressure source dp/dpsi: the scalar pprime on every interval, or, when
         ! pressure_law is present, its piecewise-cubic pp(s) in the normalized
         ! flux s (0 axis, 1 edge; pprime is then ignored). Only the knots and pp
-        ! of pressure_law are used. The supported branch has psi_axis < 0,
-        ! psi_edge = 0 and p(s) = psi_axis*integral_s^1 pp ds' >= 0 everywhere
-        ! (equivalently pprime <= 0 for a constant law). forcing is an optional
+        ! and p_edge of pressure_law are used. The supported branch has
+        ! psi_axis < 0, psi_edge = 0 and p(s) = p_edge + psi_axis*integral_s^1
+        ! pp ds' >= 0 everywhere (p_edge = 0 without pressure_law: pprime <= 0
+        ! for a constant law). forcing is an optional
         ! extra source for manufactured-solution verification.
         !
         ! FF'(s) is a continuous cubic B-spline. Its break points are the
@@ -178,13 +179,18 @@ contains
             if (any(shape(pressure_law%pp) /= [4, size(pressure_law%knots) - 1])) return
             plaw%knots = pressure_law%knots; plaw%pp = pressure_law%pp
             plaw%axis = pressure_law%axis
+            ! only p' enters the GS equation; the edge pressure fixes p itself
+            ! and the sign guard below acts on p = p_edge + psi_axis int pp
+            if (.not. ieee_is_finite(pressure_law%p_edge)) return
+            if (pressure_law%p_edge < 0) return
+            plaw%p_edge = pressure_law%p_edge
         else
             if (.not. ieee_is_finite(pprime)) return
             plaw%knots = [0.0_dp, 1.0_dp]
             allocate (plaw%pp(4, 1)); plaw%pp = 0; plaw%pp(1, 1) = pprime
         end if
         allocate (plaw%ff(4, size(plaw%knots) - 1)); plaw%ff = 0
-        plaw%normalized = .true.; plaw%f_edge = 1; plaw%p_edge = 0
+        plaw%normalized = .true.; plaw%f_edge = 1
         if (abs(plaw%axis) <= tiny(1.0_dp) .or. plaw%axis > 0) plaw%axis = -1
         if (.not. plaw%valid()) return
         if (abs(plaw%knots(1)) > 0) return
@@ -340,7 +346,7 @@ contains
             law%pp(:, j) = shifted(plaw%pp(:, ipp(j)), ukn(j) - plaw%knots(ipp(j)))
         end do
         law%normalized = .true.; law%axis = axis_target
-        law%f_edge = sign(fscale, phi)
+        law%f_edge = sign(fscale, phi); law%p_edge = plaw%p_edge
         if (.not. law%valid()) return
         x0(:n) = ffseed/ffscale; x0(n + 1) = 0
         if (present(probe_seed)) then
