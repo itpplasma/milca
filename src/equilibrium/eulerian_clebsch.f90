@@ -153,7 +153,7 @@ contains
 
 
     subroutine clebsch_3d_system(derham, quad, nt, profiles, axis, chi, g, energy, &
-                                 gradient, hessian)
+                                 gradient, hessian, plane_axis, plane_nodes)
         !! 3D label lane on the section x trigonometric-nodal complex (nt =
         !! 2M + 1 planes, cylindrical chart, phi = 2 pi t). Unknowns chi and g
         !! as node values per plane, section index fastest, ordered (chi, g).
@@ -161,6 +161,12 @@ contains
         !! L_k(t) and N_i L_k'(t)/(2 pi R). The winding form is about the
         !! axis X (independent of phi). Per section cell the local Hessian is
         !! accumulated densely over all quadrature points and planes.
+        !! With plane_nodes (V0 node values of (R, Z) on each plane, the same
+        !! section topology) the section varies with t: s(xi, t) = sum_k
+        !! L_k(t) s_k(xi), so a wall that changes with phi and a core that
+        !! follows the axis are both isoparametric. With plane_axis (the
+        !! axis X_k on each plane) the winding form is about the axis curve
+        !! X(t) = sum_k L_k(t) X_k. The quadrature stays that of derham.
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
         integer, intent(in) :: nt
@@ -168,9 +174,13 @@ contains
         real(dp), intent(in) :: axis(2), chi(:), g(:)
         real(dp), intent(out) :: energy
         real(dp), allocatable, intent(out) :: gradient(:)
-        type(csr_t), intent(out) :: hessian
+        type(csr_t), intent(out), optional :: hessian
+        real(dp), intent(in), optional :: plane_axis(:, :), plane_nodes(:, :, :)
         real(dp), allocatable :: v0(:, :, :), gn(:, :, :), du(:, :), gloc(:), hloc(:, :), &
                                  vals(:)
+        real(dp) :: dt(2), xt(2), sm(2), fm(2, 2), ft(2, 2), detf, gx(2), v(2), rt(2), &
+                    sk(2, nt), gk(2, 2, nt)
+        integer :: kk
         integer, allocatable :: d0(:), idx(:), rows(:), cols(:)
         real(dp) :: lt(nt, 2), ht(nt, 2), s(2), jet(2, 6), wq, wt, c, gc(3), gg(3), hv(3), &
                     rho2, f(3), gp(3), pr(3), w, gu(7), h(28), hm(7, 7), t
@@ -204,20 +214,50 @@ contains
                 p = quad%point_offset(cell) + q - 1
                 call spline_geometry_at(derham%space, quad%block(p), quad%xi(:, p), jet, st)
                 s = jet(:, 1)
-                rho2 = (s(1) - axis(1))**2 + (s(2) - axis(2))**2
-                hv = [-(s(2) - axis(2)), 0.0_dp, s(1) - axis(1)]/rho2
                 wq = quad%weight(p)
+                if (present(plane_nodes)) then
+                    do kk = 1, nt
+                        sk(:, kk) = matmul(plane_nodes(:, d0, kk), v0(1, :, q))
+                        gk(:, :, kk) = matmul(plane_nodes(:, d0, kk), transpose(gn(:, :, q)))
+                    end do
+                end if
                 do m = 1, nqt
                     t = (m - 1)/real(nqt, dp)
                     call spline_derham_t_basis(nt, t, lt, ht)
+                    ! the point, F = ds/ds0, the mesh velocity ds/dt and the axis
+                    sm = s
+                    fm = reshape([1.0_dp, 0.0_dp, 0.0_dp, 1.0_dp], [2, 2])
+                    v = 0
+                    if (present(plane_nodes)) then
+                        sm = matmul(sk, lt(:, 1))
+                        fm = 0
+                        do kk = 1, nt
+                            fm = fm + lt(kk, 1)*gk(:, :, kk)
+                        end do
+                        v = matmul(sk, lt(:, 2))
+                    end if
+                    xt = axis
+                    dt = 0
+                    if (present(plane_axis)) then
+                        xt = matmul(plane_axis, lt(:, 1))
+                        dt = matmul(plane_axis, lt(:, 2))
+                    end if
+                    detf = fm(1, 1)*fm(2, 2) - fm(1, 2)*fm(2, 1)
+                    ft = reshape([fm(2, 2), -fm(1, 2), -fm(2, 1), fm(1, 1)], [2, 2])/detf
+                    rt = sm - xt
+                    rho2 = rt(1)**2 + rt(2)**2
+                    hv = [-rt(2), (rt(2)*dt(1) - rt(1)*dt(2))/(two_pi*sm(1)), rt(1)]/rho2
                     du = 0
                     do k = 1, nt
                         do i = 1, nloc
                             a = (k - 1)*nloc + i
+                            ! F^-T grad_0; d/dphi at fixed (R, Z) removes the mesh velocity
+                            gx = matmul(ft, gn(:, i, q))
                             du(1, a) = v0(1, i, q)*lt(k, 1)
-                            du(2, a) = gn(1, i, q)*lt(k, 1)
-                            du(3, a) = v0(1, i, q)*lt(k, 2)/(two_pi*s(1))
-                            du(4, a) = gn(2, i, q)*lt(k, 1)
+                            du(2, a) = gx(1)*lt(k, 1)
+                            du(3, a) = (v0(1, i, q)*lt(k, 2) - dot_product(v, gx)*lt(k, 1)) &
+                                       /(two_pi*sm(1))
+                            du(4, a) = gx(2)*lt(k, 1)
                             du(5, nl + a) = du(2, a)
                             du(6, nl + a) = du(3, a)
                             du(7, nl + a) = du(4, a)
@@ -227,7 +267,7 @@ contains
                     gc = matmul(du(2:4, 1:nl), chi(idx(1:nl)))
                     gg = matmul(du(5:7, nl + 1:), g(idx(nl + 1:) - ntot))
                     call profiles(c, f, gp, pr)
-                    call clebsch_energy_3d(s(1), c, gc(1), gc(2), gc(3), gg(1), gg(2), gg(3), &
+                    call clebsch_energy_3d(sm(1), c, gc(1), gc(2), gc(3), gg(1), gg(2), gg(3), &
                                            hv(1), hv(2), hv(3), f(1), f(2), f(3), gp(1), &
                                            gp(2), gp(3), pr(1), pr(2), pr(3), w, gu(1), gu(2), &
                                            gu(3), gu(4), gu(5), gu(6), gu(7), h(1), h(2), &
@@ -235,7 +275,7 @@ contains
                                            h(11), h(12), h(13), h(14), h(15), h(16), h(17), &
                                            h(18), h(19), h(20), h(21), h(22), h(23), h(24), &
                                            h(25), h(26), h(27), h(28))
-                    wt = wq*two_pi/nqt
+                    wt = wq*abs(detf)*two_pi/nqt
                     energy = energy + wt*w
                     gloc = gloc + wt*matmul(gu, du)
                     k = 0
@@ -246,10 +286,11 @@ contains
                             hm(b, a) = h(k)
                         end do
                     end do
-                    hloc = hloc + wt*matmul(transpose(du), matmul(hm, du))
+                    if (present(hessian)) hloc = hloc + wt*matmul(transpose(du), matmul(hm, du))
                 end do
             end do
             gradient(idx) = gradient(idx) + gloc
+            if (.not. present(hessian)) cycle
             do col = 1, 2*nl
                 do i = 1, 2*nl
                     if (hloc(i, col) == 0) cycle
@@ -260,6 +301,7 @@ contains
                 end do
             end do
         end do
+        if (.not. present(hessian)) return
         call csc_from_triplet(2*ntot, 2*ntot, cols(:nz), rows(:nz), vals(:nz), mm, info)
         if (info%code /= 0) error stop 'Clebsch 3D Hessian triplets'
         hessian%nrow = 2*ntot
