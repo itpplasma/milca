@@ -364,7 +364,11 @@ contains
         real(dp) :: x, b0, b1, b2
         integer :: m, k
 
-        if (.not. cheb_ready) call fit_flux()
+        if (.not. cheb_ready) then
+            !$omp critical (solovev_flux_fit)
+            if (.not. cheb_ready) call fit_flux()
+            !$omp end critical (solovev_flux_fit)
+        end if
         x = 2*chi/cheb_top - 1
         do m = 1, 3
             b1 = 0

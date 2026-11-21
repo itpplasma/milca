@@ -197,7 +197,8 @@ contains
         real(dp) :: dt(2), xt(2), sm(2), fm(2, 2), ft(2, 2), detf, gx(2), v(2), rt(2), &
                     sk(2, nt), gk(2, 2, nt), mf(2, 2), mdot(2, 2), uu(2), udot(2), bv(3), &
                     bx(3)
-        integer :: kk, ka, kb, la, lb, il, jl
+        integer :: kk, ka, kb, la, lb, il, jl, blk
+        real(dp) :: ferr(2)
         integer, allocatable :: d0(:), idx(:), rows(:), cols(:)
         real(dp), allocatable :: sx(:, :, :), am(:, :, :, :, :), tb(:, :, :)
         real(dp) :: lt(nt, 2), ht(nt, 2), s(2), jet(2, 6), wq, wt, c, gc(3), gg(3), hv(3), &
@@ -214,9 +215,20 @@ contains
         gradient = 0
         energy = 0
         if (present(field_error)) field_error = 0
-        nz = size(quad%point_offset)*(2*(derham%degree + 1)**2*nt)**2
-        allocate (rows(nz), cols(nz), vals(nz))
-        nz = 0
+        ! one block of triplets per cell (zeros where a cell has fewer nodes)
+        blk = (2*(derham%degree + 1)**2*nt)**2
+        if (present(hessian)) then
+            allocate (rows(size(quad%point_offset)*blk), cols(size(quad%point_offset)*blk), &
+                      vals(size(quad%point_offset)*blk))
+            rows = 1
+            cols = 1
+            vals = 0
+        end if
+        ferr = 0
+        !$omp parallel do schedule(dynamic) default(private) &
+        !$omp shared(derham, quad, nt, chi, g, axis, plane_axis, plane_nodes, plane_frames, &
+        !$omp        gradient, rows, cols, vals, n0, ntot, nqt, blk, hessian, field_error) &
+        !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
             call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
             nloc = size(d0)
@@ -316,7 +328,7 @@ contains
                         bv = cross3(gg, gc) + f(1)*cross3(gc, hv) &
                              + gp(1)*cross3(gc, [0.0_dp, 1/sm(1), 0.0_dp])
                         call exact_field([sm(1), two_pi*t, sm(2)], bx)
-                        field_error = field_error + wt*[sum((bv - bx)**2), sum(bx**2)]
+                        ferr = ferr + wt*[sum((bv - bx)**2), sum(bx**2)]
                     end if
                     gloc = gloc + wt*matmul(gu, du)
                     k = 0
@@ -372,11 +384,14 @@ contains
                     end do
                 end do
             end if
-            gradient(idx) = gradient(idx) + gloc
+            do i = 1, 2*nl
+                !$omp atomic
+                gradient(idx(i)) = gradient(idx(i)) + gloc(i)
+            end do
             if (.not. present(hessian)) cycle
+            nz = (cell - 1)*blk
             do col = 1, 2*nl
                 do i = 1, 2*nl
-                    if (hloc(i, col) == 0) cycle
                     nz = nz + 1
                     rows(nz) = idx(i)
                     cols(nz) = idx(col)
@@ -384,8 +399,10 @@ contains
                 end do
             end do
         end do
+        !$omp end parallel do
+        if (present(field_error)) field_error = ferr
         if (.not. present(hessian)) return
-        call csc_from_triplet(2*ntot, 2*ntot, cols(:nz), rows(:nz), vals(:nz), mm, info)
+        call csc_from_triplet(2*ntot, 2*ntot, cols, rows, vals, mm, info)
         if (info%code /= 0) error stop 'Clebsch 3D Hessian triplets'
         hessian%nrow = 2*ntot
         hessian%ncol = 2*ntot
