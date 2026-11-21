@@ -345,8 +345,9 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # forms #160, factored anisotropic apply, the spline de Rham complex #254
 # with rooted trees #255, parametric mass matrices #256, the tree for one
 # t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
-# symmetry #263 #265 and polar quadrature at point singularities #267).
-set(MILCA_FORTFEM_REVISION "9f8531607e09aa24c0f609a729d9966b686b53f0")
+# symmetry #263 #265 and polar quadrature at point singularities #267, on
+# block sides and vertices #268).
+set(MILCA_FORTFEM_REVISION "5aabc63f34e5bb0c40d94479183ec3b8053a9f9c")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -517,7 +518,9 @@ target_sources(milca_equilibrium PRIVATE src/equilibrium/gs_coils.f90 src/equili
     src/equilibrium/gs_free_boundary.f90 src/equilibrium/gs_coil_inverse.f90
     src/equilibrium/gs_free_current.f90 src/equilibrium/gs_spline.f90
     src/equilibrium/gs_spline_current.f90
-    src/equilibrium/eulerian_vacuum.f90)
+    src/equilibrium/eulerian_vacuum.f90
+    src/generated/milca_eulerian_clebsch_leaves.f90
+    src/equilibrium/eulerian_clebsch.f90)
 target_sources(milca_equilibrium PRIVATE src/equilibrium/equilibrium_harness.f90)
 add_executable(test_equilibrium_harness test/test_equilibrium_harness.f90)
 target_link_libraries(test_equilibrium_harness PRIVATE milca)
@@ -890,6 +893,9 @@ target_link_libraries(test_eulerian_clebsch_fit PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_clebsch_fit_gate_e0 COMMAND test_eulerian_clebsch_fit)
 add_test(NAME eulerian_clebsch_fit_nonlinear_gate_e0
     COMMAND test_eulerian_clebsch_fit nonlinear)
+add_executable(test_eulerian_clebsch_newton test/test_eulerian_clebsch_newton.f90)
+target_link_libraries(test_eulerian_clebsch_newton PRIVATE milca_eulerian_test)
+add_test(NAME eulerian_clebsch_newton_gate_e1 COMMAND test_eulerian_clebsch_newton)
 add_executable(test_gs_fb_manufactured test/test_gs_fb_manufactured.f90)
 target_link_libraries(test_gs_fb_manufactured PRIVATE milca_gs_fb_test)
 add_library(milca_gs_ci_test STATIC test/support/gs_ci_fixture.f90)
@@ -1645,7 +1651,7 @@ if(MILCA_FORTSYM_BUILD)
     foreach(generator vrmhd_leaves gs_error grad_shafranov ideal_map ideal_gll ideal_xi
             ideal_response_error equilibrium_core curve_chart ideal_seed_3d map_3d_readback
             ideal_field_angle nonnested islands metriplectic vacuum_shell fold_barrier
-            landreman nested_oracles winslow_seed
+            landreman nested_oracles winslow_seed eulerian_clebsch
             response_strip_jets
             response_fluid
             gs_coarea gs_inverse boozer_file boozer_orbit dk_pitch dk_mono dk_hp dk_ntv dk_collop ntv_boozer
@@ -1659,6 +1665,12 @@ if(MILCA_FORTSYM_BUILD)
         add_executable(gen_${generator} gen/gen_${generator}.f90)
         target_link_libraries(gen_${generator} PRIVATE milca_gen_support)
     endforeach()
+    add_test(NAME eulerian_clebsch_leaf_regeneration COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:gen_eulerian_clebsch>
+        -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_eulerian_clebsch_leaves.f90
+        -DWORK=${CMAKE_BINARY_DIR}/eulerian-clebsch-regeneration
+        -DLEAF=milca_eulerian_clebsch_leaves.f90
+        -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
     add_test(NAME dk_pitch_leaf_regeneration COMMAND ${CMAKE_COMMAND}
         -DGENERATOR=$<TARGET_FILE:gen_dk_pitch>
         -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_dk_pitch_leaves.f90
