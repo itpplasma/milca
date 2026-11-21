@@ -263,7 +263,7 @@ Units: m, A, Wb/rad. Flux is absolute with psi = 0 on the symmetry axis.
 | group | variables |
 |---|---|
 | mesh | `boundary_file` (count, then R Z rows: closed curve Gamma_c, as `gs_phase1`), `boundary_nodes`, `max_area`, `degree` (2, 3), `curved`, `plasma_ellipse` = R0, a, b (initial Gamma_p chain), `chain_nodes` |
-| coils | `coil_file` (`gs_coils` text table), `currents(:)` (circuit currents, table order) |
+| coils | `coil_file` (`gs_coils` text table; a `grid` coil reads a tabulated flux per ampere, e.g. integrated from a VMEC mgrid), `currents(:)` (circuit currents, table order) |
 | profiles | `profile_file` (normalised law file, as `gs_phase1`), `mu0` |
 | LCFS | `lcfs_mode` = `xpoint`, `limiter`, `target_mean`; `cut_fraction`; `axis_guess`, `xpoint_guess`, `search_radius`; `points_file` (limiter or target points); `axis_sign` |
 | solve | `max_refits`, `refit_tolerance`, `newton_tolerance`, `quadrature_tolerance`, `max_newton_iterations`, `seed_amplitude`, `seed_file` (initial flux map: `nr nz`, R, Z, psi with R fastest; replaces the vacuum-plus-Gaussian seed) |

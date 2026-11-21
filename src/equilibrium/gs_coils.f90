@@ -25,6 +25,14 @@ module milca_gs_coils
     !!                           flux is mu0 * turns / (nr nz) * sum G.
     !!   gs_coil_filaments       explicit filaments (fil_r, fil_z, fil_turns);
     !!                           the flux is mu0 * sum fil_turns * G.
+    !!   gs_coil_grid            flux per ampere tabulated on a uniform (R, Z)
+    !!                           grid, interpolated by the tensor Lagrange
+    !!                           polynomial of degree 5 on the 6 x 6 nearest
+    !!                           nodes (error O(h^6)).  For coils known only
+    !!                           through their field, such as MAKEGRID's mgrid
+    !!                           of a VMEC deck.  Nodes inside or next to a
+    !!                           conductor hold NaN, so a field point whose
+    !!                           stencil touches one gives NaN.
     !! Filament positions must not coincide with a field point.
     !!
     !! Current limits.  The limits i_min, i_max of a circuit are in A (of the
@@ -37,18 +45,24 @@ module milca_gs_coils
     !!     milca-coil-table 1
     !!     coil NAME rect R Z DR DZ TURNS [quad=N] [fil=SIZE]
     !!     coil NAME filament R Z TURNS
+    !!     coil NAME grid FILE
     !!     circuit NAME IMIN IMAX MEMBER [MEMBER ...]
     !!
     !! 'rect' is a rectangle with centre (R, Z) and full sizes (DR, DZ);
     !! 'quad=N' sets the Gauss order (default 12), 'fil=SIZE' selects the
     !! FreeGS filament grid.  'filament' lines with the same NAME accumulate
-    !! the filaments of one coil.  A MEMBER is a coil name or NAME*FACTOR
+    !! the filaments of one coil.  The 'grid' FILE (relative to the table's
+    !! directory unless absolute) holds 'NR NZ RMIN RMAX ZMIN ZMAX' and then
+    !! the NR*NZ flux values per ampere (Wb/rad/A), R fastest; it has one
+    !! turn.  A MEMBER is a coil name or NAME*FACTOR
     !! (incidence entry FACTOR, default 1).  A coil that belongs to no
     !! circuit is uncontrolled (zero incidence row).  Circuits refer to coils
     !! declared earlier in the file.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_axisymmetric_gs_kernel, only: gs_mu0, gs_rect_coil_t, &
         gs_rect_coil_flux, gs_rect_coil_flux_gradient, gs_green, gs_green_gradient
+    use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
+    use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
     use milca_real_identity, only: same_real_value
     implicit none
     private
@@ -56,6 +70,8 @@ module milca_gs_coils
     integer, parameter, public :: gs_coil_rect = 1
     integer, parameter, public :: gs_coil_rect_filaments = 2
     integer, parameter, public :: gs_coil_filaments = 3
+    integer, parameter, public :: gs_coil_grid = 4
+    integer, parameter :: grid_points = 6
     integer, parameter, public :: gs_name_len = 32
 
     type, public :: gs_coil_t
@@ -65,6 +81,9 @@ module milca_gs_coils
         integer :: quad_order = 12
         real(dp) :: fil_size = 0.0_dp
         real(dp), allocatable :: fil_r(:), fil_z(:), fil_turns(:)
+        character(len=512) :: grid_file = ''
+        real(dp) :: grid_box(4) = 0.0_dp !< rmin, rmax, zmin, zmax
+        real(dp), allocatable :: grid_psi(:, :) !< (R, Z) nodes
     end type gs_coil_t
 
     type, public :: gs_circuit_set_t
@@ -105,6 +124,8 @@ contains
         real(dp) :: turns
         if (coil%kind == gs_coil_filaments) then
             turns = sum(coil%fil_turns)
+        else if (coil%kind == gs_coil_grid) then
+            turns = 1.0_dp
         else
             turns = coil%rect%turns
         end if
@@ -151,10 +172,13 @@ contains
         real(dp), intent(in) :: r, z
         real(dp) :: psi
         real(dp), allocatable :: fr(:), fz(:), fw(:)
+        real(dp) :: dpsi(2)
         integer :: k
 
         if (coil%kind == gs_coil_rect) then
             psi = gs_rect_coil_flux(coil%rect, r, z, coil%quad_order, coil%quad_order)
+        else if (coil%kind == gs_coil_grid) then
+            call grid_coil_flux(coil, r, z, psi, dpsi)
         else
             call gs_coil_filament_list(coil, fr, fz, fw)
             psi = 0.0_dp
@@ -178,6 +202,10 @@ contains
         if (coil%kind == gs_coil_rect) then
             call gs_rect_coil_flux_gradient(coil%rect, r, z, coil%quad_order, &
                 coil%quad_order, psi, grad6)
+            dpsi_dr = grad6(1)
+            dpsi_dz = grad6(2)
+        else if (coil%kind == gs_coil_grid) then
+            call grid_coil_flux(coil, r, z, psi, grad6(1:2))
             dpsi_dr = grad6(1)
             dpsi_dz = grad6(2)
         else
@@ -319,6 +347,14 @@ contains
         do c = 1, nc
             if (set%coils(c)%kind == gs_coil_filaments) then
                 if (.not. allocated(set%coils(c)%fil_r)) stat = 3
+            else if (set%coils(c)%kind == gs_coil_grid) then
+                if (.not. allocated(set%coils(c)%grid_psi)) then
+                    stat = 3
+                else if (any(shape(set%coils(c)%grid_psi) < grid_points) .or. &
+                        .not. set%coils(c)%grid_box(2) > set%coils(c)%grid_box(1) .or. &
+                        .not. set%coils(c)%grid_box(4) > set%coils(c)%grid_box(3)) then
+                    stat = 3
+                end if
             else if (set%coils(c)%quad_order < 1) then
                 stat = 3
             else if (set%coils(c)%kind == gs_coil_rect_filaments .and. &
@@ -362,6 +398,9 @@ contains
                         write (u, '(4a,3(1x,es24.16e3))') 'coil ', &
                             trim(coil%name), ' filament', '', fr(f), fz(f), fw(f)
                     end do
+                else if (coil%kind == gs_coil_grid) then
+                    write (u, '(4a)') 'coil ', trim(coil%name), ' grid ', &
+                        trim(coil%grid_file)
                 else
                     write (line, '(3a,5(1x,es24.16e3),a,i0)') 'coil ', trim(coil%name), &
                         ' rect', coil%rect%r, coil%rect%z, coil%rect%dr, coil%rect%dz, &
@@ -490,6 +529,18 @@ contains
                     coils(c)%fil_r = [coils(c)%fil_r, x(1)]
                     coils(c)%fil_z = [coils(c)%fil_z, x(2)]
                     coils(c)%fil_turns = [coils(c)%fil_turns, x(3)]
+                case ('grid')
+                    if (c /= 0 .or. ntok /= 4) then
+                        call fail(13, 'bad or duplicate grid coil'); exit
+                    end if
+                    call append_coil(coils, nc, tok(2))
+                    c = nc
+                    coils(c)%kind = gs_coil_grid
+                    coils(c)%grid_file = tok(4)
+                    call read_flux_grid(table_path(path, tok(4)), coils(c), ok)
+                    if (.not. ok) then
+                        call fail(20, 'cannot read flux grid '//trim(tok(4))); exit
+                    end if
                 case default
                     call fail(12, 'unknown coil type'); exit
                 end select
@@ -637,6 +688,9 @@ contains
             tmp(i)%rect = coils(i)%rect
             tmp(i)%quad_order = coils(i)%quad_order
             tmp(i)%fil_size = coils(i)%fil_size
+            call move_alloc(coils(i)%grid_psi, tmp(i)%grid_psi)
+            tmp(i)%grid_file = coils(i)%grid_file
+            tmp(i)%grid_box = coils(i)%grid_box
         end do
         nc = nc + 1
         tmp(nc)%name = name(1:min(len(name), gs_name_len))
@@ -657,5 +711,73 @@ contains
         tmp(1:a, 1:b) = inc(1:a, 1:b)
         call move_alloc(tmp, inc)
     end subroutine grow_incidence
+
+
+    subroutine grid_coil_flux(coil, r, z, psi, dpsi)
+        !! Tensor Lagrange interpolant of a tabulated flux and its gradient;
+        !! the stencil is centred on the point and shifted inward at the
+        !! grid edges.  NaN outside the grid.
+        type(gs_coil_t), intent(in) :: coil
+        real(dp), intent(in) :: r, z
+        real(dp), intent(out) :: psi, dpsi(2)
+        real(dp) :: x, y, hr, hz, wr(grid_points), wz(grid_points), dr(grid_points), &
+            dz(grid_points), nodes(grid_points), block(grid_points, grid_points)
+        integer :: nr, nz, i0, j0, a
+
+        nr = size(coil%grid_psi, 1)
+        nz = size(coil%grid_psi, 2)
+        hr = (coil%grid_box(2) - coil%grid_box(1))/(nr - 1)
+        hz = (coil%grid_box(4) - coil%grid_box(3))/(nz - 1)
+        x = (r - coil%grid_box(1))/hr
+        y = (z - coil%grid_box(3))/hz
+        if (.not. (x >= 0 .and. x <= nr - 1 .and. y >= 0 .and. y <= nz - 1)) then
+            psi = ieee_value(psi, ieee_quiet_nan)
+            dpsi = psi
+            return
+        end if
+        nodes = [(real(a, dp), a=0, grid_points - 1)]
+        i0 = min(max(int(x) - (grid_points/2 - 1), 0), nr - grid_points)
+        j0 = min(max(int(y) - (grid_points/2 - 1), 0), nz - grid_points)
+        call lagrange_weights(grid_points, x - i0, nodes, wr)
+        call lagrange_weights(grid_points, y - j0, nodes, wz)
+        call lagrange_deriv_weights(grid_points, x - i0, nodes, dr)
+        call lagrange_deriv_weights(grid_points, y - j0, nodes, dz)
+        block = coil%grid_psi(i0 + 1:i0 + grid_points, j0 + 1:j0 + grid_points)
+        psi = dot_product(wr, matmul(block, wz))
+        dpsi(1) = dot_product(dr, matmul(block, wz))/hr
+        dpsi(2) = dot_product(wr, matmul(block, dz))/hz
+    end subroutine grid_coil_flux
+
+    subroutine read_flux_grid(path, coil, ok)
+        character(len=*), intent(in) :: path
+        type(gs_coil_t), intent(inout) :: coil
+        logical, intent(out) :: ok
+        integer :: u, ios, nr, nz
+
+        ok = .false.
+        open (newunit=u, file=path, status='old', action='read', iostat=ios)
+        if (ios /= 0) return
+        read (u, *, iostat=ios) nr, nz, coil%grid_box
+        if (ios == 0 .and. nr >= grid_points .and. nz >= grid_points) then
+            allocate (coil%grid_psi(nr, nz))
+            read (u, *, iostat=ios) coil%grid_psi
+            ok = ios == 0
+        end if
+        close (u)
+    end subroutine read_flux_grid
+
+    pure function table_path(table, file) result(path)
+        !! FILE relative to the directory of the coil table, unless absolute.
+        character(len=*), intent(in) :: table, file
+        character(len=:), allocatable :: path
+        integer :: slash
+
+        slash = index(table, '/', back=.true.)
+        if (file(1:1) == '/' .or. slash == 0) then
+            path = trim(file)
+        else
+            path = table(1:slash)//trim(file)
+        end if
+    end function table_path
 
 end module milca_gs_coils

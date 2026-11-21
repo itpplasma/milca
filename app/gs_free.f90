@@ -116,7 +116,7 @@ program gs_free_main
 
     ! Inputs: coils, profile law, boundary curve, LCFS points.
     call gs_read_coil_table(trim(coil_file), set, stat, message)
-    if (stat /= 0) error stop 'invalid coil table'
+    if (stat /= 0) error stop 'invalid coil table: '//trim(message)
     nc = size(set%incidence, 2)
     if (nc > max_circuits) error stop 'too many circuits'
     call read_gs_profile_law(trim(profile_file), law, stat)
@@ -169,7 +169,10 @@ program gs_free_main
 
     call initialize_gs(state, contour, max_area, stat, degree, curved=curved, &
                        curve=boundary, interior_chain=chain)
-    if (stat /= 0) error stop 'mesh/assembly failed'
+    if (stat /= 0) then
+        print '(a,i0)', 'initialize_gs status ', stat
+        error stop 'mesh/assembly failed'
+    end if
     allocate (seed(size(state%points, 2)), vac(size(state%points, 2), nc))
     call gs_circuit_flux_vectors(set, state%points(1, :), state%points(2, :), vac)
     if (len_trim(seed_file) > 0) then
