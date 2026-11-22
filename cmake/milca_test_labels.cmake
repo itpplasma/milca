@@ -103,6 +103,8 @@ milca_test_labels(grad_shafranov_profile_mu0_nan fast CLASSES equilibrium
     TARGETS test_gs_profile_domain)
 milca_test_labels(grad_shafranov_p2_profile_mu0_nan fast CLASSES equilibrium
     TARGETS test_gs_profile_domain)
+milca_test_labels(deck_chart fast CLASSES mhd
+    TARGETS test_deck_chart)
 milca_test_labels(ideal_fb_bem_analytic fast CLASSES mhd
     TARGETS test_ideal_fb_bem_analytic)
 milca_test_labels(ideal_fb_schur_spectrum fast CLASSES mhd
