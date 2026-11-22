@@ -8,7 +8,8 @@ module milca_import_vmec
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_import_text, only: kv_store_t, read_namelist_group, namelist_groups, lower
     use milca_equilibrium_import, only: imported_equilibrium_t, import_note, import_refuse, &
-        import_fail, IMPORT_OK, power_series_profile, spline_profile, boundary_reserve
+        import_fail, IMPORT_OK, power_series_profile, spline_profile, boundary_reserve, &
+        import_profile_t
     use netcdf, only: nf90_open, nf90_close, nf90_inq_varid, nf90_get_var, nf90_inquire_variable, &
         nf90_inquire_dimension, NF90_NOWRITE, NF90_NOERR
     implicit none
@@ -98,8 +99,14 @@ contains
         ! VMEC defaults LFREEB to true and runs free-boundary whenever a grid is named
         if (p%logical('lfreeb', .true.) .and. len_trim(p%text('mgrid_file', '')) > 0 .and. &
             lower(p%text('mgrid_file', 'none')) /= 'none') then
-            call import_refuse(eq, 'free-boundary VMEC input; nested_equilibrium is fixed-boundary')
-            return
+            ! the boundary is the initial guess in the field of the coil groups
+            eq%free_boundary = .true.
+            eq%mgrid_file = p%text('mgrid_file', '')
+            call read_extcur(eq%extcur)
+            if (size(eq%extcur) == 0 .or. all(eq%extcur == 0)) then
+                call import_refuse(eq, 'free-boundary VMEC input without EXTCUR')
+                return
+            end if
         end if
         if (p%logical('lrfp', .false.)) then
             call import_refuse(eq, 'LRFP: iota of the poloidal flux is not imported')
@@ -107,10 +114,13 @@ contains
         end if
         do k = 1, 3
             kind = lower(p%text(trim(profiles(k))//'_type', 'power_series'))
-            if (kind /= 'power_series') then
-                call import_refuse(eq, 'VMEC profile type '//kind//' (power_series only)')
-                return
-            end if
+            if (kind == 'power_series') cycle
+            ! knot splines of pressure and iota: the not-a-knot cubic through
+            ! the AUX knots (dense knots make the end condition immaterial)
+            if (k <= 2 .and. (kind == 'cubic_spline' .or. kind == 'akima_spline')) cycle
+            call import_refuse(eq, 'VMEC profile type '//kind//' of '//profiles(k)// &
+                               ' (power_series; cubic or Akima splines for pressure and iota)')
+            return
         end do
         if (p%real('bloat', 1.0_dp) /= 1 .or. abs(p%real('spres_ped', 1.0_dp)) < 1) then
             call import_refuse(eq, 'BLOAT or SPRES_PED (power_series without them only)')
@@ -143,6 +153,10 @@ contains
         call coefficients('ai', ai)
         call coefficients('ac', ac)
         eq%pressure = power_series_profile(p%real('pres_scale', 1.0_dp)*am)
+        if (lower(p%text('pmass_type', 'power_series')) /= 'power_series') then
+            call aux_spline('am', p%real('pres_scale', 1.0_dp), eq%pressure, ok)
+            if (.not. ok) return
+        end if
         if (p%int('ncurr', 0) == 1) then
             ! AC is dI/ds; I(s) is scaled to CURTOR at the edge
             enclosed = [0.0_dp, ac/[(real(k, dp), k=1, size(ac))]]
@@ -155,8 +169,67 @@ contains
             eq%prescribe_current = .true.
         else
             eq%iota = power_series_profile(ai)
+            if (lower(p%text('piota_type', 'power_series')) /= 'power_series') then
+                call aux_spline('ai', 1.0_dp, eq%iota, ok)
+                if (.not. ok) return
+            end if
         end if
     contains
+        subroutine aux_spline(name, scale, profile, ok)
+            ! NAME_AUX_S, NAME_AUX_F as a spline profile; the knots end where
+            ! VMEC's do (the first non-increasing knot after the first)
+            character(*), intent(in) :: name
+            real(dp), intent(in) :: scale
+            type(import_profile_t), intent(out) :: profile
+            logical, intent(out) :: ok
+            real(dp), allocatable :: ks(:), kf(:)
+            logical :: parsed
+            integer :: nk
+            call p%reals(name//'_aux_s', ks, parsed)
+            call p%reals(name//'_aux_f', kf, parsed)
+            nk = 1
+            do while (nk < min(size(ks), size(kf)))
+                if (ks(nk + 1) <= ks(nk)) exit
+                nk = nk + 1
+            end do
+            ok = nk >= 4
+            if (.not. ok) then
+                call import_refuse(eq, 'spline profile '//name//' with fewer than four knots')
+                return
+            end if
+            profile = spline_profile(ks(:nk), scale*kf(:nk), ok)
+            if (.not. ok) call import_refuse(eq, 'spline profile '//name//' not admitted')
+        end subroutine
+
+        subroutine read_extcur(c)
+            ! EXTCUR as a list, EXTCUR(k) = v entries, or both (indexed wins)
+            real(dp), allocatable, intent(out) :: c(:)
+            real(dp), allocatable :: listed(:)
+            real(dp) :: v
+            logical :: parsed, found
+            integer :: k, last
+            character(16) :: key
+            call p%reals('extcur', listed, parsed)
+            if (.not. parsed) then
+                deallocate (listed)
+                allocate (listed(0))
+            end if
+            allocate (c(512))
+            c = 0
+            c(:size(listed)) = listed
+            last = size(listed)
+            do k = 1, 512
+                write (key, '(a,i0,a)') 'extcur(', k, ')'
+                if (.not. p%has(trim(key))) cycle
+                v = p%real(trim(key), 0.0_dp, found)
+                if (found) then
+                    c(k) = v
+                    last = max(last, k)
+                end if
+            end do
+            c = c(:last)
+        end subroutine
+
         subroutine coefficients(name, c)
             character(*), intent(in) :: name
             real(dp), allocatable, intent(out) :: c(:)

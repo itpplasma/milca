@@ -47,6 +47,10 @@ module milca_equilibrium_import
         real(dp), allocatable :: rbc(:, :), rbs(:, :), zbc(:, :), zbs(:, :)
         type(import_profile_t) :: iota, pressure, current
         logical :: prescribe_current = .false.
+        ! free boundary: the coil groups of an mgrid file scaled by extcur
+        logical :: free_boundary = .false.
+        character(1024) :: mgrid_file = ''
+        real(dp), allocatable :: extcur(:)
         ! largest boundary displacement left out by the conversion (m), and
         ! its accepted bound relative to the minor radius
         real(dp) :: geometry_error = 0, geometry_tolerance = 1e-6_dp
@@ -504,6 +508,14 @@ contains
                 end if
                 write (unit, '(a,es24.16e3,a)') '  iota(0) = ', start, ','
             end if
+        end if
+        if (eq%free_boundary) then
+            write (unit, '(a)') '  free_boundary = .true.,'
+            write (unit, '(a)') "  mgrid_file = '"//trim(eq%mgrid_file)//"',"
+            do k = 1, size(eq%extcur)
+                if (eq%extcur(k) /= 0) write (unit, '(a,i0,a,es24.16e3,a)') '  extcur(', k, &
+                    ') = ', eq%extcur(k), ','
+            end do
         end if
         ! a foreign boundary angle is not a field-line angle
         write (unit, '(a)') '  angle_mpol = 4, max_iterations = 400,'
