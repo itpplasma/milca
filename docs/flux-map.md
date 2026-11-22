@@ -277,11 +277,22 @@ needed (the dump).
   (FFT of δR + iδZ over the planes): 13 planes, n = −6 (2.5e-2), +6
   (7.3e-3), −4 (5.6e-3), ±5 below 1e-3; 21 planes, n = −4 (8.7e-2),
   +4, −6. On 13 planes n = 6 is the highest harmonic of the planes.
-- Open: whether the instability belongs to the continuous γ = 0 energy of
-  this exact state or to the toroidal discretisation. Deciding runs: the
-  spectrum at the state next to the exact one on 21 and more planes (needs
-  a start prolonged in t from 13 planes), and an independent stability
-  check of the exact state (forward map Hessian, Mercier criterion).
+- Toroidal resolution (4 cells, Newton on stationarity from the 13-plane
+  state, `MILCA_FM3_START_PLANES=13`; B error 7.3e-3 to 7.7e-3 throughout,
+  so the state stays next to the exact one): negative μ 6, 12, 16, 24 on
+  13, 17, 21, 29 planes, lowest μ −1.35e-2, −1.60e-2, −2.54e-2, −3.04e-2.
+  Neither count nor lowest μ converges. 4 instead of 2 toroidal quadrature
+  points per plane give the same spectra to 4–5 digits (13 and 21 planes):
+  not under-integration in t.
+- QA (vacuum, below) has no negative μ on 9 to 29 planes, its lowest μ
+  converging (2.29e-2 on 2 cells; 1.48e-2, 1.45e-2, 1.43e-2, 1.41e-2 on 13,
+  17, 21, 29 planes, 4 cells). A vacuum field has δW = ∫|δB|² ≥ 0, so the
+  3D discretisation does not create unstable modes there; the growing
+  spectrum belongs to this case (pressure, ι crossing 5 with weak shear).
+- Open: a physical pressure-driven instability with an unstable spectrum
+  unbounded in n, or a defect of the pressure term. Deciding case: a
+  standard configuration with pressure (stellarator, which does not mesh yet,
+  below).
 
 QA driver (`test_flux_map_qa`, opt-in, not a registered test): the
 Landreman–Paul QA deck of [benchmarks/label-qa](../benchmarks/label-qa/README.md),
@@ -306,24 +317,44 @@ and the nested start reach the same state at degrees 2 and 3 (at degree 4
 the energies differ by 6e-6 relative, not followed up): no second state
 was met on this vacuum case, where the label lane did not converge. It is not yet competitive with VMEC++:
 
-- Accuracy. The energy and \|B\| converge (2.06, 0.40, 0.06 %; \|B\| rms
-  at s = 0.5: 2.8, 0.75, 0.37 %), but the axis and the s = 0.25 surface stay
-  at 1.3 to 1.8 mm and 0.7 mm (0.8 % of the minor radius). Not explained.
-  Candidates, none measured: the near-shearless ι (0.4230 to 0.4158), which
-  leaves the labels near the axis weakly determined by the energy; the
-  section meshes (worst ratio of the Jacobian determinant 0.04 to 0.06 on
-  the bean sections, 0.008 at degree 4 on 2 cells); the toroidal resolution
-  of the wall (the deck has NTOR = 12, 13 planes carry 6 harmonics).
-- Degree. At 4 cells the energy error is 0.40, 0.30, 0.20 % for degrees 2,
-  3, 4, while 8 cells at degree 2 give 0.06 %: the error is not that of
-  smooth approximation at order p. Suspects: the spline fit of the wall
-  (volume) and the C0 block corners of the O-grid; not measured.
+- Energy: explained by the wall. The volume inside the spline wall
+  (the per-plane L² metric of the Hessian dump sums to it) against VMEC's
+  0.564712: −1.867, −0.364, −0.055 % on 2, 4, 8 cells (degree 2), −0.276 %
+  at degree 3, 4 cells; the energy error is +2.056, +0.395, +0.065, +0.302 %,
+  i.e. ΔW/W ≈ −1.1 ΔV/V in every run. On 13 to 29 planes (4 cells) W
+  jitters in the 5th digit with the volume (21 planes: ΔV/V −1.0e-4, ΔW/W
+  +1.2e-4 against 17). The wall fit, not the solver, sets the energy error;
+  it converges with the cells but hardly with the degree.
+- Axis and inner surfaces: not explained by the wall. The axis lies
+  inward of VMEC++'s at every φ (mean dR −1.29, −1.35, −1.29, −1.02 mm for
+  4 cells/13 planes, 8 cells/13 planes, 4 cells/29 planes, degree 3), while
+  the volume error falls 6.6× from 4 to 8 cells. Ruled out: a φ offset (fit
+  1e-7 rad), the toroidal resolution (13 to 29 planes), the VMEC reference's
+  radial resolution (0.06 mm at the axis, ns 101 against 151) and
+  VMEC2000 against VMEC++ (1 µm), a uniform ι error (the axis moves 26 mm per
+  unit relative change of ι, so 5 % would be needed; the fit error is 1e-4).
+- VMEC's state in the flux map's functional (`MILCA_FM3_VMEC`, 
+  `milca_vmec_state`, `flux_map_vmec`): W(VMEC) − W(flux map) = 2.3e-3 and
+  5.2e-4 on 2 and 4 cells; its scaled gradient by bands s < 0.05, < 0.25,
+  < 0.5, < 0.8, wall is 3e-4, 1.6e-3, 3.5e-3, 1.1e-2, 3.7e-2 (4 cells),
+  largest at the wall; Newton from it returns the flux-map state (|Δz|
+  7e-11). One discrete minimum, VMEC's state relaxes into it. Open: which of
+  the two axes is nearer the continuum solution (VMEC's angular truncation
+  MPOL 16/NTOR 12 is shared by both VMEC codes); deciding checks: VMEC++ at
+  higher MPOL/NTOR, an independent code (GVEC), and j = ∇×B = 0 of both
+  states.
 - Speed. The Hessian couples all planes of a section cell (dense blocks of
   (2 (p + 1)² nt)²) and is factorised directly: 22 s at 3536 unknowns, 99 s
   at 14416. A toroidal basis with local support or a Krylov solver is
   needed before a time comparison means anything.
+- stellarator standard (`benchmarks/flux-map-standard/stel5`, pressure, ι 0.878 to
+  0.943 prescribed from VMEC++) does not mesh: `spline_quadrature_build`
+  reports a singular block map on the bean plane φ = 0 (the O-grid corner
+  quadrilaterals are valid; the interior folds). A smaller core does not
+  help. This contradicts the flux map's premise of robustness on shaped
+  sections and is the first open item of the section discretisation.
 - Not run: degree 2, 8 cells, 25 planes from the polar start (stopped
-  unfinished), QH and QI decks, any case with pressure.
+  unfinished), QH and QI decks.
 
 The percent-level \|B\| deviations of the prototype below (4 to 13 % rms
 at 10272 unknowns) are not reproduced with splines (0.6 to 0.8 % at 3536

@@ -894,8 +894,8 @@ target_link_libraries(test_vacuum_torus_3d PRIVATE milca)
 add_test(NAME vacuum_torus_3d_gate_g1 COMMAND test_vacuum_torus_3d)
 add_library(milca_eulerian_test STATIC test/eulerian_solovev_fields.f90
     test/support/solovev_doublet.f90 test/support/landreman_sections.f90
-    test/support/flux_map_sections.f90)
-target_link_libraries(milca_eulerian_test PUBLIC milca)
+    test/support/flux_map_sections.f90 test/support/flux_map_vmec.f90)
+target_link_libraries(milca_eulerian_test PUBLIC milca milca_importers)
 add_executable(test_eulerian_solovev_labels test/test_eulerian_solovev_labels.f90)
 target_link_libraries(test_eulerian_solovev_labels PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_solovev_labels_gate_g2a COMMAND test_eulerian_solovev_labels)
@@ -2233,7 +2233,7 @@ target_compile_options(milca_io PRIVATE -Wall -Wextra)
 # namelist (docs/equilibrium-import.md).
 add_library(milca_importers src/import/import_text.f90 src/import/equilibrium_import.f90
     src/import/import_vmec.f90 src/import/import_gvec.f90 src/import/import_desc_spectre.f90
-    src/import/import_any.f90)
+    src/import/import_any.f90 src/import/vmec_state.f90)
 target_link_libraries(milca_importers PUBLIC fortnum fortio::fortio)
 target_compile_options(milca_importers PRIVATE -Wall -Wextra)
 add_executable(milca_import app/milca_import.f90)

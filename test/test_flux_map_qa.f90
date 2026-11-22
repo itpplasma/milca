@@ -1,9 +1,10 @@
 program test_flux_map_qa
     !! Opt-in driver (not a registered test): the 3D flux map
-    !! (milca_flux_map_3d) on a fixed-boundary VMEC deck with p = 0 and a
-    !! prescribed rotational transform, by default the Landreman-Paul QA deck
-    !! of benchmarks/label-qa. s is the normalised toroidal flux,
-    !! B = PHIEDGE/(2 pi) [2 grad x X grad y + iota(s) grad phi X grad s].
+    !! (milca_flux_map_3d) on a fixed-boundary VMEC deck with a prescribed
+    !! rotational transform and the deck's power-series pressure (zero for the
+    !! default, the Landreman-Paul QA deck of benchmarks/label-qa). s is the
+    !! normalised toroidal flux, B = PHIEDGE/(2 pi) [2 grad x X grad y +
+    !! iota(s) grad phi X grad s], W = int (|B|^2/2 - mu0 p) dV (B in T).
     !! The planes span one field period; the wall curves are the only
     !! geometric input (meshes on their area centroids, polar start after
     !! the second-moment normalisation). Stages are solved in turn, each from
@@ -15,12 +16,20 @@ program test_flux_map_qa
     !!
     !! Arguments: deck, output directory, stages "degree:cells:planes,..."
     !! (default 2:2:9), iota scale (1), verbose.
+    !!
+    !! With MILCA_FM3_VMEC=<wout file> every stage also evaluates the VMEC
+    !! state of that file on its mesh (flux_map_vmec, both orientations of
+    !! theta*): W and the scaled gradient of the flux map there, the gradient
+    !! by bands of s, and the state Newton reaches from it.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use milca_equilibrium_import, only: imported_equilibrium_t, IMPORT_OK
+    use milca_equilibrium_import, only: imported_equilibrium_t, IMPORT_OK, profile_value
     use milca_import_vmec, only: import_vmec
     use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
+    use fortsparse_csr, only: csr_t
     use flux_map_sections
+    use flux_map_vmec, only: fm3_from_vmec, fm3_from_vmec_failures
+    use milca_vmec_state, only: vmec_state_t, vmec_state_read
     implicit none
     real(dp), parameter :: pi = acos(-1.0_dp)
     integer, parameter :: nsamples = 256, nout = 64, nray = 128, max_stages = 8
@@ -30,10 +39,14 @@ program test_flux_map_qa
                       outdir = 'flux-map-qa-out', stages = '2:2:9', arg
     integer :: stage_spec(3, max_stages), nstages, istage, k, st, u, newton_total, j
     real(dp) :: phiedge, kappa = 1, t0, t1, ts, energy, phi, axis(2), x0(2), sym
-    real(dp), allocatable :: iota_c(:), samples(:, :, :), quality(:), flux(:)
+    real(dp), allocatable :: iota_c(:), pres_c(:), samples(:, :, :), quality(:), flux(:)
+    logical :: pres_hermite = .false.
     real(dp) :: bmin, bmax
     logical :: verbose
     integer :: skipped = 0
+    type(vmec_state_t) :: vstate
+    character(512) :: vpath, vreason
+    integer :: vlen
 
     if (command_argument_count() >= 1) call get_command_argument(1, deck)
     if (command_argument_count() >= 2) call get_command_argument(2, outdir)
@@ -44,6 +57,14 @@ program test_flux_map_qa
     end if
     verbose = command_argument_count() >= 5
     call parse_stages()
+    call get_environment_variable('MILCA_FM3_VMEC', vpath, vlen)
+    if (vlen > 0) then
+        call vmec_state_read(trim(vpath), vstate, st, vreason)
+        if (st /= 0) then
+            print '(2a)', 'VMEC state: ', trim(vreason)
+            error stop 'VMEC state'
+        end if
+    end if
     call wall_time(t0)
     call import_vmec(trim(deck), eq)
     if (eq%status /= IMPORT_OK) then
@@ -53,6 +74,16 @@ program test_flux_map_qa
     phiedge = eq%phiedge
     clebsch_nfp = eq%nfp
     iota_c = eq%iota%coefficients
+    if (trim(eq%iota%kind) /= 'power_series') error stop 'iota: power series required'
+    select case (trim(eq%pressure%kind))
+    case ('none')
+    case ('power_series')
+        if (any(eq%pressure%coefficients /= 0)) pres_c = eq%pressure%coefficients
+    case ('hermite')
+        pres_hermite = .true.
+    case default
+        error stop 'pressure: power series or Hermite spline required'
+    end select
     print '(a,i0,a,f10.6,a,7f10.6)', 'NFP ', eq%nfp, '  PHIEDGE', phiedge, '  iota', iota_c
     newton_total = 0
     do istage = 1, nstages
@@ -65,7 +96,10 @@ program test_flux_map_qa
                 call plane_curve(2*pi*(k - 1)/(nt*eq%nfp), samples(:, :, k))
             end do
             call fm3_build(c, samples, cells, deg, 4, st)
-            if (st /= 0) error stop 'meshes'
+            if (st /= 0) then
+                print '(a,i0)', 'fm3_build status ', st
+                error stop 'meshes'
+            end if
             call fm3_mesh_quality(c, quality)
             if (istage == 1) then
                 call fm3_start(c)
@@ -91,6 +125,7 @@ program test_flux_map_qa
                 '  worst Jacobian ratio', minval(quality), '  W', energy, '  flux defect', &
                 maxval(abs(abs(flux) - abs(phiedge)))/abs(phiedge), '  ', t1 - ts, ' s  negative eigenvalues ', &
                 c%fm%negative_eigenvalues
+            if (vlen > 0) call vmec_check(energy)
         end associate
         previous = c
     end do
@@ -180,6 +215,66 @@ contains
         close (v)
     end subroutine surface
 
+    subroutine vmec_check(w_ours)
+        !! The VMEC state on the mesh of c: W and gradient of the flux map.
+        real(dp), intent(in) :: w_ours
+        type(fm3_case_t) :: cv
+        type(csr_t) :: h
+        real(dp), allocatable :: g(:), d(:), sc(:)
+        real(dp) :: wv, orient, edges(6), band(5), sv
+        integer :: o, i, kk, n0, nt, b, stv
+
+        edges = [0.0_dp, 0.05_dp, 0.25_dp, 0.5_dp, 0.8_dp, huge(1.0_dp)]
+        do o = 1, 2
+            orient = merge(1.0_dp, -1.0_dp, o == 1)
+            cv = c
+            call fm3_from_vmec(cv, vstate, orient, stv)
+            if (stv /= 0) error stop 'fm3_from_vmec'
+            call flux_map3d_system(cv%fm, cv%derham, cv%quad, profiles, cv%base, cv%fm%z, wv, g, h)
+            d = diag_of(h)
+            sc = g/sqrt(abs(d) + tiny(1.0_dp))
+            sc(cv%fm%fixed) = 0
+            n0 = cv%n0
+            nt = cv%nt
+            band = 0
+            do kk = 1, nt
+                do i = 1, n0
+                    if (cv%fm%is_wall(i)) then
+                        band(5) = band(5) + sc((kk - 1)*n0 + i)**2
+                        cycle
+                    end if
+                    sv = cv%fm%z((kk - 1)*n0 + i)**2 + cv%fm%z(n0*nt + (kk - 1)*n0 + i)**2
+                    b = count(sv >= edges(2:5)) + 1
+                    band(b) = band(b) + sc((kk - 1)*n0 + i)**2 + sc(n0*nt + (kk - 1)*n0 + i)**2
+                end do
+            end do
+            print '(a,f5.1,a,es17.10,a,es10.3,a,es9.2,a,5es9.2,a,i0)', '  VMEC state, orientation', &
+                orient, ':  W', wv, '  W - W_flux map', wv - w_ours, '  |g| scaled', &
+                norm2(sc), '  by s bands [0,.05,.25,.5,.8,wall]', sqrt(band), &
+                '  inversion failures ', fm3_from_vmec_failures()
+            if (o == 1 .or. wv - w_ours < 1e-2_dp*abs(w_ours)) then
+                cv%fm%verbose = .false.
+                call flux_map3d_solve(cv%fm, cv%derham, cv%quad, profiles, cv%base, 1e-9_dp, 80, stv)
+                call flux_map3d_system(cv%fm, cv%derham, cv%quad, profiles, cv%base, cv%fm%z, wv)
+                print '(a,i0,a,i0,a,es17.10,a,es10.3,a,es10.3)', '    Newton from it: status ', stv, &
+                    '  steps ', cv%fm%steps, '  W', wv, '  W - W_flux map', wv - w_ours, &
+                    '  max |z - z_flux map|', maxval(abs(cv%fm%z - c%fm%z))
+            end if
+        end do
+    end subroutine vmec_check
+
+    function diag_of(a) result(dg)
+        type(csr_t), intent(in) :: a
+        real(dp), allocatable :: dg(:)
+        integer :: i, q
+        allocate (dg(a%nrow), source=0.0_dp)
+        do i = 1, a%nrow
+            do q = a%row_ptr(i), a%row_ptr(i + 1) - 1
+                if (a%col(q) == i) dg(i) = a%val(q)
+            end do
+        end do
+    end function diag_of
+
     subroutine plane_curve(phi, curve)
         !! Wall curve of the deck in the plane phi, counter-clockwise, first
         !! sample on the outboard side at the centroid height.
@@ -221,8 +316,21 @@ contains
                 first = ii
             end if
         end do
-        curve = cshift(raw, first - 1, dim=2)
+        curve = cshift(raw, first - 1 + corner_shift(ns), dim=2)
     end subroutine plane_curve
+
+    integer function corner_shift(ns)
+        !! diagnostic: MILCA_FM3_CORNER_SHIFT = fraction of the samples
+        integer, intent(in) :: ns
+        character(32) :: v
+        integer :: length
+        real(dp) :: f
+        corner_shift = 0
+        call get_environment_variable('MILCA_FM3_CORNER_SHIFT', v, length)
+        if (length == 0) return
+        read (v, *) f
+        corner_shift = nint(f*ns)
+    end function corner_shift
 
     subroutine profiles(s, tau, gp, p)
         real(dp), intent(in) :: s
@@ -238,7 +346,26 @@ contains
         end do
         tau = [-phiedge/pi, 0.0_dp, 0.0_dp]
         gp = -kappa*phiedge/(2*pi)*io
+        ! mu0 p(s), p' and p'' of the deck's power series (Pa -> T^2)
         p = 0
+        if (allocated(pres_c)) then
+            do m = 1, size(pres_c)
+                p(1) = p(1) + pres_c(m)*s**(m - 1)
+                if (m >= 2) p(2) = p(2) + (m - 1)*pres_c(m)*s**(m - 2)
+                if (m >= 3) p(3) = p(3) + (m - 1)*(m - 2)*pres_c(m)*s**(m - 3)
+            end do
+            p = 4e-7_dp*pi*p
+        else if (pres_hermite) then
+            ! sampled profiles (e.g. two_power): p', p'' by central differences
+            block
+                real(dp), parameter :: h = 1e-4_dp
+                real(dp) :: pm, p0, pp
+                p0 = profile_value(eq%pressure, s)
+                pm = profile_value(eq%pressure, s - h)
+                pp = profile_value(eq%pressure, s + h)
+                p = 4e-7_dp*pi*[p0, (pp - pm)/(2*h), (pp - 2*p0 + pm)/h**2]
+            end block
+        end if
     end subroutine profiles
 
 end program test_flux_map_qa

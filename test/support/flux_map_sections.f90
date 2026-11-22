@@ -79,7 +79,7 @@ contains
         do k = c%nt, 1, -1
             associate (sm => samples(:, :, k))
                 call layout_ogrid(c%centre(:, k), 0.5_dp*(maxval(sm(1, :)) - minval(sm(1, :))), &
-                                  0.5_dp, layout, status)
+                                  core_fraction(), layout, status)
                 if (status /= 0) return
                 if (core) then
                     call layout_set_curve(layout, LAYOUT_WALL, sm, status, centre_core=.true.)
@@ -111,6 +111,16 @@ contains
         call spline_derham_boundary_dofs(c%derham, LAYOUT_WALL, 0, wall)
         call flux_map3d_init(c%fm, c%n0, c%nt, wall)
     end subroutine fm3_build
+
+    real(dp) function core_fraction()
+        !! Size of the O-grid core relative to the half width (0.5; diagnostic
+        !! override MILCA_FM3_CORE).
+        character(32) :: v
+        integer :: length
+        core_fraction = 0.5_dp
+        call get_environment_variable('MILCA_FM3_CORE', v, length)
+        if (length > 0) read (v, *) core_fraction
+    end function core_fraction
 
     pure subroutine moments(poly, centroid, root)
         !! Area centroid and the symmetric square root of the second-moment
