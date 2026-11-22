@@ -1111,3 +1111,29 @@ milca_test_labels(ideal_flux_tokamak_mercier fast CLASSES mhd TARGETS test_ideal
 milca_test_labels(nested_flux_field fast CLASSES mhd TARGETS test_nested_flux)
 milca_test_labels(nested_flux_well fast CLASSES mhd TARGETS test_nested_flux)
 milca_test_labels(nested_flux_study slow CLASSES mhd TARGETS test_nested_flux)
+milca_test_labels(eulerian_clebsch_doublet_aligned_gate_e2b fast CLASSES equilibrium
+    TARGETS test_eulerian_clebsch_doublet_aligned)
+# label lane, spline Grad-Shafranov and their fixtures (under 25 s each)
+foreach(entry
+        "gs_free_current_contour_integrals test_gs_free_current"
+        "gs_spline_solovev_rate test_gs_spline"
+        "gs_spline_free_boundary_coupling test_gs_spline_free"
+        "vacuum_torus_3d_gate_g1 test_vacuum_torus_3d"
+        "eulerian_solovev_labels_gate_g2a test_eulerian_solovev_labels"
+        "eulerian_solovev_nonlinear_labels_gate_g2a test_eulerian_solovev_labels"
+        "eulerian_clebsch_fit_gate_e0 test_eulerian_clebsch_fit"
+        "eulerian_clebsch_fit_nonlinear_gate_e0 test_eulerian_clebsch_fit"
+        "eulerian_clebsch_newton_gate_e1 test_eulerian_clebsch_newton"
+        "eulerian_clebsch_3d_gate_e3 test_eulerian_clebsch_3d"
+        "eulerian_clebsch_doublet_fit_gate_e2a test_eulerian_clebsch_doublet_fit"
+        "eulerian_clebsch_doublet_fit_circular_gate_e2a test_eulerian_clebsch_doublet_fit"
+        "eulerian_clebsch_landreman_gate_e4a test_eulerian_clebsch_landreman"
+        "grad_shafranov_p3_pedestal_seed_convergence test_gs_nonlinear")
+    separate_arguments(entry)
+    list(GET entry 0 test)
+    list(GET entry 1 target)
+    milca_test_labels(${test} fast CLASSES equilibrium TARGETS ${target})
+endforeach()
+milca_test_labels(grad_shafranov_phase1_edge_readback_app fast CLASSES equilibrium
+    TARGETS gs_phase1 test_gs_prescribed_q_circle)
+milca_test_labels(gs_free_xpoint_refit fast CLASSES equilibrium TARGETS gs_free)
