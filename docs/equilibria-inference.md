@@ -170,6 +170,25 @@ equilibria are highly nonunique. With collisions, sources, transport, neutrals
 and walls, the scientifically relevant object is often a balanced stationary
 solution rather than a collisionless equilibrium.
 
+## Physics-exact families as optional forward models
+
+The exploratory [exact-force-balance and coordinate-consistency plan](exact-force-balance-coordinate-plan.md)
+tests whether an analytic or certified coefficient family can enforce
+interior ideal-MHD force balance identically while boundary, coil, profile
+and measurement inputs are imperfect targets. A converged ordinary
+finite-element/Newton residual is **not** a pointwise-exact equilibrium,
+and a fixed-profile analytical family may simply lack enough freedom to
+reproduce measured data. Always report the fit defect separately from
+the physical-residual and numerical/certification status.
+
+For regular nested equilibria, the independent Boozer and Hamada routes
+owned by libneo offer additional compatibility tests, not proofs of force
+balance. Their resonant small divisors and the degeneration of the
+current-based Hamada route at zero pressure gradient remain explicit.
+MILCA owns any new physical forward model and its implicit derivatives;
+TIAGO continues to own priors, diagnostic likelihoods and uncertainty.
+This is downstream research, not a new active equilibrium lane.
+
 ## TIAGO owns reconstruction and inference
 
 MILCA provides the differentiable forward model: stationary/evolution solve,
