@@ -9,8 +9,7 @@ program test_eulerian_clebsch_landreman
     !! W). The winding angle is taken in the frame H^(1/2) of chi at X_k. The
     !! L2 error of B against the exact field must converge at order p.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use fortfem_spline_layout, only: block_layout_t, layout_ogrid, layout_set_curve, &
-        LAYOUT_WALL
+    use fortfem_spline_layout, only: block_layout_t
     use fortfem_spline_space, only: spline_space_t, spline_space_options_t, &
         spline_space_build, spline_space_update_geometry, SPLINE_C0
     use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build, &
@@ -20,13 +19,13 @@ program test_eulerian_clebsch_landreman
     use fortsparse_csr, only: csr_t
     use milca_eulerian_vacuum, only: eu_constrained_solve
     use milca_eulerian_clebsch, only: clebsch_3d_system
-    use milca_nested_oracles, only: nested_oracle_t, NESTED_INTEGER
-    use milca_nested_oracle_leaves, only: nested_integer_surface, nested_ray, &
-        nested_integer_flux
+    use milca_nested_oracles, only: NESTED_INTEGER
+    use milca_nested_oracle_leaves, only: nested_integer_flux
+    use landreman_sections, only: section_oracle, section_label, section_exact_b, &
+        section_sqrt_hessian, section_layout
     implicit none
-    integer, parameter :: degree = 2, samples_n = 128
+    integer, parameter :: degree = 2
     real(dp), parameter :: pi = acos(-1.0_dp)
-    type(nested_oracle_t) :: o
     type(spline_space_t) :: space
     integer :: nt = 13, levels = 3, level, failures, component, plane
     integer :: cells(3) = [2, 4, 8]
@@ -35,13 +34,13 @@ program test_eulerian_clebsch_landreman
     character(16) :: arg
 
     failures = 0
-    o%family = NESTED_INTEGER
-    o%eps = 0.1_dp
-    o%tau = 0
-    o%delta = 1.0_dp/64
+    section_oracle%family = NESTED_INTEGER
+    section_oracle%eps = 0.1_dp
+    section_oracle%tau = 0
+    section_oracle%delta = 1.0_dp/64
     if (command_argument_count() >= 1) then
         call get_command_argument(1, arg)
-        read (arg, *) o%eps
+        read (arg, *) section_oracle%eps
     end if
     if (command_argument_count() >= 2) then
         call get_command_argument(2, arg)
@@ -59,7 +58,7 @@ program test_eulerian_clebsch_landreman
         call get_command_argument(5, arg)
         read (arg, *) sign_g
     end if
-    print '(a,f6.3,a,i3,a,2f5.1)', 'eps', o%eps, '  planes', nt, '  signs F, G', sign_f, sign_g
+    print '(a,f6.3,a,i3,a,2f5.1)', 'eps', section_oracle%eps, '  planes', nt, '  signs F, G', sign_f, sign_g
     do level = 1, levels
         err(level) = solve_g(cells(level))
         print '(a,i3,a,es10.3)', 'cells', cells(level), '  L2 error of B', err(level)
@@ -84,50 +83,6 @@ contains
             failures = failures + 1
         end if
     end subroutine check
-
-    function axis_at(phi) result(x)
-        !! (R, Z) of the magnetic axis in the plane phi: the surface map at
-        !! rho = 0, its parameter t found where the ray angle matches phi.
-        real(dp), intent(in) :: phi
-        real(dp) :: x(2), lo, hi, t, c(3), jac, ray, radius
-        integer :: k
-
-        lo = phi - pi/2
-        hi = phi + pi/2
-        do k = 1, 60
-            t = (lo + hi)/2
-            call nested_integer_surface(0.0_dp, 0.0_dp, t, o%eps, o%tau, c(1), c(2), c(3), jac)
-            call nested_ray(c(1), c(2), phi, ray, radius)
-            if (ray < 0) then
-                lo = t
-            else
-                hi = t
-            end if
-        end do
-        x = [sqrt(c(1)**2 + c(2)**2), c(3)]
-    end function axis_at
-
-    real(dp) function chi_at(r, phi, z) result(chi)
-        real(dp), intent(in) :: r, phi, z
-        real(dp) :: v(20)
-        integer :: st
-
-        call o%point([r*cos(phi), r*sin(phi), z], v, st)
-        if (st /= 0) error stop 'oracle point outside the domain'
-        chi = v(1)/o%delta
-    end function chi_at
-
-    subroutine exact_b(x, b)
-        !! Cylindrical (R, phi, Z) components of the exact field.
-        real(dp), intent(in) :: x(3)
-        real(dp), intent(out) :: b(3)
-        real(dp) :: v(20)
-        integer :: st
-
-        call o%point([x(1)*cos(x(2)), x(1)*sin(x(2)), x(3)], v, st)
-        if (st /= 0) error stop 'exact field outside the domain'
-        b = [v(3)*cos(x(2)) + v(4)*sin(x(2)), -v(3)*sin(x(2)) + v(4)*cos(x(2)), v(5)]
-    end subroutine exact_b
 
     subroutine profiles(chi, f, g, p)
         !! F = -sign_f Phi(psi)/(2 pi), G = sign_g iota Phi/(2 pi), psi = delta chi,
@@ -164,8 +119,8 @@ contains
         real(dp), intent(in) :: chi
         real(dp) :: psi
 
-        psi = o%delta*chi
-        call nested_integer_flux(psi, o%eps, o%tau, phi_of)
+        psi = section_oracle%delta*chi
+        call nested_integer_flux(psi, section_oracle%eps, section_oracle%tau, phi_of)
     end function phi_of
 
     subroutine coordinate(block, xi, t, values)
@@ -189,73 +144,10 @@ contains
         integer :: st
 
         call spline_geometry_at(space, block, xi, jet, st)
-        values(1) = chi_at(jet(1, 1), plane_phi, jet(2, 1))
+        values(1) = section_label(jet(1, 1), plane_phi, jet(2, 1))
         associate (unused => t)
         end associate
     end subroutine label_cb
-
-    subroutine plane_layout(phi, centre, layout)
-        real(dp), intent(in) :: phi
-        real(dp), intent(out) :: centre(2)
-        type(block_layout_t), intent(out) :: layout
-        real(dp) :: samples(2, samples_n)
-        integer :: i, st
-
-        centre = axis_at(phi)
-        ! rays from the axis: counter-clockwise from the outboard midplane
-        do i = 1, samples_n
-            samples(:, i) = centre + boundary_radius(phi, centre, 2*pi*(i - 1)/samples_n) &
-                            *[cos(2*pi*(i - 1)/samples_n), sin(2*pi*(i - 1)/samples_n)]
-        end do
-        call layout_ogrid(centre, 0.5_dp*(maxval(samples(1, :)) - minval(samples(1, :))), &
-                          0.5_dp, layout, st)
-        if (st /= 0) error stop 'layout'
-        call layout_set_curve(layout, LAYOUT_WALL, samples, st)
-        if (st /= 0) error stop 'boundary curve'
-    end subroutine plane_layout
-
-    real(dp) function boundary_radius(phi, centre, angle) result(r)
-        !! Distance from the axis to chi = 1 along a ray in the plane phi.
-        real(dp), intent(in) :: phi, centre(2), angle
-        real(dp) :: lo, hi, e(2)
-        integer :: k
-
-        e = [cos(angle), sin(angle)]
-        lo = 0
-        hi = 0.05_dp
-        do while (chi_at(centre(1) + hi*e(1), phi, centre(2) + hi*e(2)) < 1)
-            lo = hi
-            hi = 1.5_dp*hi
-        end do
-        do k = 1, 60
-            r = (lo + hi)/2
-            if (chi_at(centre(1) + r*e(1), phi, centre(2) + r*e(2)) < 1) then
-                lo = r
-            else
-                hi = r
-            end if
-        end do
-    end function boundary_radius
-
-    function sqrt_hessian(phi, x) result(m)
-        !! H^(1/2) of the exact chi in the plane phi at x.
-        real(dp), intent(in) :: phi, x(2)
-        real(dp) :: m(2, 2), hm(2, 2), sd
-        real(dp), parameter :: h = 1e-3_dp
-
-        hm(1, 1) = (chi_at(x(1) + h, phi, x(2)) - 2*chi_at(x(1), phi, x(2)) &
-                    + chi_at(x(1) - h, phi, x(2)))/h**2
-        hm(2, 2) = (chi_at(x(1), phi, x(2) + h) - 2*chi_at(x(1), phi, x(2)) &
-                    + chi_at(x(1), phi, x(2) - h))/h**2
-        hm(1, 2) = (chi_at(x(1) + h, phi, x(2) + h) - chi_at(x(1) + h, phi, x(2) - h) &
-                    - chi_at(x(1) - h, phi, x(2) + h) + chi_at(x(1) - h, phi, x(2) - h))/(4*h**2)
-        hm(2, 1) = hm(1, 2)
-        sd = sqrt(hm(1, 1)*hm(2, 2) - hm(1, 2)**2)
-        m = hm
-        m(1, 1) = m(1, 1) + sd
-        m(2, 2) = m(2, 2) + sd
-        m = m/sqrt(hm(1, 1) + hm(2, 2) + 2*sd)
-    end function sqrt_hessian
 
     real(dp) function solve_g(n) result(rel)
         integer, intent(in) :: n
@@ -271,9 +163,9 @@ contains
 
         do plane = nt, 1, -1
             plane_phi = 2*pi*(plane - 1)/nt
-            call plane_layout(plane_phi, centre, layout)
+            call section_layout(plane_phi, centre, layout)
             axes(:, plane) = centre
-            frames(:, :, plane) = sqrt_hessian(plane_phi, centre)
+            frames(:, :, plane) = section_sqrt_hessian(plane_phi, centre)
             if (plane == nt) then
                 options%degree = degree
                 options%regularity = SPLINE_C0
@@ -314,7 +206,7 @@ contains
         g = delta(ntot + 1:)
         call clebsch_3d_system(derham, aquad, nt, profiles, axes(:, 1), chi, g, energy, grad, &
                                plane_axis=axes, plane_nodes=nodes, plane_frames=frames, &
-                               exact_field=exact_b, field_error=ferr)
+                               exact_field=section_exact_b, field_error=ferr)
         rel = sqrt(ferr(1)/ferr(2))
         associate (unused => k)
         end associate

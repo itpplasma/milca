@@ -416,7 +416,7 @@ relative L2 error of B against the exact field, degree 2):
 
 | case | planes | 2 cells | 4 cells | 8 cells |
 |---|---|---|---|---|
-| integer family, ε = 0.1 | 13 | 1.09e-2 | 2.47e-3 | 4.99e-4 |
+| integer family, ε = 0.1 | 13 | 1.07e-2 | 2.58e-3 | 5.59e-4 |
 | integer family, ε = 0.1 | 21 | | | 4.96e-4 |
 | sheared family, ε = 1.2 | 21 | 2.81e-2 | 1.03e-2 | 2.77e-3 |
 | sheared family, ε = 1.2 | 31 | 2.81e-2 | 1.02e-2 | |
@@ -433,14 +433,59 @@ relative L2 error of B against the exact field, degree 2):
 - The multiplier of χ(X) = 0 is nonzero and mesh independent (0.103 for
   ε = 0): the winding form leaves a point term 4πκF'² δχ(X) in the first
   variation of W, which the constraint absorbs.
-- Open: on the sheared sections the axis rows stay at 0.5 from the exact
-  state because `layout_set_curve` scales the core corners with the wall, so
-  the central core vertex leaves the axis. The core must be re-centred on X
-  after the wall is set.
+- The O-grid of each plane is centred on its axis (FortFEM
+  `layout_set_curve(..., centre_core=.true.)`, #277): before, the core
+  corners were scaled about the axis with the wall, so the core block's
+  centre left the axis wherever the boundary is not centred on it, and on
+  the sheared sections the axis rows stayed at 0.5 from the exact state.
+  The integer row above is with the centred core (before: 1.09e-2, 2.47e-3,
+  4.99e-4; still order p). The Solov'ev gates keep the default core (scaled
+  about r0): centring it there crowds the outboard cells and costs E1 its
+  quadratic convergence at 4 cells.
 - The 3D assembly is threaded over cells (OpenMP): the E3b gate takes 1.4 s
   and E4a 2.4 s on 16 threads, against 11 s and 17 s serial. The finite
   difference axis columns (2 nt gradient assemblies per Newton step) remain
   the cost at 21 planes.
+
+E4 result (`test_eulerian_clebsch_landreman_newton`, sheared family ε = 0.6,
+S = 2.4, δ = 0.2: ι from 4.73 to 5.11, the axis from R = 1.456 to 1.646 over
+a field period; 13 planes, degree 2; χ = ψ/δ, F = −Φ/(2π), G' = −ιΦ'/(2π),
+p = −ψ/λ², with Φ(ψ) and ι(ψ) Chebyshev series of 24 terms fitted to the
+oracle (last coefficients 1e-16); start: labels perturbed by 2 % per plane,
+the axis offset helically by 2e-3, g fitted):
+
+| cells | 2 | 4 |
+|---|---|---|
+| L2 error of B, Newton | 4.86e-2 | 1.16e-2 |
+| fixed-label fit (E4a) on the same mesh | 4.99e-2 | 1.16e-2 |
+| max \|χ − Π0 ψ/δ\| | 2.3e-2 | 3.1e-3 |
+| max \|X_k − X_exact\| | 8.1e-3 | 2.3e-3 |
+| Newton steps (\|r\| to 1e-8 of the start) | 4 | 4 |
+
+Rates: B 2.06, χ 2.89, axis 1.81. \|r\| at 4 cells: 7.5e-2, 1.0e-3, 8.9e-6,
+1.0e-7, 2.8e-11. The gate runs in 17 s on 28 cores (the finite-difference
+axis columns, 4 nt assemblies per step, dominate).
+
+- The Newton matrix agrees with central differences of the residual to
+  1e-12 in χ, g and μ and 1e-9 in X (argument `jacobian`), with the wall
+  rows excluded (the residual is zero there and the solve fixes those
+  labels).
+- The discrete g → g + k(χ_h) is a near-null direction: with the ridge of
+  the g solve (1e-12 relative) Newton steps drift along it (\|Δg\| 3e-2
+  every other step at \|r\| = 1e-7). A ridge of 1e-8 on the g block of the
+  Newton matrix only (not the residual, so the solution is unchanged)
+  removes the drift. The proper remedy is the gauge constraint of section 4.
+- Unresolved: the sheared cases with ε = 1.2 do not converge. With δ = 1/64
+  (the E4a case, ι from 2.7997 to 2.8007) Newton diverges at 2 cells even
+  from the exact state; with S = 2.4, δ = 0.2 (ι from 4.55 to 4.78) it
+  converges at 2 cells in 4 steps and stagnates, then diverges, at 4 cells.
+  The Newton matrix is consistent there too, so the linearised problem is
+  nearly singular. Weak shear explains the first case only; candidates for
+  the second are a near-marginal pressure-driven mode of the label Hessian
+  (which is not the ideal δW, section 7) and the coarse planes. To be
+  measured by the smallest eigenvalues of the reduced Hessian against ε.
+- The ι of the sheared family (scan over ε, S, λ, δ): shear grows with S and
+  δ and is independent of λ; at S = 1.4 it is below 2e-2 for every ε.
 
 FortFEM supplies the separatrix-aligned layouts for E2b and E5:
 `layout_doublet` (18 blocks, X of valence 8) and `layout_island_chain` (any
@@ -461,8 +506,8 @@ reaches order p at p = 2.
 4. O-line handling for several axes: E2a and E2b done (graded layers of
    power 4 on FortFEM's doublet layout), then E2 with Newton. The graded
    layer belongs in FortFEM's `spline_grade_knots` once E2 needs it too.
-5. 3D: E3, E3b and E4a done; E4 with Newton on the sheared family after the
-   core is re-centred on the axis, then the registered integer case against
+5. 3D: E3, E3b, E4a and E4 (Newton on the sheared family, ε = 0.6) done;
+   ε = 1.2 open (above); then the registered integer case against
    VMEC++, DESC and GVEC.
 6. Islands and rational surfaces, E5. Open whether Newton from nested
    initial labels finds the island topology, or whether the topology has to
