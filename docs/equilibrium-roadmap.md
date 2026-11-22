@@ -78,6 +78,36 @@ Each step on cases that run in seconds, against analytic solutions first.
    First on the exact Solov'ev doublet with fixed labels (E2b), then Newton
    (E2, open: the log-singular flux at the separatrix shrinks the basin to
    the graded layer; the ALE separatrix alignment is the planned remedy).
+   *State:* A2a passed (`milca_label_ale_multi`, gate
+   `label_ale_doublet_gate_a2a`, 8 s): the exact Solov'ev doublet on
+   FortFEM's doublet layout in the Grad–Shafranov form of the label
+   (ψ = ψ_O + sχ, f prescribed, no winding form), unknowns χ, both
+   O-points and their multipliers. Each core follows its O-point by its own
+   blend (0 on the wall, the other core and the separatrix sides), the X
+   vertex follows the saddle of χ_h between passes by its own blend, and the
+   pins are renewed each pass in the original mesh so a core never moves by
+   more than half a cell. From O-points offset by 10 % of the lobe half
+   widths (up to 30 % tested) and the X vertex off by half that:
+
+   | cells | B_pol | projected exact χ | B_pol in the lobes | O error | X vertex error | passes, Newton steps |
+   |---|---|---|---|---|---|---|
+   | 2 | 8.83e-2 | 9.32e-2 | 3.34e-2 | 3.4e-3 | 1.5e-4 | 5, 8 |
+   | 4 | 2.00e-2 | 2.03e-2 | 8.26e-3 | 1.7e-4 | 3.1e-5 | 5, 7 |
+   | 8 | 8.75e-3 | 8.80e-3 | 1.94e-3 | 1.5e-5 | 7.7e-6 | 5, 8 |
+
+   Newton is quadratic in every pass. B_pol equals the projected exact label
+   on the same mesh; in the lobes it converges at order 2, the outer ring to
+   the wall is pre-asymptotic for both (order 1.2 from 4 to 8 cells, 2.5 from
+   8 to 16). The O-points converge at order 3.5–4, the X vertex at order 2.
+   Findings: χ_h is only C0, so at the X vertex its saddle is a kink
+   (Newton on ∇χ_h circles the vertex); the saddle comes from a
+   kernel-weighted quadratic fit of χ_h (smooth in χ_h, exact for a
+   quadratic label), which also makes the X follow converge. A fixed pin far
+   from the O-point folds the thin lobe rings (the lobes have aspect 2.3,
+   the cores are 0.4 of them); renewing the pins removes that. Open: the
+   same with the direct-Clebsch toroidal field (g and the winding forms, E2:
+   the log-singular F' at the separatrix), which needs unknowns adapted to
+   the separatrix layer.
 3. **Gate C: Clebsch against constrained A.** On the same ALE mesh:
    Solov'ev, a sheared 3D nested case and a simple island. Compare
    conditioning, Newton convergence, locking, cost and topology handling.
