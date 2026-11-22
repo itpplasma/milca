@@ -190,6 +190,10 @@ element) is unstable: the energy collapses.
 
 ## 5. Sequence
 
+Order of work after F2 and how the flux map is compared with the
+Lagrangian map: [roadmap](equilibrium-roadmap.md), "Way forward after the
+audit" (P0–P6).
+
 - F1 (done): axisymmetric, this document.
 - F2: 3D on the per-plane meshes of the label lane (ζ cylindrical), the 3D
   projection space, QA, QH and QI decks against VMEC++.
