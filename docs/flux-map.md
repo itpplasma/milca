@@ -163,7 +163,124 @@ pointwise. Degree 3, 8 cells: pointwise 2.54e-4, 2.77e-4, 1.34e-3; cell mean
 devices) converges at order p here, where the label lane reached order 0.6
 (label plan, section 4b).
 
-### Prototype (Python, C0 Lagrange elements, not in the repository)
+### Gates F2a, F2b and the QA driver (3D, `milca_flux_map_3d`)
+
+Discretisation: the spline section of F1 times the trigonometric nodal
+basis of nt planes over one field period (the complex of
+`clebsch_3d_system`), the section of each plane isoparametric in t, vector
+components (R, φ, Z), ζ the cylindrical angle. Kernel: the generated leaf
+`flux_map_energy_3d` (FortSym proves tangency, rotation invariance and
+Hessian symmetry). The wall condition is exact at every point and every t:
+Θ_h = Σ_k L_k(t) Σ_b N_b Θ_bk/σ. B enters pointwise. Meshes
+(`test/support/flux_map_sections.f90`): `layout_ogrid` and
+`layout_set_curve(centre_core)` on the area centroid of each wall curve; the
+start is the polar map of the section after an affine normalisation by its
+second moments. No axis unknown, multiplier, winding form or singular
+quadrature. The toroidal flux through every plane is conserved to
+round-off in all runs below (defect 1e-14 to 6e-10) and B_φ keeps its sign.
+
+F2a (`flux_map_3d_gate_f2a`, 5 s): the F1 Solov'ev case through the 3D path
+on 3 identical planes reproduces F1: B 2.420e-2, 7.110e-3, 1.932e-3 on 2, 4,
+8 cells (F1: 2.42e-2, 7.11e-3, 1.93e-3), 13, 17, 26 Newton steps, axis
+5.0e-3, 1.1e-4, 1.3e-5.
+
+F2b (`flux_map_3d_gate_f2b`, 9 s): the exact sheared Landreman family of
+E4 and A1-3D (ε 0.6, 13 planes over the torus, degree 2), wall curves as the
+only geometric input (mesh centres 6 % of the minor radius off the axis),
+polar start at each level:
+
+| cells | unknowns | Newton steps | B error | fixed-label fit of E4a | label lane (A1-3D) | axis | time |
+|---|---|---|---|---|---|---|---|
+| 2 | 1352 | 11 | 3.49e-2 | 4.98e-2 | 4.80e-2 | 2.0e-3 | 1.9 s |
+| 4 | 3536 | 11 | 7.43e-3 | 1.161e-2 | 1.159e-2 | 1.7e-3 | 6.6 s |
+
+Rate of B 2.23. A1-3D takes 21 s from an axis guess within 5 % of the minor
+radius, E4 133 s. The axis error falls only from 2.0e-3 to 1.7e-3.
+
+The exact state is not the state of lowest energy, and beyond this
+resolution the minimisation leaves it (same case, B error and axis error
+against the exact state; energies compare only on the same mesh, because
+the spline fit of the wall changes the volume):
+
+| run | B error | axis | W |
+|---|---|---|---|
+| 4 cells, polar start | 7.43e-3 | 1.7e-3 | 9.310776e-2 |
+| 4 cells, from the 2-cell solution | 3.36e-2 | 3.8e-2 | 9.306395e-2 |
+| 8 cells, polar start | 1.89e-2 | 3.3e-2 | 9.296213e-2 |
+| 8 cells, from the 4-cell solution, minimisation | 2.55e-2 | 2.9e-2 | 9.296084e-2 |
+| 8 cells, from the 4-cell solution, Newton on stationarity | 2.48e-3 | 5.6e-3 | 9.298362e-2 |
+| degree 3, 2 cells, from the degree-2 solution | 1.60e-2 | 1.6e-3 | 9.331707e-2 |
+| degree 3, 4 cells, polar start or nested | 3.2e-2 | 3.3e-2 to 3.7e-2 | 9.3049e-2 |
+| 21 planes, 4 cells, polar start | 1.18e-1 | 1.8e-1 | 9.145135e-2 |
+| 21 planes, 4 cells, from the 13-plane solution | 7.59e-3 | 5.7e-3 | 9.310760e-2 |
+
+So on the 4-cell and 8-cell meshes there is a second stationary state with
+the same fluxes and lower energy (by 4.4e-5 and 2.3e-5), its axis about
+3e-2 from the exact one. With `stationary` (Newton with a line search on
+the gradient norm, any Hessian signature) the 8-cell solve started from the
+4-cell solution converges quadratically to the state next to the exact one
+(B 2.48e-3, rate 1.6 from 4 cells) while its axis error grows to 5.6e-3:
+the axis displacement is a very soft direction. Read as: this equilibrium
+is at or beyond marginal stability for an axis-displacing mode of the γ = 0
+energy, and a minimiser cannot be expected to return it; not verified by
+an eigenvalue of the Hessian. The label lane met the same case as "Newton
+stagnates, then diverges" (label plan, E4, ε = 1.2). The gate therefore
+runs 2 and 4 cells from the polar start; options of the test: `nested`,
+`stationary`, degree, planes.
+
+QA driver (`test_flux_map_qa`, opt-in, not a registered test): the
+Landreman–Paul QA deck of [benchmarks/label-qa](../benchmarks/label-qa/README.md),
+one field period, p = 0, ι prescribed, gauge by stellarator symmetry,
+stages "degree:cells:planes" solved in turn from the previous one
+(`fm3_prolong`). Compared by `compare.py` with VMEC++ (9 s, energy
+0.281794): axis and surfaces on the 64 reference planes, surfaces traced as
+preimages of circles. Wall times on 5 threads with other jobs running:
+
+| last stage (start) | unknowns | Newton steps | time | energy | axis max | s = 0.25: distance rms, \|B\| rms | s = 0.50: distance rms, \|B\| rms |
+|---|---|---|---|---|---|---|---|
+| degree 2, 2 cells, 9 planes (polar) | 936 | 16 | 2 s | +2.06 % | 11.4 mm | 4.8 mm, 2.7 % | 4.2 mm, 2.8 % |
+| degree 2, 4 cells, 13 planes (polar) | 3536 | 23 | 22 s | +0.40 % | 1.5 mm | 0.81 mm, 0.58 % | 1.27 mm, 0.75 % |
+| degree 2, 4 cells, 13 planes (from 2 cells) | 3536 | 16 + 13 | 13 s | +0.40 % (same W to 11 digits) | | | |
+| degree 3, 4 cells, 13 planes (from degree 2, 2 cells) | 5018 | 58 | 68 s | +0.30 % | 1.3 mm | 0.65 mm, 0.52 % | 0.99 mm, 0.65 % |
+| degree 2, 8 cells, 17 planes (from 4 cells, 9 planes) | 14416 | 34 | 99 s | +0.06 % | 1.8 mm | 0.77 mm, 0.23 % | 0.43 mm, 0.37 % |
+| degree 3, 4 cells, 21 planes (polar; the ladder 2:2:9, 2:4:13, 3:4:13, 3:4:21 gives the same W to 11 digits in 57 steps, 116 s) | 8106 | 27 | 175 s | +0.30 % | 1.5 mm | 0.59 mm, 0.45 % | 0.96 mm, 0.47 % |
+| degree 4, 4 cells, 13 planes (polar; the ladder 2:2:9, 4:2:9, 4:2:13, 4:4:13 ends at W lower by 6e-6 relative in 93 steps, 193 s) | 6760 | 43 | 215 s | +0.20 % | 1.5 mm | 0.91 mm, 0.44 % | 0.92 mm, 0.62 % |
+
+Every stage converges (scaled gradient 1e-10 or below), and the polar start
+and the nested start reach the same state at degrees 2 and 3 (at degree 4
+the energies differ by 6e-6 relative, not followed up): no second state
+was met on this vacuum case, where the label lane did not converge. It is not yet competitive with VMEC++:
+
+- Accuracy. The energy and \|B\| converge (2.06, 0.40, 0.06 %; \|B\| rms
+  at s = 0.5: 2.8, 0.75, 0.37 %), but the axis and the s = 0.25 surface stay
+  at 1.3 to 1.8 mm and 0.7 mm (0.8 % of the minor radius). Not explained.
+  Candidates, none measured: the near-shearless ι (0.4230 to 0.4158), which
+  leaves the labels near the axis weakly determined by the energy; the
+  section meshes (worst ratio of the Jacobian determinant 0.04 to 0.06 on
+  the bean sections, 0.008 at degree 4 on 2 cells); the toroidal resolution
+  of the wall (the deck has NTOR = 12, 13 planes carry 6 harmonics).
+- Degree. At 4 cells the energy error is 0.40, 0.30, 0.20 % for degrees 2,
+  3, 4, while 8 cells at degree 2 give 0.06 %: the error is not that of
+  smooth approximation at order p. Suspects: the spline fit of the wall
+  (volume) and the C0 block corners of the O-grid; not measured.
+- Speed. The Hessian couples all planes of a section cell (dense blocks of
+  (2 (p + 1)² nt)²) and is factorised directly: 22 s at 3536 unknowns, 99 s
+  at 14416. A toroidal basis with local support or a Krylov solver is
+  needed before a time comparison means anything.
+- Not run: degree 2, 8 cells, 25 planes from the polar start (stopped
+  unfinished), QH and QI decks, any case with pressure.
+
+The percent-level \|B\| deviations of the prototype below (4 to 13 % rms
+at 10272 unknowns) are not reproduced with splines (0.6 to 0.8 % at 3536
+unknowns), so they were not an amplification by the guide field; which of
+the prototype's meshes and C0 Lagrange elements caused them was not
+separated. A scan of ι → κι in the prototype has its energy minimum at
+κ ≈ 0.95 to 0.98, which fixes the orientation (u counter-clockwise in
+(R, Z), ι > 0, ζ = φ). Every per-cell projection tried there in 3D (all
+reference components of ∇x×∇y or only the plane-normal one, degrees p − 1
+and p) is unstable, so the 3D solver has none.
+
+### Prototype (Python, C0 Lagrange elements, [benchmarks/flux-map-spike](../benchmarks/flux-map-spike/README.md))
 
 Solov'ev (R0 = 1, own parameters), degree 2, 8 elements per block side,
 B_φ/B_pol ≈ 1.6, 16, 160, 1600: pointwise 3.6e-3, 1.4e-2, 8.6e-2, 3.0e-1;
@@ -195,8 +312,11 @@ Lagrangian map: [roadmap](equilibrium-roadmap.md), "Way forward after the
 audit" (P0–P6).
 
 - F1 (done): axisymmetric, this document.
-- F2: 3D on the per-plane meshes of the label lane (ζ cylindrical), the 3D
-  projection space, QA, QH and QI decks against VMEC++.
+- F2 (solver and gates F2a, F2b done; QA runs, not yet at VMEC accuracy or
+  speed, section 4): 3D on the per-plane meshes of the label lane (ζ
+  cylindrical). Next: the cause of the 1 to 2 mm floor of axis and inner
+  surfaces on QA, section meshes by Winslow, a sparse toroidal basis or
+  Krylov solver, then QH and QI decks against VMEC++.
 - F3: mesh swept along a guiding curve with ζ its parameter, for axes that
   are not single valued in the cylindrical angle (figure-eight) and other
   exotic shapes; section meshes by Winslow.
@@ -284,6 +404,15 @@ these needs has not been reviewed.
 
 ## 6. Open
 
+- Equilibria that are not minima (F2b): the default solver minimises W and
+  leaves a state with a soft or unstable direction; `stationary` finds it
+  from a good start. Needed: the lowest eigenvalues of the Hessian at the
+  solution (stability comes with the equilibrium), and a rule for which
+  solver a run uses. Distinct stationary states are distinct equilibria.
+- QA accuracy floor near the axis, the missing gain from the degree, and
+  the cost of the plane-dense Hessian (section 4).
+- Gauge in 3D without stellarator symmetry: without rows the shift of the
+  solver holds it (not tested).
 - Projection space in 3D. Candidate: B_h = Π_2(u_h*β), the 2-form space of
   the complex, in mixed form; the per-cell mean of F1 and its first-order
   b̄ are the fallback.

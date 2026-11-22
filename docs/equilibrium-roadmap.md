@@ -159,9 +159,21 @@ reference. Order of work ([flux-map.md](flux-map.md), section 5):
   radius off the axis, from a polar start without axis information; B at
   order p, the axis as the zero of u, and a B_pol error independent of the
   guide field up to B_φ/B_pol ≈ 150 with B_φ projected on its cell mean.
-- **F2, 3D on per-plane meshes.** The 3D projection space; QA, QH and QI
-  decks against VMEC++ (the prototype converges on the Landreman–Paul QA
-  deck of step 4 from a cold start).
+- **F2, 3D on per-plane meshes (solver and gates done, QA not yet at
+  parity).** `milca_flux_map_3d`, gates `flux_map_3d_gate_f2a` (F1 through
+  the 3D path) and `flux_map_3d_gate_f2b` (sheared Landreman family from
+  the wall curves alone: B 3.49e-2, 7.43e-3 at 2, 4 cells in 11 Newton
+  steps, 2 s and 7 s, against 4.80e-2, 1.159e-2 and 21 s of A1-3D). The
+  opt-in driver `test_flux_map_qa` converges on the Landreman–Paul QA deck
+  of step 4 from the polar start at every resolution tried (energy within
+  0.06 % of VMEC++ at degree 2, 8 cells, 17 planes; \|B\| rms 0.2 to 0.4 %),
+  with a floor of 1 to 2 mm in the axis, no gain from the degree and a
+  plane-dense Hessian (99 s at 14416 unknowns against 9 s of VMEC++). The
+  Landreman state is not an energy minimum beyond 4 cells; the minimiser
+  leaves it and Newton on stationarity finds it
+  ([flux-map.md](flux-map.md), section 4). No projection in 3D. Next: the
+  QA floor, Winslow section meshes, a sparse toroidal basis or Krylov
+  solver, Hessian eigenvalues, QH and QI decks.
 - **F3, guiding-curve mesh.** ζ and the sweep along a closed curve instead
   of the cylindrical angle (figure-eight and other axes), Winslow section
   meshes.
