@@ -277,12 +277,13 @@ def main():
     ap.add_argument("--nrad", type=int, default=24)
     ap.add_argument("--coils", type=int, default=48)
     ap.add_argument("--beta", type=float, default=0.02, help="target volume-average beta")
+    ap.add_argument("--b0", type=float, default=1.5, help="vacuum B_phi at r0 (T)")
     ap.add_argument("--coil-a", type=float, default=2.2)
     ap.add_argument("--coil-b", type=float, default=2.8)
     args = ap.parse_args()
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
-    sol = Solovev(beta_target=args.beta)
+    sol = Solovev(beta_target=args.beta, b0=args.b0)
 
     # ring coils on an ellipse outside the grid box, currents by least squares
     # against the exact B_ext = B_Solovev - B_plasma on levels inside D
