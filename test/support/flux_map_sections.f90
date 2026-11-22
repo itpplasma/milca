@@ -1,22 +1,24 @@
 module flux_map_sections
     !! Section meshes, start values and diagnostics for the 3D flux map
     !! (milca_flux_map_3d) from the wall curves of the toroidal planes only:
-    !! no magnetic axis enters. Each plane is an O-grid on the area centroid
-    !! of its wall curve; the start is the polar map of the section after an
-    !! affine normalisation by its second moments, so elongated sections
-    !! start from near-circular labels.
+    !! no magnetic axis enters. Each plane is the pullback of one O-grid of
+    !! the unit disc by the harmonic map of its section onto the disc
+    !! (fortfem_harmonic_disc: valid for any smooth simple closed wall
+    !! curve), and the start is that map, u = G.
     use, intrinsic :: iso_fortran_env, only: dp => real64, int32
     use fortsparse_csr, only: csr_t
-    use fortfem_spline_layout, only: block_layout_t, layout_ogrid, layout_set_curve, &
-        LAYOUT_WALL
+    use fortfem_spline_layout, only: block_layout_t, layout_ogrid, LAYOUT_WALL
     use fortfem_spline_space, only: spline_space_t, spline_space_options_t, &
-        spline_space_build, spline_space_update_geometry, SPLINE_C0
+        spline_space_build, SPLINE_C0
+    use fortfem_harmonic_disc, only: harmonic_disc_t, harmonic_disc_build, &
+        harmonic_disc_inverse, harmonic_disc_pull_back, harmonic_disc_wall_error, &
+        spline_jacobian_certificate
     use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build, &
         spline_point_matrix, spline_locate, spline_boundary_nodes, spline_geometry_at
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_build, &
         spline_derham_boundary_dofs, spline_derham_project, spline_derham_t_basis
     use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp
-    use milca_spline_ale, only: spline_geometry_dofs
+    use milca_spline_ale, only: spline_geometry_dofs, spline_set_geometry
     use milca_flux_map, only: flux_map_profiles
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_t, flux_map3d_init, flux_map3d_gauge_row, &
         flux_map3d_point, flux_map3d_expand_symmetric
@@ -30,13 +32,21 @@ module flux_map_sections
         type(flux_map3d_t) :: fm
         integer :: n0 = 0, nt = 0, cells = 0, degree = 0
         real(dp), allocatable :: base(:, :, :) ! node coordinates per plane
-        real(dp), allocatable :: centre(:, :) ! mesh centres
-        real(dp), allocatable :: frame(:, :, :) ! sqrt of the second moments
+        real(dp), allocatable :: centre(:, :) ! mesh centres, G^-1(0)
         real(dp), allocatable :: samples(:, :, :)
+        real(dp), allocatable :: disc(:, :) ! control points of the disc O-grid
+        ! per plane: distance of the mesh wall from the wall curve, relative
+        ! error of the section area, smallest/largest Bernstein coefficient of
+        ! the block Jacobians and whether all are positive (mesh valid)
+        real(dp), allocatable :: wall_distance(:), area_error(:), jacobian_ratio(:)
+        logical, allocatable :: certified(:)
+        real(dp) :: map_residual = 0 ! boundary error of the harmonic maps
+        ! fm3_start_polar: area centroids and sqrt of the second moments
+        real(dp), allocatable :: centroid(:, :), frame(:, :, :)
     end type fm3_case_t
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
-    public :: fm3_build, fm3_start, fm3_gauge_symmetric, fm3_axis, fm3_mesh_quality, &
+    public :: fm3_build, fm3_start, fm3_start_polar, fm3_gauge_symmetric, fm3_axis, fm3_mesh_quality, &
               fm3_locate, fm3_state, fm3_flux, fm3_prolong, fm3_preimage, &
               fm3_dump_hessian
 
@@ -47,62 +57,71 @@ module flux_map_sections
 
 contains
 
-    subroutine fm3_build(c, samples, cells, degree, extra_points, status, centre, centre_core)
-        !! Meshes of all planes from the wall curves samples(2, m, nt)
-        !! (counter-clockwise, first sample on the outboard side). centre
-        !! overrides the area centroids; centre_core (default true) centres
-        !! the core block on them.
+    subroutine fm3_build(c, samples, cells, degree, extra_points, status, preserve_area)
+        !! Meshes of all planes from the wall curves samples(2, m, nt):
+        !! counter-clockwise, equally spaced in a smooth periodic parameter,
+        !! the first sample (mapped to the disc angle 0) a smooth function of
+        !! the plane. preserve_area (default true): the mesh wall encloses the
+        !! area of the wall curve. Status 10 + s: status s of the harmonic map
+        !! of a plane (3: the samples do not resolve the curve), 20: a mesh is
+        !! not certified valid.
         type(fm3_case_t), intent(out) :: c
         real(dp), intent(in) :: samples(:, :, :)
         integer, intent(in) :: cells, degree, extra_points
         integer, intent(out) :: status
-        real(dp), intent(in), optional :: centre(:, :)
-        logical, intent(in), optional :: centre_core
+        logical, intent(in), optional :: preserve_area
         type(block_layout_t) :: layout
         type(spline_space_options_t) :: options
+        type(harmonic_disc_t) :: map
         real(dp), allocatable :: xg(:, :)
         integer, allocatable :: wall(:)
-        logical :: core
+        complex(dp) :: z
+        logical :: keep
         integer :: k
 
         c%nt = size(samples, 3)
         c%cells = cells
         c%degree = degree
         c%samples = samples
-        allocate (c%centre(2, c%nt), c%frame(2, 2, c%nt))
-        do k = 1, c%nt
-            call moments(samples(:, :, k), c%centre(:, k), c%frame(:, :, k))
-        end do
-        if (present(centre)) c%centre = centre
-        core = .true.
-        if (present(centre_core)) core = centre_core
+        keep = .true.
+        if (present(preserve_area)) keep = preserve_area
+        allocate (c%centre(2, c%nt), c%wall_distance(c%nt), c%area_error(c%nt), &
+                  c%jacobian_ratio(c%nt), c%certified(c%nt))
+        call layout_ogrid([0.0_dp, 0.0_dp], 1.0_dp, core_fraction(), layout, status)
+        if (status /= 0) return
+        options%degree = degree
+        options%regularity = SPLINE_C0
+        allocate (options%knots(2, layout%block_count))
+        options%knots(:, :)%element_count = cells
+        call spline_space_build(layout, options, c%space, status)
+        if (status /= 0) return
+        call spline_geometry_dofs(c%space, c%disc, status)
+        if (status /= 0) return
+        allocate (c%base(2, size(c%disc, 2), c%nt))
+        c%map_residual = 0
         do k = c%nt, 1, -1
-            associate (sm => samples(:, :, k))
-                call layout_ogrid(c%centre(:, k), 0.5_dp*(maxval(sm(1, :)) - minval(sm(1, :))), &
-                                  core_fraction(), layout, status)
-                if (status /= 0) return
-                if (core) then
-                    call layout_set_curve(layout, LAYOUT_WALL, sm, status, centre_core=.true.)
-                else
-                    call layout_set_curve(layout, LAYOUT_WALL, sm, status)
-                end if
-                if (status /= 0) return
-            end associate
-            if (k == c%nt) then
-                options%degree = degree
-                options%regularity = SPLINE_C0
-                allocate (options%knots(2, layout%block_count))
-                options%knots(:, :)%element_count = cells
-                call spline_space_build(layout, options, c%space, status)
-            else
-                call spline_space_update_geometry(c%space, layout, status)
+            call harmonic_disc_build(map, samples(:, :, k), status)
+            if (status /= 0) then
+                status = 10 + status
+                return
             end if
+            c%map_residual = max(c%map_residual, map%residual)
+            call harmonic_disc_pull_back(c%space, map, status, preserve_area=keep)
+            if (status /= 0) return
+            call harmonic_disc_wall_error(c%space, map, c%wall_distance(k), c%area_error(k), &
+                                          status)
+            if (status /= 0) return
+            call spline_jacobian_certificate(c%space, c%certified(k), c%jacobian_ratio(k), status)
             if (status /= 0) return
             call spline_geometry_dofs(c%space, xg, status)
             if (status /= 0) return
-            if (.not. allocated(c%base)) allocate (c%base(2, size(xg, 2), c%nt))
             c%base(:, :, k) = xg
+            call harmonic_disc_inverse(map, (0.0_dp, 0.0_dp), z, status)
+            if (status /= 0) return
+            c%centre(:, k) = [real(z, dp), aimag(z)]
         end do
+        status = 20
+        if (.not. all(c%certified)) return
         call spline_derham_build(c%space, c%derham, status, 0)
         if (status /= 0) return
         call spline_quadrature_build(c%space, degree + extra_points, c%quad, status)
@@ -113,7 +132,7 @@ contains
     end subroutine fm3_build
 
     real(dp) function core_fraction()
-        !! Size of the O-grid core relative to the half width (0.5; diagnostic
+        !! Size of the O-grid core relative to the disc radius (0.5; diagnostic
         !! override MILCA_FM3_CORE).
         character(32) :: v
         integer :: length
@@ -121,6 +140,25 @@ contains
         call get_environment_variable('MILCA_FM3_CORE', v, length)
         if (length > 0) read (v, *) core_fraction
     end function core_fraction
+
+    subroutine fm3_start(c)
+        !! u = G on every plane: the control points of the disc O-grid; a wall
+        !! function takes their angle.
+        type(fm3_case_t), intent(inout) :: c
+        integer :: i, k, ntot
+
+        ntot = c%n0*c%nt
+        do k = 1, c%nt
+            do i = 1, c%n0
+                if (c%fm%is_wall(i)) then
+                    c%fm%z((k - 1)*c%n0 + i) = atan2(c%disc(2, i), c%disc(1, i))
+                else
+                    c%fm%z((k - 1)*c%n0 + i) = c%disc(1, i)
+                    c%fm%z(ntot + (k - 1)*c%n0 + i) = c%disc(2, i)
+                end if
+            end do
+        end do
+    end subroutine fm3_start
 
     pure subroutine moments(poly, centroid, root)
         !! Area centroid and the symmetric square root of the second-moment
@@ -170,7 +208,7 @@ contains
         real(dp) :: v(2), d(2), det
 
         associate (s => c%frame(:, :, k))
-            d = p - c%centre(:, k)
+            d = p - c%centroid(:, k)
             det = s(1, 1)*s(2, 2) - s(1, 2)*s(2, 1)
             v = [s(2, 2)*d(1) - s(1, 2)*d(2), -s(2, 1)*d(1) + s(1, 1)*d(2)]/det
         end associate
@@ -201,14 +239,23 @@ contains
         end do
     end function wall_radius
 
-    subroutine fm3_start(c)
-        !! u = normalised position / wall radius at the control points of
-        !! every plane; Theta = the normalised polar angle on the wall,
-        !! continuous in t.
+    subroutine fm3_start_polar(c)
+        !! Alternative start (gate F2b, whose exact state is a saddle that the
+        !! start u = G does not reach): u = normalised position / wall radius
+        !! at the control points of every plane, about the area centroid
+        !! after an affine normalisation by the second moments of the
+        !! section (star-shaped sections only); Theta = the normalised polar
+        !! angle on the wall, continuous in t.
         type(fm3_case_t), intent(inout) :: c
         real(dp) :: v(2), theta, prev
         integer :: i, k, ntot
 
+        if (.not. allocated(c%centroid)) then
+            allocate (c%centroid(2, c%nt), c%frame(2, 2, c%nt))
+            do k = 1, c%nt
+                call moments(c%samples(:, :, k), c%centroid(:, k), c%frame(:, :, k))
+            end do
+        end if
         ntot = c%n0*c%nt
         do i = 1, c%n0
             prev = 0
@@ -225,7 +272,7 @@ contains
                 end if
             end do
         end do
-    end subroutine fm3_start
+    end subroutine fm3_start_polar
 
     subroutine fm3_gauge_symmetric(c, status)
         !! Gauge rows for a state with stellarator symmetry (plane 1 up-down
@@ -385,7 +432,7 @@ contains
             det = jac(1, 1)*jac(2, 2) - jac(1, 2)*jac(2, 1)
             dx = -[jac(2, 2)*r(1) - jac(1, 2)*r(2), jac(1, 1)*r(2) - jac(2, 1)*r(1)]/det
             ! steps limited to a tenth of the section size
-            lim = 0.1_dp*sqrt(c%frame(1, 1, 1)**2 + c%frame(2, 2, 1)**2)
+            lim = 0.05_dp*(maxval(c%samples(1, :, 1)) - minval(c%samples(1, :, 1)))
             if (norm2(dx) > lim) dx = dx*lim/norm2(dx)
             x = x + dx
         end do
