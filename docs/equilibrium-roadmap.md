@@ -8,7 +8,7 @@ four competing solvers for one problem; they serve different purposes.
 | Layer | Content |
 |---|---|
 | Shared infrastructure | spline de Rham spaces, ALE–Winslow mesh, coil fields, vacuum (BEM, exterior map), Newton–Krylov, verification |
-| Ideal lane (labels) | Eulerian Clebsch, A = g∇χ + Σ F_j(χ) h_j + G(χ)∇φ ([plan](eulerian-label-plan.md)); nested surfaces, islands of prescribed topology, current sheets |
+| Ideal lane (labels) | Cartesian flux map u = (x, y): Ω → flux disc, B = (Φ'(s)/π)∇x×∇y + ψ'(s)∇ζ×∇s, s = x² + y² ([flux-map.md](flux-map.md)); nested surfaces, islands of prescribed topology (one map per region), current sheets. Its polar form (χ, g) with axis unknowns ([plan](eulerian-label-plan.md)) is the reference |
 | NN2 lane | general A, p, Φ, U ([NN2](equilibrium-nonnested-nn2.md)); islands that form, stochastic regions, resistive steady states, transport |
 | Interface | one physical state and diagnostics: reconstruction, ideal stability, linear response, heat loads |
 
@@ -20,7 +20,8 @@ physical models stay distinct.
 | Component | Decision | Reason |
 |---|---|---|
 | Lagrangian map (`nested_equilibrium`, [ideal-map-3d.md](ideal-map-3d.md)) | reference, no new development beyond parity fixes | verified, exact energy Hessian, ideal stability; its relabelling null needs gauges that fail in strong shaping |
-| Eulerian Clebsch labels | develop: the ideal lane | exact tangency B·∇χ = 0, no multiplier, no locking (E0–E6c) |
+| Cartesian flux map ([flux-map.md](flux-map.md)) | develop: the ideal lane | the same Clebsch field with exact tangency, as a smooth map: no axis unknown, no winding form, no mesh tied to the axis; guide-field locking removed by a flux-preserving projection (F1) |
+| Eulerian Clebsch labels (χ, g) with axis unknowns | reference, no new development | polar coordinates of the flux map: verified at weak guide field (E0–E6c), does not converge on real configurations (step 4) |
 | Constrained A ∈ V1 with B·∇χ = 0 weakly ([eulerian-3d.md](eulerian-3d.md)) | alternative, decided by gate C below | more flexible, but the weak constraint locks |
 | ALE–Winslow | shared infrastructure | mesh quality independent of the physical unknowns |
 | NN2 | continue on the shared mesh | coupled 3D Newton and island/transport tests exist |
@@ -47,6 +48,25 @@ mesh follows them afterwards.
 ## Sequence
 
 Each step on cases that run in seconds, against analytic solutions first.
+
+**Since the flux map (2026-11-22).** The ideal lane continues in the flux-map
+form; steps 1, 2 and 4 below record the (χ, g) solvers, which stay as
+reference. Order of work ([flux-map.md](flux-map.md), section 5):
+
+- **F1, axisymmetric (done).** `milca_flux_map`, gate
+  `flux_map_axisym_gate_f1`: Solov'ev on a fixed O-grid 15 % of the minor
+  radius off the axis, from a polar start without axis information; B at
+  order p, the axis as the zero of u, and a B_pol error independent of the
+  guide field up to B_φ/B_pol ≈ 150 with B_φ projected on its cell mean.
+- **F2, 3D on per-plane meshes.** The 3D projection space; QA, QH and QI
+  decks against VMEC++ (the prototype converges on the Landreman–Paul QA
+  deck of step 4 from a cold start).
+- **F3, guiding-curve mesh.** ζ and the sweep along a closed curve instead
+  of the cylindrical angle (figure-eight and other axes), Winslow section
+  meshes.
+- **Then** free boundary (E6 machinery on the wall of the map) and regions
+  (step 2: one map per lobe or island, separatrices as aligned interfaces),
+  followed by steps 5–7.
 
 1. **ALE label solver, one axis (A1).** Module (not a test) for the
    axisymmetric label lane on a spline O-grid: physics Newton on (χ, g, X)
@@ -181,9 +201,10 @@ Effort split (equilibrium development): ALE and common FE infrastructure
 35 %, ideal Eulerian lane and VMEC parity 35 %, NN2 and island benchmarks
 20 %, stability and reconstruction interfaces 10 %.
 
-Milestone: a robust Eulerian nested equilibrium solver on an ALE–Winslow
-mesh that reproduces VMEC fixed- and free-boundary results without the
-slide gauges of the Lagrangian map. NN2 then inherits mesh and exterior.
+Milestone: a robust Eulerian nested equilibrium solver (the flux map) that
+reproduces VMEC fixed- and free-boundary results without the slide gauges of
+the Lagrangian map; the ALE–Winslow mesh follows free boundaries and
+separatrices, not the axis. NN2 then inherits mesh and exterior.
 
 ## Optional, not an immediate priority
 
