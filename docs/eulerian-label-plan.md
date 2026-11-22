@@ -247,6 +247,7 @@ of a reconstruction from measured profiles and magnetics.
 | E4a | exact 3D Landreman equilibria, fixed labels, g fitted | B at order p against the exact field |
 | E4 | E4a with χ, g and the axis curve by Newton (sheared family), then the registered integer case against VMEC++, DESC and GVEC | B and χ at order p; time to accuracy |
 | E5 | tokamak with a resonant boundary perturbation, island chain, ΔΦ_I as input | continuous to the nested solution at ΔΦ_I → 0, derivatives against finite differences, minimum-energy width against a published SPEC or HINT case |
+| E5u | E2a with g broken along the level set and the log slope factored out, unaligned mesh, only O and X tracked | measurement: separatrix band below order 1 (result: h^(1/2), below) |
 | E6 | free boundary: plasma (2) coupled to V1 vacuum and the wall operator | E6a: axisymmetric, exact manufactured solution; E6b: 3D, exact (oracle field as source); then Landreman–Paul QA (L5) |
 
 E0 and E1 also run the multiplier formulation with the same enrichment of A
@@ -409,6 +410,49 @@ needed. The registered gate runs 4, 8, 16 in 42 s and checks the 8 → 16 rates.
   discrete case is the relevant one.
 - The one-sided traces of B_φ are no sheet measure: each Clebsch term is
   log-singular on the separatrix and only their sum is finite.
+
+E5u (`test_label_e5_unaligned`): can the label lane carry a separatrix on a
+mesh not aligned with it, tracking only the O- and X-points? The doublet of
+E2a (the axisymmetric proxy of a two-island chain; in helical symmetry the
+label representation is the same with another metric) on the plain O-grid
+centred at X, fixed χ_h = Π0 χ, exact profiles per region, B_φ fitted in L2
+by three representations of g on the same unaligned mesh: (1) continuous V0
+(E2a); (2) one copy of V0 per region, broken along the level set χ_h = 1
+(Eulerian jump capture, region per quadrature point); (3) as (2) with the
+log-singular slope factored out, g = F_r'(χ_h) ζ, so ζ = θ − θ* is bounded
+and B_φ = F_r'(∇ζ × ∇χ_h + ∇χ_h × h_r). Relative L2 error of B_φ, band
+|χ − 1| < 0.2:
+
+| cells per block side | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|
+| (1) total / band | 2.20e-1 / 1.62e-1 | 1.53e-1 / 1.31e-1 | 1.11e-1 / 1.02e-1 | |
+| (2) total / band | 1.49e-1 / 9.71e-2 | 8.23e-2 / 6.74e-2 | 5.64e-2 / 5.25e-2 | |
+| (3) total / band | 1.32e-1 / 7.37e-2 | 6.09e-2 / 4.46e-2 | 3.23e-2 / 2.96e-2 | 2.17e-2 / 2.09e-2 |
+| E2b aligned, graded, broken: total / band | 6.06e-2 / 3.63e-2 | 3.06e-2 / 1.71e-2 | 6.84e-3 / 3.99e-3 | 1.91e-3 / 1.28e-3 |
+
+Lobes and outside converge at order p in every mode (mode 3, 16 → 32:
+1.46 and 2.32). The band does not: rates 0.36 (1), 0.36 (2), 0.59 then 0.50
+(3); 24 Gauss points per direction instead of 10 change mode 3 by 2 %, so
+cut-cell quadrature is not the limit. Breaking g along the level set halves
+the error and factoring the log slope halves it again, but the order stays
+h^(1/2): the straight-field-line angle θ* (hence ζ) has a layer normal to
+the separatrix (its tangential slope goes like 1/log|χ − 1|, weighted by
+F' ~ log|χ − 1| in B), which a uniform mesh resolves only to h^(1/2) in a
+band of width h. At 32 cells the unaligned error is 11 times the aligned one
+and the gap grows like h^(-1.3).
+
+Verdict: the direct Clebsch label lane needs resolution normal to every
+separatrix: a mesh aligned with it and graded towards it (E2b), or anisotropic
+refinement that follows the level set χ_h = χ_s, which is surface tracking in
+all but name. Tracking only the O- and X-points (codimension 2) does not
+suffice for islands. The limitation is in the representation, not in the
+mesh: any field-line label (θ*, α = θ* − ιφ, g) is log-singular at a
+separatrix, while B and a vector potential A are smooth there. Across
+separatrices the Eulerian advantage therefore belongs to the A
+representations (constrained A, NN2), which approximate the smooth A at order
+p on any mesh; gate C has to show whether the constrained A's weak tangency
+can be made to converge there without locking. Labels stay the method for
+regions bounded by tracked surfaces.
 
 E2 attempt (Newton on the doublet; open, not converged). Formulation tried:
 the axisymmetric system with regions (χ in continuous V0, g cut along the

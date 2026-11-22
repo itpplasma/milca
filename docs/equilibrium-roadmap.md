@@ -111,6 +111,17 @@ Each step on cases that run in seconds, against analytic solutions first.
 3. **Gate C: Clebsch against constrained A.** On the same ALE mesh:
    Solov'ev, a sheared 3D nested case and a simple island. Compare
    conditioning, Newton convergence, locking, cost and topology handling.
+   *Input from E5u* ([plan](eulerian-label-plan.md), `label_e5_unaligned`):
+   on a mesh not aligned with a separatrix, with only O- and X-points
+   tracked, the label lane's B converges at h^(1/2) in the separatrix band
+   even with g broken along the level set and the log slope factored out
+   (2.2e-2 at 32 cells against 1.9e-3 aligned, the gap growing like
+   h^(-1.3)). Field-line labels are log-singular at separatrices; B and A are
+   not. Rule: only codimension-2 lines (O and X lines) may be tracked, so
+   islands and separatrices go to the A representation (constrained A, NN2),
+   and the label lane stays in regions bounded by tracked surfaces. Gate C
+   decides whether the constrained A converges at order p across an
+   unaligned separatrix without locking.
 4. **VMEC parity in the ideal lane.** Fixed boundary, then free boundary
    (E6 with the exterior map and coils from mgrid), prescribed ι or I,
    realistic pressure, stellarator geometry. Against VMEC2000, VMEC++, GVEC

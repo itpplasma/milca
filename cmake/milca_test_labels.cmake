@@ -1132,6 +1132,7 @@ foreach(entry
         "label_ale_doublet_gate_a2a test_label_ale_doublet"
         "eulerian_clebsch_3d_gate_e3 test_eulerian_clebsch_3d"
         "eulerian_clebsch_doublet_fit_gate_e2a test_eulerian_clebsch_doublet_fit"
+        "label_e5_unaligned_gate_e5u test_label_e5_unaligned"
         "eulerian_clebsch_doublet_fit_circular_gate_e2a test_eulerian_clebsch_doublet_fit"
         "eulerian_clebsch_landreman_gate_e4a test_eulerian_clebsch_landreman"
         "grad_shafranov_p3_pedestal_seed_convergence test_gs_nonlinear")
