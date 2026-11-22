@@ -522,7 +522,8 @@ target_sources(milca_equilibrium PRIVATE src/equilibrium/gs_coils.f90 src/equili
     src/equilibrium/eulerian_vacuum.f90
     src/generated/milca_eulerian_clebsch_leaves.f90
     src/equilibrium/eulerian_clebsch.f90
-    src/generated/milca_flux_map_leaves.f90 src/equilibrium/flux_map.f90)
+    src/generated/milca_flux_map_leaves.f90 src/equilibrium/flux_map.f90
+    src/equilibrium/flux_map_3d.f90)
 target_sources(milca_equilibrium PRIVATE src/equilibrium/equilibrium_harness.f90)
 add_executable(test_equilibrium_harness test/test_equilibrium_harness.f90)
 target_link_libraries(test_equilibrium_harness PRIVATE milca)
@@ -892,7 +893,8 @@ add_executable(test_vacuum_torus_3d test/test_vacuum_torus_3d.f90)
 target_link_libraries(test_vacuum_torus_3d PRIVATE milca)
 add_test(NAME vacuum_torus_3d_gate_g1 COMMAND test_vacuum_torus_3d)
 add_library(milca_eulerian_test STATIC test/eulerian_solovev_fields.f90
-    test/support/solovev_doublet.f90 test/support/landreman_sections.f90)
+    test/support/solovev_doublet.f90 test/support/landreman_sections.f90
+    test/support/flux_map_sections.f90)
 target_link_libraries(milca_eulerian_test PUBLIC milca)
 add_executable(test_eulerian_solovev_labels test/test_eulerian_solovev_labels.f90)
 target_link_libraries(test_eulerian_solovev_labels PRIVATE milca_eulerian_test)
@@ -911,6 +913,12 @@ add_test(NAME eulerian_clebsch_newton_gate_e1 COMMAND test_eulerian_clebsch_newt
 add_executable(test_flux_map_axisym test/test_flux_map_axisym.f90)
 target_link_libraries(test_flux_map_axisym PRIVATE milca_eulerian_test)
 add_test(NAME flux_map_axisym_gate_f1 COMMAND test_flux_map_axisym)
+add_executable(test_flux_map_3d test/test_flux_map_3d.f90)
+target_link_libraries(test_flux_map_3d PRIVATE milca_eulerian_test)
+add_test(NAME flux_map_3d_gate_f2a COMMAND test_flux_map_3d solovev)
+add_test(NAME flux_map_3d_gate_f2b COMMAND test_flux_map_3d landreman)
+add_executable(test_flux_map_qa test/test_flux_map_qa.f90)
+target_link_libraries(test_flux_map_qa PRIVATE milca_eulerian_test milca_importers)
 # gate A1 (docs/equilibrium-roadmap.md): label lane on an ALE mesh, one axis
 add_executable(test_label_ale_axisym test/test_label_ale_axisym.f90)
 target_link_libraries(test_label_ale_axisym PRIVATE milca_eulerian_test)

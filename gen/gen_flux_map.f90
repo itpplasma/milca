@@ -30,6 +30,10 @@ program gen_flux_map
     character(16) :: gnames(6), hnames(21)
     integer :: i, j, k
     logical :: toroidal
+    ! 3D kernel
+    type(expr_t) :: xp, yp, v8(8), rot8(8), g8(8), h8(36), c3(3), gs3(3), b3(3), dens3, turn8
+    character(4), parameter :: vn8(8) = ['x   ', 'y   ', 'x_r ', 'x_p ', 'x_z ', 'y_r ', 'y_p ', 'y_z ']
+    character(16) :: gn8(8), hn8(36)
 
     r = sym('r'); x = sym('x'); y = sym('y')
     xr = sym('x_r'); xz = sym('x_z'); yr = sym('y_r'); yz = sym('y_z')
@@ -66,9 +70,53 @@ program gen_flux_map
         ['r   ', 'x   ', 'y   ', 'x_r ', 'x_z ', 'y_r ', 'y_z ', 'gp  ', 'gpp ', 'gppp', &
         'pres', 'pp  ', 'ppp '], &
         ['w               ', gnames, hnames], [dens, grad, hess])
+    ! 3D, per unit dR dphi dZ, vector components (R, phi, Z), grad u =
+    ! (u_R, u_phi/R, u_Z) passed as (x_r, x_p, x_z), (y_r, y_p, y_z):
+    !   B = -[tau(s) grad x X grad y + psi'(s) grad phi X grad s],
+    !   W = int [|B|^2/2 - p(s)] R dR dphi dZ.
+    ! With s the normalised toroidal flux, tau = -PHIEDGE/pi and
+    ! psi' = -iota PHIEDGE/(2 pi) give B = PHIEDGE/(2 pi) [2 grad x X grad y
+    ! + iota grad phi X grad s]. In axisymmetry (x_p = y_p = 0) this is the
+    ! sum of the two kernels above: B_phi = tau det.
+    xp = sym('x_p'); yp = sym('y_p')
+    v8 = [x, y, xr, xp, xz, yr, yp, yz]
+    rot8 = [0*x - y, x, 0*x - yr, 0*x - yp, 0*x - yz, xr, xp, xz]
+    c3 = [xp*yz - xz*yp, xz*yr - xr*yz, xr*yp - xp*yr]
+    gs3 = [2*(x*xr + y*yr), 2*(x*xp + y*yp), 2*(x*xz + y*yz)]
+    b3 = [tau*c3(1) + gp*gs3(3)/r, tau*c3(2), tau*c3(3) - gp*gs3(1)/r]
+    proof = engine%zero_test(b3(1)*gs3(1) + b3(2)*gs3(2) + b3(3)*gs3(3))
+    if (proof%verdict /= VERDICT_TRUE) error stop '3D tangency unproved'
+    ! axisymmetric limit: B_phi^2 = (tau det)^2
+    dens3 = r*((b3(1)**2 + b3(2)**2 + b3(3)**2)/2 - pres)
+    do i = 1, 8
+        g8(i) = derivative8(dens3, i)
+        gn8(i) = 'w_'//trim(vn8(i))
+    end do
+    turn8 = g8(1)*rot8(1)
+    do i = 2, 8
+        turn8 = turn8 + g8(i)*rot8(i)
+    end do
+    proof = engine%zero_test(turn8)
+    if (proof%verdict /= VERDICT_TRUE) error stop '3D rotation invariance unproved'
+    k = 0
+    do i = 1, 8
+        do j = i, 8
+            k = k + 1
+            h8(k) = derivative8(g8(i), j)
+            hn8(k) = 'h_'//trim(vn8(i))//'_'//trim(vn8(j))
+        end do
+    end do
+    proof = engine%zero_test(derivative8(g8(1), 2) - derivative8(g8(2), 1))
+    if (proof%verdict /= VERDICT_TRUE) error stop '3D Hessian symmetry unproved'
+    proof = engine%zero_test(derivative8(g8(1), 4) - derivative8(g8(4), 1))
+    if (proof%verdict /= VERDICT_TRUE) error stop '3D Hessian symmetry unproved'
+    call w%emit('flux_map_energy_3d', &
+        ['r    ', 'x    ', 'y    ', 'x_r  ', 'x_p  ', 'x_z  ', 'y_r  ', 'y_p  ', 'y_z  ', 'tau  ', &
+        'taup ', 'taupp', 'gp   ', 'gpp  ', 'gppp ', 'pres ', 'pp   ', 'ppp  '], &
+        ['w               ', gn8, hn8], [dens3, g8, h8])
     call w%line('end module milca_flux_map_leaves')
     call w%close()
-    print '(a)', '[V] FortSym tangency, rotation invariance of both kernels and Hessian symmetry proved; flux-map leaves generated'
+    print '(a)', '[V] FortSym tangency, rotation invariance of the kernels (axisymmetric and 3D) and Hessian symmetry proved; flux-map leaves generated'
 
 contains
 
@@ -117,5 +165,17 @@ contains
             d = d + 2*v(i)*(diff(e, gp)*gpp + diff(e, gpp)*gppp + diff(e, pres)*pp + diff(e, pp)*ppp)
         end if
     end function derivative
+
+    function derivative8(e, i) result(d)
+        !! d e/d v8_i with every profile a function of s = x^2 + y^2.
+        type(expr_t), intent(in) :: e
+        integer, intent(in) :: i
+        type(expr_t) :: d
+
+        d = diff(e, v8(i))
+        if (i > 2) return
+        d = d + 2*v8(i)*(diff(e, tau)*taup + diff(e, taup)*taupp + diff(e, gp)*gpp &
+                         + diff(e, gpp)*gppp + diff(e, pres)*pp + diff(e, pp)*ppp)
+    end function derivative8
 
 end program gen_flux_map
