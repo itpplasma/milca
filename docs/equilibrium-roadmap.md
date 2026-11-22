@@ -104,10 +104,19 @@ Each step on cases that run in seconds, against analytic solutions first.
    kernel-weighted quadratic fit of χ_h (smooth in χ_h, exact for a
    quadratic label), which also makes the X follow converge. A fixed pin far
    from the O-point folds the thin lobe rings (the lobes have aspect 2.3,
-   the cores are 0.4 of them); renewing the pins removes that. Open: the
-   same with the direct-Clebsch toroidal field (g and the winding forms, E2:
-   the log-singular F' at the separatrix), which needs unknowns adapted to
-   the separatrix layer.
+   the cores are 0.4 of them); renewing the pins removes that. E2 in the
+   direct-Clebsch form (gate `label_ale_doublet_clebsch_gate_e2`, O and X
+   fixed): Newton converges quadratically at B_φ/B_pol ≈ 1 (toroidal field
+   scaled by κ = 1e-3; B at the fixed-label fit on 4 and 8 cells) and fails
+   at the doublet's B_φ/B_pol ≈ 1e3, equally with the log terms of the
+   profiles removed. The obstruction is the guide field, not the separatrix:
+   after eliminating g the label Hessian has O(B_φ²) negative grid-scale
+   modes that swamp the O(B_pol²) poloidal stiffness. E1 degrades the same
+   way (f0 = 30: labels at order 0.6; f0 = 300: Newton diverges), and every
+   label gate so far ran at B_φ/B_pol ≲ 1 or ι ≈ 5. This blocks realistic
+   tokamaks and stellarators (B_φ/B_pol ≈ 10–20, the QA deck) and comes
+   before E2 with moving O-points, E5 and VMEC parity
+   ([plan, E2 diagnosis](eulerian-label-plan.md)).
 3. **Gate C: Clebsch against constrained A.** On the same ALE mesh:
    Solov'ev, a sheared 3D nested case and a simple island. Compare
    conditioning, Newton convergence, locking, cost and topology handling.

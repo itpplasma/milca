@@ -493,6 +493,59 @@ mesh:
   Grad–Shafranov form (f = R B_φ prescribed) to separate the separatrix
   topology from the label-lane representation.
 
+E2 diagnosis (`test_label_ale_doublet_clebsch`, gate
+`label_ale_doublet_clebsch_gate_e2`): the cause above is wrong; the
+obstruction is the toroidal guide field, not the separatrix. Setup as
+before on the E2b mesh, O- and X-points at the exact points (χ_h(O_j) = 0
+and ∇χ_h(O_j) = 0 by multipliers), χ = 1 pinned on the mesh separatrix,
+profiles fitted in t^m, t^m log|t| (t = χ − 1, m ≤ 4) to the traced slope
+on |t| ≥ 1e-6 (5e-5 relative; the trace is noisy below 1e-7, and one
+outer table entry at 1e-9 is off by a factor 12), so the Newton matrix is
+exact: central differences agree to 6e-10 (χ), 9e-14 (g), 8e-14 (μ) at the
+full field. The toroidal field is scaled by κ (any constant f is an exact
+Solov'ev state); the E2 doublet has B_φ/B_pol ≈ 1e3 κ.
+
+| κ (B_φ/B_pol) | log-singular profiles | log terms removed |
+|---|---|---|
+| 1e-3 (≈ 1) | 9 steps, quadratic (4 cells); 7 (8 cells) | |
+| 1e-2 (≈ 10) | 23 steps | 21 steps |
+| 1e-1, 1 (≈ 100, 1000) | no progress (α ≈ 1e-3 per step) | no progress |
+
+- From the projected exact label (amplitude 0) at κ = 1 Newton makes no
+  progress either: the basin is smaller than the discretisation error.
+- Spectrum at κ = 1, 4 cells (Jacobi-scaled, wall and separatrix fixed):
+  the χ–χ block is positive definite, the g–g block has 6 exact null modes
+  (region constants of the cut space) and soft modes from 1e-5, and the
+  label Hessian after eliminating g has 48 negative eigenvalues down to
+  −0.57. Its softest modes (|λ| ≈ 3e-5) are grid-scale checkerboards of χ in
+  the lobe cores (χ 0.2–0.5, 0.05 from O), where the large Newton steps sit
+  (δχ = −0.78 at χ = 0.23); the separatrix layer nodes come next.
+- In the continuum the guide field adds positive compressional stiffness
+  (B_φ²(∇·ξ + 2ξ·κ)²); discretely, g cannot follow grid-scale relabelings,
+  so an O(h^p B_φ²) defect of either sign remains, against the physical
+  poloidal stiffness O(B_pol²): it dominates once (B_φ/B_pol)² h^p ≳ 1.
+- Remedies tried without effect: the multiplicative update (Newton in
+  log|χ_i − 1|, a node keeps its side; it fails even at κ = 1e-3, because
+  near X control points of the C1 block interiors carry the other sign), and
+  g of degree 3 with χ of degree 2.
+- The single-axis E1 shows the same trend when f0 is raised (B_φ/B_pol ≈ 0.2
+  to 1 at f0 = 3): f0 = 30, Newton converges in 5–8 steps but the label
+  error falls at order 0.6 (1.1e-2, 3.1e-3, 2.0e-3 on 2, 4, 8 cells) and B
+  misses the interpolation bound; f0 = 100, χ off by 3.9e-2 on 2 cells;
+  f0 = 300, Newton moves the axis until the mesh folds. Every label-lane
+  gate so far ran at B_φ/B_pol ≲ 1 (E1) or with large ι (E4, ι ≈ 5).
+  Realistic tokamaks and stellarators have B_φ/B_pol ≈ 10–20, the QA deck
+  of benchmarks/label-qa included.
+
+The direct-Clebsch label lane therefore locks in the poloidal structure
+under a strong guide field: the same failure class it was built to avoid in
+the constrained A (section 1), now in χ. Before E2, E5 or VMEC parity, the
+representation needs the guide-field part separated so that its
+discretisation error does not enter the label stiffness (e.g. B_φ carried by
+a field whose relabeling response is exact, or g eliminated by a
+compatible pair of spaces in which the compressional term is represented),
+measured on E1 with f0 = 30 and 300 first.
+
 E4a (fixed χ_h = Π0 ψ/δ per plane, per-plane O-grid on the exact axis fitted to
 the exact boundary, winding angle in the Hessian frame of each plane,
 relative L2 error of B against the exact field, degree 2):
@@ -736,10 +789,10 @@ reaches order p at p = 2.
 3. E0, E1 in axisymmetry (done, `test_eulerian_clebsch_fit`,
    `test_eulerian_clebsch_newton`).
 4. O-line handling for several axes: E2a and E2b done (graded layers of
-   power 4 on FortFEM's doublet layout); E2 with Newton open (section 5,
-   E2 attempt: the log-singular flux profile at the separatrix leaves
-   Newton a basin of the size of the smallest |χ − 1| in the graded
-   layer). The graded layer belongs in FortFEM's `spline_grade_knots` once
+   power 4 on FortFEM's doublet layout); E2 Newton converges at a weak
+   guide field (B_φ/B_pol ≈ 1) and fails at the doublet's 1e3, with and
+   without the log-singular profile (section 5, E2 diagnosis): the
+   obstruction is the guide field, which also degrades E1 at f0 = 30. The graded layer belongs in FortFEM's `spline_grade_knots` once
    E2 needs it too.
 5. 3D: E3, E3b, E4a and E4 (Newton on the sheared family, ε = 0.6) done;
    ε = 1.2 open (above); then the registered integer case against
