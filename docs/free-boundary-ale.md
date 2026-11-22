@@ -18,6 +18,11 @@ through its coordinates. NN2 at finite resistivity opens islands there.
 
 ## 0. Decision of 2026-11-21: Eulerian frozen lane on an ALE mesh
 
+> Superseded in part by the [plan of 2026-11-22](equilibrium-roadmap.md):
+> the ideal lane uses direct Clebsch labels ([label plan](eulerian-label-plan.md)),
+> the constrained A below is the alternative of gate C there, and the
+> frozen-map relabelling of section 4 (R1, B1–B3) is closed.
+
 The material map of the frozen lane ([ideal-map-3d.md](ideal-map-3d.md)) has
 an exact null for every relabelling along the surfaces (particle-relabelling
 symmetry). Gauges of it (VMEC's angle condition, the transversal gauge,
@@ -211,6 +216,9 @@ are the island and free-boundary gates of
 E4 and E5 follow A4 and A5. E8 also needs G7 on the island cases of E6.
 
 ## 4. Frozen lane
+
+> Closed by the [plan of 2026-11-22](equilibrium-roadmap.md); kept as the
+> record of the map lane, which stays the reference.
 
 The frozen lane stores b as a closed 2-form on the reference mesh,
 b = (−∂₂χ, ∂₁χ, b₃) in master coordinates, with χ the reference label

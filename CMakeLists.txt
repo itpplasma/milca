@@ -407,7 +407,7 @@ target_sources(milca_field PRIVATE
     src/generated/milca_segment_leaves.f90 src/fem2d/triangle_basis.f90
     src/generated/milca_equilibrium_core_leaves.f90
     src/generated/milca_curve_chart_leaves.f90
-    src/equilibrium/equilibrium_chart.f90 src/field/field_shell.f90)
+    src/equilibrium/equilibrium_chart.f90 src/equilibrium/deck_chart.f90 src/field/field_shell.f90)
 # The upstream BEM assembly (panel-pair colouring) is threaded with OpenMP.
 if(MILCA_ENABLE_OPENMP)
     target_link_libraries(milca_spatial PUBLIC OpenMP::OpenMP_Fortran)
@@ -603,6 +603,9 @@ add_executable(test_ideal_free_boundary test/test_ideal_free_boundary.f90
     test/generated/ideal_fb_kink_leaves.f90)
 target_link_libraries(test_ideal_free_boundary PRIVATE milca)
 add_test(NAME ideal_fb_schur_spectrum COMMAND test_ideal_free_boundary spectrum)
+add_executable(test_deck_chart test/test_deck_chart.f90)
+target_link_libraries(test_deck_chart PRIVATE milca)
+add_test(NAME deck_chart COMMAND test_deck_chart)
 add_executable(test_ideal_fb_bem_analytic test/test_ideal_fb_bem_analytic.f90)
 target_link_libraries(test_ideal_fb_bem_analytic PRIVATE milca)
 add_test(NAME ideal_fb_bem_analytic COMMAND test_ideal_fb_bem_analytic)
