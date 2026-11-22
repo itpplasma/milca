@@ -27,7 +27,8 @@ The material map of the frozen lane ([ideal-map-3d.md](ideal-map-3d.md)) has
 an exact null for every relabelling along the surfaces (particle-relabelling
 symmetry). Gauges of it (VMEC's angle condition, the transversal gauge,
 slide moments, penalties) put the mesh parametrisation into the physics
-Newton and fail in strong shaping. The frozen lane therefore drops the
+Newton and fail in strong shaping (asserted; no case or number supports
+it, see the [audit](equilibrium-lane-audit.md), section 3). The frozen lane therefore drops the
 material map and uses unknowns without that symmetry:
 
 - B = ∇×A with A in the spline de Rham complex (∇·B = 0 exactly), and one

@@ -228,7 +228,7 @@ symmetry neither exists, and B·∇ has to be inverted somewhere:
 | Route | Where B·∇ is inverted | Cost |
 |---|---|---|
 | Ampère iterated with J from force balance (the Picard loop of GS in 3D; PIES, HINT) | magnetic differential equation for J_∥ | 1/(m ι − n) currents; not developed here |
-| A ∈ V1 with a label and B·∇χ = 0 as a constraint ([eulerian-3d.md](eulerian-3d.md)) | the constraint | locks (13 % in B at every mesh) |
+| A ∈ V1 with a label and B·∇χ = 0 as a constraint ([eulerian-3d.md](eulerian-3d.md)) | the constraint | locks with an equal-degree multiplier; not shown dead ([audit](equilibrium-lane-audit.md)) |
 | Clebsch field, flux map | the representation | labels singular at separatrices |
 
 Region rule that follows.

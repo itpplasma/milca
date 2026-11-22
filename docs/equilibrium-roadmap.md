@@ -15,11 +15,21 @@ four competing solvers for one problem; they serve different purposes.
 NN2 is not an alternative nonlinear solver for the ideal equations: the
 physical models stay distinct.
 
+## Audit
+
+[equilibrium-lane-audit.md](equilibrium-lane-audit.md) (2026-11-22) records
+per lane what is a dead end, what was a mistake of method and what is
+specific to a representation. One dead end: a single label field across an
+unaligned separatrix. Rules taken from it: a cause is written into a plan
+only with the run that isolates it; gates include a realistic B_φ/B_pol, a
+low-shear case and degree ≥ 3; null directions are removed by constraints
+from the first version.
+
 ## Decisions
 
 | Component | Decision | Reason |
 |---|---|---|
-| Lagrangian map (`nested_equilibrium`, [ideal-map-3d.md](ideal-map-3d.md)) | reference, no new development beyond parity fixes | verified, exact energy Hessian, ideal stability; its relabelling null needs gauges that fail in strong shaping |
+| Lagrangian map (`nested_equilibrium`, [ideal-map-3d.md](ideal-map-3d.md)) | reference, no new development beyond parity fixes | verified, exact energy Hessian, ideal stability. The earlier reason for stopping it (gauges that "fail in strong shaping") has no measurement behind it ([audit](equilibrium-lane-audit.md), section 3); its measured weaknesses are cost in 3D and shell folds. To be compared with the flux map after F2 |
 | Cartesian flux map ([flux-map.md](flux-map.md)) | develop: the ideal lane | the same Clebsch field with exact tangency, as a smooth map: no axis unknown, no winding form, no mesh tied to the axis; guide-field locking removed by a flux-preserving projection (F1) |
 | Eulerian Clebsch labels (χ, g) with axis unknowns | reference, no new development | polar coordinates of the flux map: verified at weak guide field (E0–E6c), does not converge on real configurations (step 4) |
 | Constrained A ∈ V1 with B·∇χ = 0 weakly ([eulerian-3d.md](eulerian-3d.md)) | alternative, decided by gate C below | more flexible, but the weak constraint locks |
@@ -108,8 +118,8 @@ reference. Order of work ([flux-map.md](flux-map.md), section 5):
    region boundary of the mesh, each O-point a physical unknown followed by
    its own mesh centre, the X-point followed by the separatrix vertex.
    First on the exact Solov'ev doublet with fixed labels (E2b), then Newton
-   (E2, open: the log-singular flux at the separatrix shrinks the basin to
-   the graded layer; the ALE separatrix alignment is the planned remedy).
+   (E2, open; the cause first written here, the log-singular flux at the
+   separatrix, was wrong: the κ scan below isolates the guide field).
    *State:* A2a passed (`milca_label_ale_multi`, gate
    `label_ale_doublet_gate_a2a`, 8 s): the exact Solov'ev doublet on
    FortFEM's doublet layout in the Grad–Shafranov form of the label
@@ -237,7 +247,9 @@ separatrices, not the axis. NN2 then inherits mesh and exterior.
 - Axisymmetric free boundary at VMEC speed on the exact Solov'ev benchmark
   ([table](../benchmarks/free-boundary-exact/README.md)).
 - 3D free boundary on a curve chart (`fb3d_synthetic`, R2 exterior): 44 s
-  against 67 s for VMEC++, under-resolved at ntor 2.
+  against 67 s for VMEC++. (An earlier "under-resolved at ntor 2" here was
+  wrong: ntor 3 and 4 change the error by 0.25 mm; the isolated cause is
+  the coil ripple of the oracle, free-boundary-nested-map-3d.md, 9.3.)
 - CTH-like decks fold the shell of the cylindrical chart (1.5 cm margin
   against a 4.6 cm helical swing). `milca_deck_chart` builds the
   axis-following chart from any deck; wiring it into `nested_equilibrium`

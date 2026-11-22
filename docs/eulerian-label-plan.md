@@ -15,7 +15,9 @@ f∘χ_h is not a spline for nonlinear f, so:
 
 - a field tangent to the surfaces with a nonlinear flux profile is not in the
   trial space of A, and the weak constraint with an equal-degree multiplier
-  locks (G2a: B error 13 % at every mesh),
+  locks (G2a: B error 13 % at every mesh; eulerian-3d.md reports the
+  13 % under G2 and has no table for it, see the
+  [audit](equilibrium-lane-audit.md), section 2),
 - a smaller multiplier space cannot absorb the pressure equation, and χ
   takes the error at O(h) (G2: label error 2e-1, 4e-2, 2e-2).
 
