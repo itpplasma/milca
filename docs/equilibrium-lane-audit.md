@@ -50,7 +50,7 @@ includes a realistic ratio B_φ/B_pol (≥ 10), a low-shear case and degree
 
 ## 3. The Lagrangian map lane
 
-- The reason given for stopping it (roadmap decisions; free-boundary-ale.md
+- The reason given for stopping it (the roadmap before this audit; free-boundary-ale.md
   section 0: its gauges "fail in strong shaping") has no case and no number
   in either document. Measured items nearby are a weight-dependent end
   point of the shaped P3 seed ladder, the N1 gauge drifting on the gs_free

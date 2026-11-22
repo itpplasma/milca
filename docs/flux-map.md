@@ -1,10 +1,13 @@
-# Cartesian flux map: the ideal lane as a map into the flux disc
+# Cartesian flux map: the ideal model as a map into the flux disc
 
-The ideal lane of [equilibrium-roadmap.md](equilibrium-roadmap.md) in the
-form that is developed from here on. The unknown is the map from physical
-space to a model torus in which the field is fixed by the profiles alone.
-It replaces the pair (χ, g) with axis unknowns of
-[eulerian-label-plan.md](eulerian-label-plan.md), which stays as reference.
+One of the two discretisations of the ideal model in
+[equilibrium-roadmap.md](equilibrium-roadmap.md); the other is its inverse,
+the Lagrangian map. The unknown is the map from physical space to a model
+torus in which the field is fixed by the profiles alone. Its polar form,
+the pair (χ, g) with axis unknowns of
+[eulerian-label-plan.md](eulerian-label-plan.md), is superseded. What is
+specific to this direction of the map and what is not:
+[audit](equilibrium-lane-audit.md), section 4.
 
 ## 1. Formulation
 
@@ -307,22 +310,9 @@ element) is unstable: the energy collapses.
 
 ## 5. Sequence
 
-Order of work after F2 and how the flux map is compared with the
-Lagrangian map: [roadmap](equilibrium-roadmap.md), "Way forward after the
-audit" (P0–P6).
-
-- F1 (done): axisymmetric, this document.
-- F2 (solver and gates F2a, F2b done; QA runs, not yet at VMEC accuracy or
-  speed, section 4): 3D on the per-plane meshes of the label lane (ζ
-  cylindrical). Next: the cause of the 1 to 2 mm floor of axis and inner
-  surfaces on QA, section meshes by Winslow, a sparse toroidal basis or
-  Krylov solver, then QH and QI decks against VMEC++.
-- F3: mesh swept along a guiding curve with ζ its parameter, for axes that
-  are not single valued in the cylindrical angle (figure-eight) and other
-  exotic shapes; section meshes by Winslow.
-- Then free boundary (the wall becomes Γ_p, exterior and shape derivatives
-  of gates E6) and regions (one map per island or lobe, separatrices as
-  aligned interfaces, label plan section 4a).
+The order of work, the gates still owed for F2 and the comparison with the
+Lagrangian map are in the [roadmap](equilibrium-roadmap.md), "Way forward"
+(P0–P6). F1 and F2 are done as far as section 4 records.
 
 ## 5a. Separatrices, X-lines and the model per region
 
@@ -387,7 +377,7 @@ not the same model in other variables:
   ι(s) of a VMEC deck cannot be posed one to one;
 - topology is not preserved: islands open where the model allows;
 - anisotropic transport on an unaligned mesh pollutes the perpendicular
-  balance, so alignment returns in another form (roadmap step 5);
+  balance, so alignment returns in another form (NN2 on an aligned mesh, roadmap P6);
 - no flux coordinates for kinetic and neoclassical consumers and no ideal δW
   from the solve.
 
@@ -404,29 +394,30 @@ these needs has not been reviewed.
 
 ## 6. Open
 
+Each with the run that would settle it in the roadmap (P0a–P0c).
+
 - Equilibria that are not minima (F2b): the default solver minimises W and
   leaves a state with a soft or unstable direction; `stationary` finds it
-  from a good start. Needed: the lowest eigenvalues of the Hessian at the
-  solution (stability comes with the equilibrium), and a rule for which
-  solver a run uses. Distinct stationary states are distinct equilibria.
-- QA accuracy floor near the axis, the missing gain from the degree, and
-  the cost of the plane-dense Hessian (section 4).
-- Gauge in 3D without stellarator symmetry: without rows the shift of the
-  solver holds it (not tested).
-- Projection space in 3D. Candidate: B_h = Π_2(u_h*β), the 2-form space of
-  the complex, in mixed form; the per-cell mean of F1 and its first-order
-  b̄ are the fallback.
-- Globalisation at a strong guide field from a poor start: continuation in
-  the guide field works; a merit function that tolerates the curved
-  constraint R τ det ∇u = f(s) (mixed Newton) is the candidate for cold
-  starts.
+  from a good start. Owed: the lowest eigenvalues of the Hessian at both
+  states, and a rule for which solver a run uses. Distinct stationary
+  states are distinct equilibria.
+- QA: the floor of the axis and inner surfaces, the missing gain from the
+  degree, the cost of the plane-dense Hessian (section 4).
+- B_pol at twice the projected exact label on 8 cells, order 1.8–1.9 (F1).
 - Gauge without a symmetry: constraints orthogonal to θ* → θ* + k(s)
-  instead of the symmetry rows.
-- B_pol at 2 times the projected exact label on 8 cells (F1).
-- Section meshes: harmonic extension of the boundary folds on a strongly
-  elongated bean (QA); Winslow (`milca_spline_ale`) or map2disc
-  (roadmap, optional).
-- The relation of the Hessian to the ideal δW (section 1).
+  instead of the symmetry penalty rows (untested in 2D and 3D).
+- Cold starts at a strong guide field: continuation works; a step
+  acceptance that tolerates the curved constraint R τ det ∇u = f(s) is
+  owed.
+- Projection in 3D: none is stable so far and it is off the critical path
+  (roadmap P0b). A candidate is B_h = Π_2(u_h*β) with a commuting
+  projection, in mixed form.
+- Section meshes on strongly elongated or concave sections: Winslow
+  (`milca_spline_ale`) or map2disc.
+- The relation of the Hessian to the ideal δW (section 1) is argued, not
+  verified.
+- Not run: pressure in 3D, QH and QI decks, free boundary, any region
+  coupling.
 - Search for prior work on the direct map before any publication.
 
 ## Sources
