@@ -17,7 +17,13 @@ module solovev_label_fields
     private
 
     real(dp), parameter, public :: r0 = 3.0_dp, alpha = 0.25_dp, beta = 1.0_dp, &
-                                   f0 = 3.0_dp, psi_b = 6.25_dp
+                                   psi_b = 6.25_dp
+    ! toroidal field R B_phi; any constant is an exact state (variable so a
+    ! test can scale the guide field B_phi/B_pol before the first use)
+    real(dp), public :: f0 = 3.0_dp
+    ! continuation in the guide field: F = flux_scale (-Phi/(2 pi)), an exact
+    ! state with R B_phi = flux_scale f0
+    real(dp), public :: flux_scale = 1
     real(dp), parameter, public :: pi = acos(-1.0_dp), source = 8*alpha + 2*beta
     integer, parameter :: rays = 128
     logical, public :: nonlinear_label = .false.
@@ -378,7 +384,7 @@ contains
                 b2 = b1
                 b1 = b0
             end do
-            f(m) = (x*b1 - b2 + cheb(0, m)/2)*(2/cheb_top)**m
+            f(m) = flux_scale*(x*b1 - b2 + cheb(0, m)/2)*(2/cheb_top)**m
         end do
         g = [psi_b, 0.0_dp, 0.0_dp]
         p = [source*psi_b*(1 - chi), -source*psi_b, 0.0_dp]

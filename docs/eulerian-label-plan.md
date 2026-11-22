@@ -233,6 +233,67 @@ Newton factorisation gives the derivatives with respect to ΔΦ_I, the
 profiles and the boundary: island width and O-line phase become parameters
 of a reconstruction from measured profiles and magnetics.
 
+## 4b. Angle forms and the guide field
+
+The forms h_θ,j and h_φ in (2) need only be closed 1-forms of the right
+class: one poloidal turn about O-line j, one toroidal turn. Their geometry
+is free; the class is topological. Replacing h by h + ∇ψ (ψ single valued)
+maps (χ, g) to (χ, g − F'(χ)ψ): the same fields, a different discrete space,
+in which the part F'(χ)ψ of g is represented exactly. So the forms are
+chosen near the straight-field-line angles of the solution and g stays small:
+
+- at an elliptic O-point the angle in the frame H^(1/2) of χ_h at X (section
+  4a); without it g has an O(F') jump at X that no single-valued shift
+  removes;
+- between Newton passes the shift ψ ← ψ − g/F'(χ), g ← 0, g re-solved
+  (adapted forms; in the sign convention of the code θ* = θ − g/F'). The
+  forms move by their own rule between solves, never inside Newton, like the
+  mesh (roadmap, architectural rule);
+- toroidally the form need not be ∇φ of the cylinder: an angle along the
+  magnetic axis (curve frame of `milca_deck_chart`) or the harmonic toroidal
+  field of the domain. For strongly shaped and figure-8 axes the cylindrical
+  φ and in-plane θ are far from the field-line angles; the adapted forms
+  are then essential, not an option.
+
+Guide field. B_φ comes from F'(χ)∇χ×h_θ + ∇g×∇χ, so the toroidal flux
+density follows the spacing of the label surfaces, |∇χ|. A relative
+interpolation error h^p in ∇χ is an energy error B_φ² h^p against the
+poloidal stiffness B_pol²: the label error scales like (B_φ/B_pol)² h^p,
+and Newton's basin shrinks like (B_pol/B_φ)². (The Grad–Shafranov form has
+no amplification: B_φ = f(ψ)/R needs no derivative. VMEC's B^ζ = Φ'/√g has
+the same structure as the label lane.) Measured on E1 with the guide field
+scaled (`test_label_angle_forms`: f0 = R B_φ, exact for any constant;
+Solov'ev B_pol ≈ 0.7, so f0 = 3, 30, 100, 300 is B_φ/B_pol ≈ 1.5, 15, 50,
+150; axis error at 2, 4, 8 cells):
+
+| case | f0 = 3 | f0 = 30 | f0 = 100 | f0 = 300 |
+|---|---|---|---|---|
+| p = 2, circular angle | 5.2e-3, 1.6e-3, 2e-6 | 8.3e-3, 7.8e-3, 7.4e-3 (χ order 0.65) | diverges | diverges |
+| p = 2, Hessian frame | 5.1e-3, 1.5e-3, 3.1e-4 | 8.8e-3, 8.2e-3, 4.8e-3 | diverges | diverges |
+| p = 2, frame + adapted forms | | 1.0e-2, 8.1e-3, 4.9e-3 | diverges | |
+| p = 4, frame | 2 cells: B 2.8e-3 | 2.1e-3, 6.8e-5 (B 1.7e-3, 4.7e-4) | diverges | diverges |
+| p = 4, frame, continuation in f0 | | | 8.6e-4, 3.7e-3 (B 1.3e-3, 3.9e-4) | fails at 243 |
+
+Quadrature is not the limit (24 instead of 8 extra points change nothing).
+The cure is the order: p = 4 brings f0 = 30, the range of real tokamaks and
+stellarators (B_φ/B_pol ≈ 10–20; QA ≈ 14), into the asymptotic range on 2–4
+cells, and continuation in the guide field (as in β) reaches the basin up to
+B_φ/B_pol ≈ 50. The frame and the adapted forms reduce g (from 0.9 to 1e-3)
+and the axis error, but do not remove the amplification by themselves.
+
+Gauge by constraint, not ridge (section 4). A g carried from another state
+keeps its component along g → g + k(χ): a ridge only damps that direction,
+and since k∘χ_h is not exactly in the discrete null space the leftover
+pollutes the solve (measured: a g from f0 = 300 scaled to f0 = 3 stalls the
+Newton that converges in 3 steps from g = 0). The constraint g ⊥ splines in
+χ_h of section 4 is required in every solver, not optional.
+
+Recipe for realistic configurations, in this order: p ≥ 4; frames and
+adapted forms (toroidal form along the axis in 3D); one field period with
+stellarator symmetry (the full torus admits symmetry-forbidden near-null
+modes m ι ≈ n, measured on QA); gauge by constraint; continuation in the
+guide field and the shaping.
+
 ## 5. Gates (each runs in seconds)
 
 | Gate | Case | Pass criterion |
@@ -441,18 +502,13 @@ F' ~ log|χ − 1| in B), which a uniform mesh resolves only to h^(1/2) in a
 band of width h. At 32 cells the unaligned error is 11 times the aligned one
 and the gap grows like h^(-1.3).
 
-Verdict: the direct Clebsch label lane needs resolution normal to every
-separatrix: a mesh aligned with it and graded towards it (E2b), or anisotropic
-refinement that follows the level set χ_h = χ_s, which is surface tracking in
-all but name. Tracking only the O- and X-points (codimension 2) does not
-suffice for islands. The limitation is in the representation, not in the
-mesh: any field-line label (θ*, α = θ* − ιφ, g) is log-singular at a
-separatrix, while B and a vector potential A are smooth there. Across
-separatrices the Eulerian advantage therefore belongs to the A
-representations (constrained A, NN2), which approximate the smooth A at order
-p on any mesh; gate C has to show whether the constrained A's weak tangency
-can be made to converge there without locking. Labels stay the method for
-regions bounded by tracked surfaces.
+Verdict: one label field across a separatrix on an unaligned mesh
+converges at h^(1/2), because any field-line label (θ*, α = θ* − ιφ, g) is
+log-singular there while B and A are smooth. This is the case section 4a
+excludes: the separatrix is a region interface, aligned and graded (E2b),
+with g cut and profiles per region. E5u measures why that design is needed;
+it does not move islands out of the label lane. Gate C compares the
+constrained A on the same cases.
 
 E2 attempt (Newton on the doublet; open, not converged). Formulation tried:
 the axisymmetric system with regions (χ in continuous V0, g cut along the

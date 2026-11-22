@@ -910,6 +910,8 @@ add_test(NAME eulerian_clebsch_newton_gate_e1 COMMAND test_eulerian_clebsch_newt
 add_executable(test_label_ale_axisym test/test_label_ale_axisym.f90)
 target_link_libraries(test_label_ale_axisym PRIVATE milca_eulerian_test)
 add_test(NAME label_ale_axisym_gate_a1 COMMAND test_label_ale_axisym)
+add_executable(test_label_angle_forms test/test_label_angle_forms.f90)
+target_link_libraries(test_label_angle_forms PRIVATE milca_eulerian_test)
 add_executable(test_label_ale_3d test/test_label_ale_3d.f90)
 target_link_libraries(test_label_ale_3d PRIVATE milca_eulerian_test)
 add_test(NAME label_ale_3d_gate_a1 COMMAND test_label_ale_3d)
