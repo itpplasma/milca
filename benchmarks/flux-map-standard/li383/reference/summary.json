@@ -1,0 +1,56 @@
+{
+ "deck": "/Users/markl_m/code/VMEC2000/python/tests/input.li383_low_res",
+ "vmecpp": "0.9.3",
+ "ns": [
+  16,
+  51,
+  101
+ ],
+ "ftol": 1e-14,
+ "threads": 6,
+ "mpol_ntor_override": [
+  10,
+  8
+ ],
+ "time_as_given_s": 12.822879999876022,
+ "iota_fit_degree": 6,
+ "iota_fit_max_error": 0.001257219331998627,
+ "fsq_as_given": [
+  9.985708238141836e-15,
+  1.955959409232118e-15,
+  3.925106981633865e-16
+ ],
+ "time_iota_s": 12.362705999985337,
+ "mpol": 10,
+ "ntor": 8,
+ "ns_final": 101,
+ "fsq_iota": [
+  9.993933971132117e-15,
+  1.8711045806762056e-15,
+  3.9583242218932707e-16
+ ],
+ "iota_axis": 0.3939523960612753,
+ "iota_edge": 0.6530107848492362,
+ "pressure_axis_Pa": 73411.61977450897,
+ "lasym": false,
+ "iota_vs_as_given": {
+  "s=0.0": 6.039988313337948e-07,
+  "s=0.25": 8.172798288426187e-05,
+  "s=0.5": 8.14949314875466e-05,
+  "s=1.0": 0.0,
+  "iota": 0.001140120672946554
+ },
+ "iota_ns151_vs_final": {
+  "s=0.0": 0.0005139482319878041,
+  "s=0.25": 0.00033676534163825793,
+  "s=0.5": 0.000486641445676151,
+  "s=1.0": 0.0,
+  "iota": 6.464117795512703e-05
+ },
+ "energy_T2m3": 3.636290672886685,
+ "wb_times_4pi2": 3.797761523460458,
+ "volume": 2.978717214536712,
+ "phiedge": 0.5143860000000007,
+ "nfp": 3,
+ "wout_iota": "/Users/markl_m/code/MILCA-wt-vmec/benchmarks/flux-map-standard/li383/work/wout_li383_iota.nc"
+}

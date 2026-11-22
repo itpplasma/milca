@@ -1,4 +1,5 @@
-"""Compare a MILCA label-lane result with the VMEC++ reference in reference/.
+"""Compare a MILCA label-lane result with the VMEC++ reference in reference/
+(or in the directory given as second argument).
 
 MILCA writes, in a directory DIR, the layout of reference/:
   axis.txt             phi R Z           on the 64 reference planes
@@ -98,4 +99,8 @@ def main(out):
 
 
 if __name__ == "__main__":
+    # optional second argument: another reference directory in the same
+    # layout (e.g. benchmarks/flux-map-standard/<case>/reference)
+    if len(sys.argv) > 2:
+        REF = pathlib.Path(sys.argv[2]).resolve()
     main(sys.argv[1])

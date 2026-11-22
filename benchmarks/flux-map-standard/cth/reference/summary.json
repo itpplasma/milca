@@ -1,0 +1,56 @@
+{
+ "deck": "/Users/markl_m/code/vmecpp/examples/data/input.cth_like_fixed_bdy",
+ "vmecpp": "0.9.3",
+ "ns": [
+  16,
+  51,
+  101
+ ],
+ "ftol": 1e-14,
+ "threads": 8,
+ "mpol_ntor_override": [
+  10,
+  8
+ ],
+ "time_as_given_s": 10.393981083994731,
+ "iota_fit_degree": 6,
+ "iota_fit_max_error": 0.003855434852133577,
+ "fsq_as_given": [
+  9.89360409102847e-15,
+  1.6608094972383334e-15,
+  3.5090070566089994e-16
+ ],
+ "time_iota_s": 10.16792962513864,
+ "mpol": 10,
+ "ntor": 8,
+ "ns_final": 101,
+ "fsq_iota": [
+  9.941188213940362e-15,
+  1.6880299911995744e-15,
+  3.532294807376497e-16
+ ],
+ "iota_axis": 1.236522615274986,
+ "iota_edge": 0.8296146524251087,
+ "pressure_axis_Pa": 432.29081086712773,
+ "lasym": false,
+ "iota_vs_as_given": {
+  "s=0.0": 9.893855072526458e-08,
+  "s=0.25": 3.0455741023187397e-05,
+  "s=0.5": 3.2575403098850833e-05,
+  "s=1.0": 0.0,
+  "iota": 0.0036695252421421465
+ },
+ "iota_ns151_vs_final": {
+  "s=0.0": 5.180971541318691e-05,
+  "s=0.25": 0.000802584587910049,
+  "s=0.5": 0.0006725599235084534,
+  "s=1.0": 0.0,
+  "iota": 0.00010027303557791356
+ },
+ "energy_T2m3": 0.05057055136750273,
+ "wb_times_4pi2": 0.05066826929554267,
+ "volume": 0.31539671012331183,
+ "phiedge": -0.03500000000000005,
+ "nfp": 5,
+ "wout_iota": "/Users/markl_m/code/MILCA-wt-vmec/benchmarks/flux-map-standard/cth/work/wout_cth_iota.nc"
+}
