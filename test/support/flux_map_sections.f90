@@ -5,7 +5,8 @@ module flux_map_sections
     !! of its wall curve; the start is the polar map of the section after an
     !! affine normalisation by its second moments, so elongated sections
     !! start from near-circular labels.
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int32
+    use fortsparse_csr, only: csr_t
     use fortfem_spline_layout, only: block_layout_t, layout_ogrid, layout_set_curve, &
         LAYOUT_WALL
     use fortfem_spline_space, only: spline_space_t, spline_space_options_t, &
@@ -14,11 +15,11 @@ module flux_map_sections
         spline_point_matrix, spline_locate, spline_boundary_nodes, spline_geometry_at
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_build, &
         spline_derham_boundary_dofs, spline_derham_project, spline_derham_t_basis
-    use milca_eulerian_clebsch, only: clebsch_node_gradients
+    use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp
     use milca_spline_ale, only: spline_geometry_dofs
     use milca_flux_map, only: flux_map_profiles
-    use milca_flux_map_3d, only: flux_map3d_t, flux_map3d_init, flux_map3d_gauge_row, &
-        flux_map3d_point
+    use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_t, flux_map3d_init, flux_map3d_gauge_row, &
+        flux_map3d_point, flux_map3d_expand_symmetric
     implicit none
     private
 
@@ -36,7 +37,8 @@ module flux_map_sections
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
     public :: fm3_build, fm3_start, fm3_gauge_symmetric, fm3_axis, fm3_mesh_quality, &
-              fm3_locate, fm3_state, fm3_flux, fm3_prolong, fm3_preimage
+              fm3_locate, fm3_state, fm3_flux, fm3_prolong, fm3_preimage, &
+              fm3_dump_hessian
 
     ! state of the projection callback of fm3_prolong
     type(fm3_case_t), pointer :: old => null()
@@ -523,5 +525,68 @@ contains
             quality(k) = minval(dets(:, k))/maxval(dets(:, k))
         end do
     end subroutine fm3_mesh_quality
+
+    subroutine fm3_dump_hessian(c, profiles)
+        !! With the environment variable MILCA_FM3_HESSIAN=prefix: the Hessian
+        !! of W at c%fm%z (with the gauge penalty, if any) as CSR, the state,
+        !! the gradient, the fixed slots, which section functions are wall
+        !! functions, W, the per-plane L2 mass matrix of the section functions
+        !! (fm3_section_mass) and the node coordinates, to
+        !! prefix_<cells>_<degree>_<planes>.bin (stream; 4-byte integers,
+        !! 8-byte reals). Read by benchmarks/flux-map-spike/hessian_spectrum.py.
+        type(fm3_case_t), intent(in) :: c
+        procedure(flux_map_profiles) :: profiles
+        type(csr_t) :: h, upper
+        real(dp), allocatable :: g(:)
+        real(dp) :: w
+        character(512) :: prefix, path
+        integer :: unit, length
+
+        call get_environment_variable('MILCA_FM3_HESSIAN', prefix, length)
+        if (length == 0) return
+        call flux_map3d_system(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z, w, g, upper)
+        call flux_map3d_expand_symmetric(upper, h)
+        write (path, '(a,a,i0,a,i0,a,i0,a)') trim(prefix), '_', c%cells, '_', c%degree, '_', &
+            c%nt, '.bin'
+        open (newunit=unit, file=trim(path), access='stream', form='unformatted', &
+              status='replace')
+        write (unit) int(h%nrow, int32), int(size(h%val), int32), int(c%n0, int32), &
+            int(c%nt, int32), int(size(c%fm%fixed), int32), int(size(c%fm%gauge_target), int32)
+        write (unit) int(h%row_ptr, int32), int(h%col, int32), h%val, c%fm%z, g, &
+            int(c%fm%fixed, int32), merge(1_int32, 0_int32, c%fm%is_wall), w
+        write (unit) fm3_section_mass(c), c%base
+        close (unit)
+        print '(2a)', '  Hessian written to ', trim(path)
+    end subroutine fm3_dump_hessian
+
+    function fm3_section_mass(c) result(m)
+        !! Per plane k the mass matrix int phi_i phi_j R dA (2 pi/(nt nfp)) of
+        !! the section functions in the geometry of plane k: with it
+        !! H v = mu M v has eigenvalues mu that compare between meshes (an L2
+        !! metric of the perturbation of u; the wall angle slot taken as
+        !! |delta u|).
+        type(fm3_case_t), intent(in) :: c
+        real(dp) :: m(c%n0, c%n0, c%nt)
+        real(dp), allocatable :: v0(:, :, :), gn(:, :, :)
+        integer, allocatable :: d0(:)
+        real(dp) :: f(2, 2), r, dv
+        integer :: cell, q, p, k
+
+        m = 0
+        do cell = 1, size(c%quad%point_offset)
+            call clebsch_node_gradients(c%derham, c%quad, cell, v0, d0, gn)
+            do q = 1, c%quad%points_per_cell
+                p = c%quad%point_offset(cell) + q - 1
+                do k = 1, c%nt
+                    f = matmul(c%base(:, d0, k), transpose(gn(:, :, q)))
+                    r = dot_product(c%base(1, d0, k), v0(1, :, q))
+                    dv = c%quad%weight(p)*abs(f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1))*r*two_pi/ &
+                         (c%nt*clebsch_nfp)
+                    m(d0, d0, k) = m(d0, d0, k) + dv*spread(v0(1, :, q), 2, size(d0))* &
+                                   spread(v0(1, :, q), 1, size(d0))
+                end do
+            end do
+        end do
+    end function fm3_section_mass
 
 end module flux_map_sections

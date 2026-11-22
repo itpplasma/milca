@@ -81,14 +81,16 @@ program test_flux_map_qa
             c%fm%verbose = verbose
             call flux_map3d_solve(c%fm, c%derham, c%quad, profiles, c%base, 1e-9_dp, 80, st)
             call flux_map3d_system(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z, energy)
+            call fm3_dump_hessian(c, profiles)
             call fm3_flux(c, profiles, flux, bmin, bmax)
             newton_total = newton_total + c%fm%steps
             call wall_time(t1)
-            print '(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,es9.2,a,f6.3,a,es17.10,a,es9.2,a,f8.2,a)', &
+            print '(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,es9.2,a,f6.3,a,es17.10,a,es9.2,a,f8.2,a,i0)', &
                 'degree ', deg, '  cells ', cells, '  planes ', nt, '  unknowns ', 2*c%n0*nt, &
                 '  status ', st, '  Newton ', c%fm%steps, '  |g|', c%fm%gradient_norm, &
                 '  worst Jacobian ratio', minval(quality), '  W', energy, '  flux defect', &
-                maxval(abs(abs(flux) - abs(phiedge)))/abs(phiedge), '  ', t1 - ts, ' s'
+                maxval(abs(abs(flux) - abs(phiedge)))/abs(phiedge), '  ', t1 - ts, ' s  negative eigenvalues ', &
+                c%fm%negative_eigenvalues
         end associate
         previous = c
     end do

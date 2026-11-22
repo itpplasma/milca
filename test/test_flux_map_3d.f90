@@ -21,14 +21,16 @@ program test_flux_map_3d
     !! level, minimisation) or 'stationary' (the previous level, Newton on
     !! stationarity); cells of the first level (2); verbose. With the
     !! environment variable MILCA_FM3_HESSIAN=prefix every landreman level
-    !! writes its Hessian at the solution to prefix_<cells>_<degree>.bin
-    !! (benchmarks/flux-map-spike/hessian_spectrum.py).
-    use, intrinsic :: iso_fortran_env, only: dp => real64, int32
+    !! writes its Hessian at the solution (fm3_dump_hessian)
+    !! (benchmarks/flux-map-spike/hessian_spectrum.py). With
+    !! MILCA_FM3_START_PLANES=m a landreman run first solves the first level
+    !! on m planes from the polar start and starts its first level from that
+    !! state (fm3_prolong, trigonometric in t) with the chosen start mode.
+    use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_curve_chart, only: curve_chart_cylindrical
     use milca_nested_oracles, only: NESTED_SHEARED
-    use milca_eulerian_clebsch, only: clebsch_nfp, clebsch_node_gradients
+    use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
-    use fortsparse_csr, only: csr_t
     use flux_map_sections
     use solovev_label_fields, only: solovev_profiles, exact_b, boundary_samples, r0, alpha, &
         psi_b, chart
@@ -39,7 +41,7 @@ program test_flux_map_3d
     integer :: degree = 2, levels = 0, nt = 0, failures = 0, level, tpoints = 2, extra = 4, first = 2
     logical :: cold = .true., stationary = .false.
     type(fm3_case_t), target :: previous
-    integer :: cells(3) = [2, 4, 8]
+    integer :: cells(3) = [2, 4, 8], start_planes = 0, planes
     logical :: verbose = .false.
     character(16) :: which = 'solovev', arg
     real(dp) :: err(3), axis_err(3)
@@ -98,6 +100,14 @@ program test_flux_map_3d
         section_oracle%saxis = 2.4_dp
         section_oracle%delta = 0.2_dp
         call section_fit_profiles()
+        call get_environment_variable('MILCA_FM3_START_PLANES', arg, level)
+        if (level > 0) read (arg, *) start_planes
+        if (start_planes > 0) then
+            planes = nt
+            nt = start_planes
+            call run_landreman(cells(1), degree, err(1), axis_err(1))
+            nt = planes
+        end if
         if (degree > 2) call run_landreman(cells(1), 2, err(1), axis_err(1))
         do level = 1, levels
             call run_landreman(cells(level), degree, err(level), axis_err(level))
@@ -182,6 +192,16 @@ contains
         c%fm%verbose = verbose
         call flux_map3d_solve(c%fm, c%derham, c%quad, solovev_fm, c%base, 1e-9_dp, 60, st)
         call check(st == 0, 'Newton converges')
+        print '(a,i0,a,i0,a,l1)', '  Hessian inertia: negative ', c%fm%negative_eigenvalues, &
+            ', zero ', c%fm%zero_eigenvalues, '  reliable ', c%fm%inertia_reliable
+        ! the Solovev states are saddles of W too: negative eigenvalues of the
+        ! dense spectrum of the dumped Hessian (hessian_spectrum.py): 2, 2, 4
+        ! at 2, 4, 8 cells
+        call check(c%fm%inertia_reliable .and. c%fm%zero_eigenvalues == 0 .and. &
+                   (n /= 2 .or. c%fm%negative_eigenvalues == 2) .and. &
+                   (n /= 4 .or. c%fm%negative_eigenvalues == 2) .and. &
+                   (n /= 8 .or. c%fm%negative_eigenvalues == 4), &
+                   'Hessian inertia equals the dense spectrum of the dumped Hessian')
         call flux_map3d_system(c%fm, c%derham, c%quad, solovev_fm, c%base, c%fm%z, w, &
                                exact_field=solovev_b, field_error=ferr)
         e = sqrt(ferr(1)/ferr(2))
@@ -191,6 +211,7 @@ contains
             if (st /= 0) error stop 'axis'
             a_err = max(a_err, norm2(axis - [r0, 0.0_dp]))
         end do
+        call fm3_dump_hessian(c, solovev_fm)
         call system_clock(clock1)
         t0 = 0
         t1 = real(clock1 - clock0, dp)/rate
@@ -260,6 +281,13 @@ contains
         end if
         call flux_map3d_solve(c%fm, c%derham, c%quad, landreman_fm, c%base, 1e-9_dp, 60, st)
         call check(st == 0, 'Newton converges')
+        call check(c%fm%negative_eigenvalues >= 0 .and. c%fm%inertia_reliable, &
+                   'Hessian inertia of the converged state is reliable')
+        ! F2b: the exact state is a saddle, six negative eigenvalues (dense
+        ! spectrum of the dumped Hessian, hessian_spectrum.py)
+        if (n == 4 .and. deg == 2 .and. nt == 13 .and. .not. stationary) &
+            call check(c%fm%negative_eigenvalues == 6, &
+                       'Hessian of the 4-cell, 13-plane state has 6 negative eigenvalues')
         call flux_map3d_system(c%fm, c%derham, c%quad, landreman_fm, c%base, c%fm%z, w, &
                                exact_field=section_exact_b, field_error=ferr)
         e = sqrt(ferr(1)/ferr(2))
@@ -279,63 +307,11 @@ contains
         print '(a,i2,a,i0,a,i3,a,es10.3,a,es10.3,a,es16.9,a,f7.2,a)', 'cells', n, '  unknowns ', &
             2*c%n0*nt, '  Newton', c%fm%steps, '  B error', e, '  axis', a_err, '  W', w, &
             '  (', t1, ' s)'
-        call dump_hessian(c, n, deg)
+        print '(a,i0,a,i0,a,l1)', '  Hessian inertia: negative eigenvalues ', &
+            c%fm%negative_eigenvalues, ', zero ', c%fm%zero_eigenvalues, '  reliable ', &
+            c%fm%inertia_reliable
+        call fm3_dump_hessian(c, landreman_fm)
         previous = c
     end subroutine run_landreman
-
-    subroutine dump_hessian(c, n, deg)
-        !! Hessian of W at c%fm%z (with the gauge penalty, if any) as CSR,
-        !! with the fixed slots, the state and which section functions are
-        !! wall functions; stream file of 4-byte integers and 8-byte reals.
-        type(fm3_case_t), intent(in) :: c
-        integer, intent(in) :: n, deg
-        type(csr_t) :: h
-        real(dp), allocatable :: g(:)
-        real(dp) :: w
-        character(512) :: prefix, path
-        integer :: unit, length
-
-        call get_environment_variable('MILCA_FM3_HESSIAN', prefix, length)
-        if (length == 0) return
-        call flux_map3d_system(c%fm, c%derham, c%quad, landreman_fm, c%base, c%fm%z, w, g, h)
-        write (path, '(a,a,i0,a,i0,a)') trim(prefix), '_', n, '_', deg, '.bin'
-        open (newunit=unit, file=trim(path), access='stream', form='unformatted', &
-              status='replace')
-        write (unit) int(h%nrow, int32), int(size(h%val), int32), int(c%n0, int32), &
-            int(c%nt, int32), int(size(c%fm%fixed), int32), int(size(c%fm%gauge_target), int32)
-        write (unit) int(h%row_ptr, int32), int(h%col, int32), h%val, c%fm%z, g, &
-            int(c%fm%fixed, int32), merge(1_int32, 0_int32, c%fm%is_wall), w
-        write (unit) section_mass(c), c%base
-        close (unit)
-        print '(2a)', '  Hessian written to ', trim(path)
-    end subroutine dump_hessian
-
-    function section_mass(c) result(m)
-        !! Per plane k the mass matrix int phi_i phi_j R dA (2 pi/nt) of the
-        !! section functions in the geometry of plane k: with it H v = mu M v
-        !! has eigenvalues mu that compare between meshes (an L2 metric of
-        !! the perturbation of u; the wall angle slot taken as |delta u|).
-        type(fm3_case_t), intent(in) :: c
-        real(dp) :: m(c%n0, c%n0, c%nt)
-        real(dp), allocatable :: v0(:, :, :), gn(:, :, :)
-        integer, allocatable :: d0(:)
-        real(dp) :: f(2, 2), r, dv
-        integer :: cell, q, p, k
-
-        m = 0
-        do cell = 1, size(c%quad%point_offset)
-            call clebsch_node_gradients(c%derham, c%quad, cell, v0, d0, gn)
-            do q = 1, c%quad%points_per_cell
-                p = c%quad%point_offset(cell) + q - 1
-                do k = 1, c%nt
-                    f = matmul(c%base(:, d0, k), transpose(gn(:, :, q)))
-                    r = dot_product(c%base(1, d0, k), v0(1, :, q))
-                    dv = c%quad%weight(p)*abs(f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1))*r*2*pi/c%nt
-                    m(d0, d0, k) = m(d0, d0, k) + dv*spread(v0(1, :, q), 2, size(d0))* &
-                                   spread(v0(1, :, q), 1, size(d0))
-                end do
-            end do
-        end do
-    end function section_mass
 
 end program test_flux_map_3d

@@ -347,7 +347,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
 # symmetry #263 #265 and polar quadrature at point singularities #267, on
 # block sides and vertices #268).
-set(MILCA_FORTFEM_REVISION "0af17a25c2ed7ef55415ebeb3c372869adf7c1e6")
+set(MILCA_FORTFEM_REVISION "64dda15d9020e314be976613ecd931c7c47ea7c5")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -481,7 +481,7 @@ if(MILCA_ENABLE_CUDA_GS_SOLVE)
     enable_language(CUDA)
     set(FORTSPARSE_ENABLE_NATIVE_CUDA ON CACHE BOOL "" FORCE)
 endif()
-set(MILCA_FORTSPARSE_REVISION "0e79ee763616742ea7e018c4c8aab9a0e9f426e4")
+set(MILCA_FORTSPARSE_REVISION "c5d10efef50951d9adaf989d65cbf8974dd2668c")
 set(FORTSPARSE_ENABLE_SUPERLU OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_UMFPACK_IPC OFF CACHE BOOL "" FORCE)
 set(FORTSPARSE_ENABLE_MUMPS OFF CACHE BOOL "" FORCE)
