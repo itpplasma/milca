@@ -347,7 +347,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
 # symmetry #263 #265 and polar quadrature at point singularities #267, on
 # block sides and vertices #268).
-set(MILCA_FORTFEM_REVISION "08d5e8b0fddae18071157df3a451d2acdd612b36")
+set(MILCA_FORTFEM_REVISION "0af17a25c2ed7ef55415ebeb3c372869adf7c1e6")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})

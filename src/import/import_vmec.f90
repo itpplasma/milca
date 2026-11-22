@@ -87,6 +87,7 @@ contains
         character(4), parameter :: fields(4) = ['rbc ', 'rbs ', 'zbc ', 'zbs ']
         character(5), parameter :: profiles(3) = ['pmass', 'piota', 'pcurr']
         character(len=:), allocatable :: kind
+        integer, parameter :: sample_knots = 129
         integer :: f, k
         logical :: ok
         eq%source = path
@@ -118,6 +119,8 @@ contains
             ! knot splines of pressure and iota: the not-a-knot cubic through
             ! the AUX knots (dense knots make the end condition immaterial)
             if (k <= 2 .and. (kind == 'cubic_spline' .or. kind == 'akima_spline')) cycle
+            ! closed forms, sampled to a dense spline
+            if (kind == 'two_power') cycle
             call import_refuse(eq, 'VMEC profile type '//kind//' of '//profiles(k)// &
                                ' (power_series; cubic or Akima splines for pressure and iota)')
             return
@@ -153,10 +156,15 @@ contains
         call coefficients('ai', ai)
         call coefficients('ac', ac)
         eq%pressure = power_series_profile(p%real('pres_scale', 1.0_dp)*am)
-        if (lower(p%text('pmass_type', 'power_series')) /= 'power_series') then
+        select case (lower(p%text('pmass_type', 'power_series')))
+        case ('power_series')
+        case ('two_power')
+            eq%pressure = sampled_profile(p%real('pres_scale', 1.0_dp)*two_power(am, knots()), ok)
+            if (.not. ok) return
+        case default
             call aux_spline('am', p%real('pres_scale', 1.0_dp), eq%pressure, ok)
             if (.not. ok) return
-        end if
+        end select
         if (p%int('ncurr', 0) == 1) then
             ! AC is dI/ds; I(s) is scaled to CURTOR at the edge
             enclosed = [0.0_dp, ac/[(real(k, dp), k=1, size(ac))]]
@@ -166,15 +174,75 @@ contains
                 enclosed = [0.0_dp]
             end if
             eq%current = power_series_profile(enclosed)
+            if (lower(p%text('pcurr_type', 'power_series')) == 'two_power') then
+                ! I(s) = CURTOR int_0^s I' / int_0^1 I', I' = AC0 (1 - s^AC1)^AC2
+                enclosed = cumulative(ac)
+                if (enclosed(size(enclosed)) /= 0) then
+                    enclosed = p%real('curtor', 0.0_dp)*enclosed/enclosed(size(enclosed))
+                end if
+                eq%current = sampled_profile(enclosed, ok)
+                if (.not. ok) return
+            end if
             eq%prescribe_current = .true.
         else
             eq%iota = power_series_profile(ai)
-            if (lower(p%text('piota_type', 'power_series')) /= 'power_series') then
+            select case (lower(p%text('piota_type', 'power_series')))
+            case ('power_series')
+            case ('two_power')
+                eq%iota = sampled_profile(two_power(ai, knots()), ok)
+                if (.not. ok) return
+            case default
                 call aux_spline('ai', 1.0_dp, eq%iota, ok)
                 if (.not. ok) return
-            end if
+            end select
         end if
     contains
+        pure function knots() result(x)
+            ! uniform knots of the sampled closed-form profiles
+            real(dp) :: x(sample_knots)
+            integer :: j
+            x = [(real(j - 1, dp)/(sample_knots - 1), j=1, sample_knots)]
+        end function
+
+        pure function two_power(c, x) result(f)
+            ! VMEC's two_power: c0 (1 - x^c1)^c2 (c1, c2 default 1)
+            real(dp), intent(in) :: c(:), x(:)
+            real(dp) :: f(size(x)), c1, c2
+            c1 = 1; c2 = 1
+            if (size(c) >= 2) c1 = c(2)
+            if (size(c) >= 3) c2 = c(3)
+            f = c(1)*max(0.0_dp, 1 - x**c1)**c2
+        end function
+
+        function cumulative(c) result(g)
+            ! int_0^x two_power(c) on the knots, trapezoids on a refined grid
+            real(dp), intent(in) :: c(:)
+            real(dp) :: g(sample_knots), x(sample_knots), y, ylast, xl, h
+            integer :: j, m
+            integer, parameter :: sub = 64
+            x = knots()
+            g(1) = 0
+            do j = 2, sample_knots
+                h = (x(j) - x(j - 1))/sub
+                g(j) = g(j - 1)
+                ylast = sum(two_power(c, [x(j - 1)]))
+                do m = 1, sub
+                    xl = x(j - 1) + m*h
+                    y = sum(two_power(c, [xl]))
+                    g(j) = g(j) + 0.5_dp*h*(ylast + y)
+                    ylast = y
+                end do
+            end do
+        end function
+
+        function sampled_profile(values, ok) result(profile)
+            real(dp), intent(in) :: values(:)
+            logical, intent(out) :: ok
+            type(import_profile_t) :: profile
+            profile = spline_profile(knots(), values, ok)
+            if (.not. ok) call import_refuse(eq, 'sampled closed-form profile not admitted')
+        end function
+
         subroutine aux_spline(name, scale, profile, ok)
             ! NAME_AUX_S, NAME_AUX_F as a spline profile; the knots end where
             ! VMEC's do (the first non-increasing knot after the first)

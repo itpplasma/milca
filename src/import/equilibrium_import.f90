@@ -295,6 +295,8 @@ contains
             call import_note(eq, 'theta reversed to run counterclockwise in (R, Z); iota changes sign')
         end if
         call scale_profile(eq%current, -sign(1.0_dp, eq%phiedge))
+        ! a negative toroidal flux is the field of reversed coil currents
+        if (eq%free_boundary .and. eq%phiedge < 0) eq%extcur = -eq%extcur
         eq%phiedge = abs(eq%phiedge)
         ! m = 0 terms on n >= 0 only
         do n = 1, ubound(eq%rbc, 1)

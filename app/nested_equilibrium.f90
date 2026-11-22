@@ -23,7 +23,7 @@ program nested_equilibrium
     use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
     use milca_ideal_seed_3d_leaves, only: seed_hermite_profile_jvp
     use milca_equilibrium_chart, only: cylindrical_chart_t
-    use milca_ideal_free_boundary, only: ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
+    use milca_ideal_free_boundary, only: step_cap_fraction, fb_prof_seconds, fb_prof_calls, ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
         ideal_fb_init_bem, ideal_fb_bem_settle, ideal_fb_fix_vertical, ideal_fb_set_coil_split, ideal_fb_enable_angle, &
@@ -36,6 +36,8 @@ program nested_equilibrium
         fb_nested_seed, fb_nested_transfer, fb_nested_settle, filament_basis_t, &
         fb_nested_plasma_mesh, fb_nested_coil_flux
     use milca_mgrid_file, only: mgrid_t, mgrid_read
+    use fortfem_gs_single_layer_shape_2d, only: sl_near_order => near_order, &
+        sl_far_order => far_order, sl_radial_n => radial_n
     implicit none
     ! namelist storage: the toroidal modes a boundary and map need follow
     ! from the spectrum and fourier_tolerance, memory grows like map_ntor^2
@@ -60,10 +62,14 @@ program nested_equilibrium
     real(dp) :: observed(4), previous_observed(4)
     real(dp), allocatable :: boundary_input(:, :, :)
     ! free boundary: seeds from the solved boundary (axisymmetric decks)
-    integer, parameter :: max_reseeds = 10, reseed_modes = 16
-    real(dp), parameter :: reseed_tolerance = 1e-6_dp
+    integer, parameter :: max_reseeds = 10, reseed_modes = 16, coarse_nodes = 16
+    real(dp), parameter :: reseed_tolerance = 1e-5_dp
     integer :: reseed_step
     real(dp) :: reseed_move, reseed_change, reseed_seen(4), reseed_last(4)
+    ! the free-boundary residual target of a level: loose for the seeds of the
+    ! reseed loop, whose boundaries only start the next seed
+    real(dp) :: level_tolerance = 0
+    real(dp), parameter :: seed_tolerance = 1e-5_dp
     type(ideal_map_t) :: previous_map
     real(dp), allocatable :: previous_seed(:, :, :)
     real(dp) :: phiedge, tolerance
@@ -217,25 +223,22 @@ program nested_equilibrium
     mesh_error = 0; fourier_error = 0; iota_error = 0
     call set_toroidal_level(ntor_level)
     if (free_boundary) then
+        call set_bem_orders(boundary_nodes)
         call free_boundary_setup()
-        call fb_level(boundary_nodes, .true.)
         ! the frozen field carries the seed's labelling: seed again from the
-        ! solved boundary until it stops moving (axisymmetric decks)
-        if (ntor == 0) then
-            call observe(reseed_seen)
-            do reseed_step = 1, max_reseeds
-                call reseed_from_solution(reseed_move)
-                if (reseed_move < reseed_tolerance) exit
-                call fb_level(boundary_nodes, .true.)
-                reseed_last = reseed_seen
-                call observe(reseed_seen)
-                ! wb relative, the axis relative to the minor radius
-                reseed_change = max(abs(reseed_seen(1)/reseed_last(1) - 1), &
-                                    abs(reseed_seen(2) - reseed_last(2)))
-                print '(a,i2,a,es10.3,a,es10.3)', 'reseed', reseed_step, &
-                    ': boundary moved', reseed_move, ', wb and axis changed', reseed_change
-                if (reseed_change < reseed_tolerance) exit
-            end do
+        ! solved boundary until it stops moving (axisymmetric decks), on a
+        ! coarse mesh first, then on the requested one from that boundary
+        ! the first solves only start the seeds: loose residual target
+        if (ntor == 0) level_tolerance = seed_tolerance
+        if (ntor == 0 .and. boundary_nodes > coarse_nodes) then
+            call fb_level(coarse_nodes, .true.)
+            call reseed_loop(coarse_nodes, max_reseeds)
+            call reseed_from_solution(reseed_move)
+            call fb_level(boundary_nodes, .true.)
+            call reseed_loop(boundary_nodes, 2)
+        else
+            call fb_level(boundary_nodes, .true.)
+            if (ntor == 0) call reseed_loop(boundary_nodes, max_reseeds)
         end if
     else
         call mesh_ladder()
@@ -339,6 +342,14 @@ program nested_equilibrium
     call result%write('analyses', real(report%analyses, dp), '1', 'final solve: symbolic analyses')
     call result%close()
 
+    block
+        integer :: venv
+        call get_environment_variable('MILCA_FB_PROFILE', status=venv)
+        if (venv == 0) print '(a,13(i6,f8.3))', 'profile calls/s: map energy, toroidal, ' &
+            //'bem terms, map hessian, toroidal hessian, bem hessian, factor, refactor, ' &
+            //'newton factor, slide system, exact blocks, map steps, newton solve', &
+            (fb_prof_calls(venv), fb_prof_seconds(venv), venv=1, 13)
+    end block
 contains
 
     subroutine fail(reason)
@@ -447,6 +458,7 @@ contains
         integer :: local
         seed%profile = profile
         if (use_bem) then
+            call set_bem_orders(nodes)
             call bem_level(nodes, next)
         else
             call shell_level(nodes, next)
@@ -482,7 +494,7 @@ contains
             if (split_env() .and. .not. use_bem) call split_check(next)
         end if
         fb = next
-        call fb_solve(tolerance)
+        call fb_solve(max(tolerance, level_tolerance))
         block
             character(len=8) :: env
             integer :: n_env, st_env
@@ -1131,6 +1143,53 @@ contains
         change = max(abs(observed(1)/previous_observed(1) - 1), &
             maxval(abs(observed(2:) - previous_observed(2:))))
     end function
+
+    subroutine set_bem_orders(nodes)
+        !! Quadrature of the plasma-boundary single layer by mesh: at 16
+        !! boundary nodes near/far Gauss orders 4/3 and 8 graded radial points
+        !! leave the exact Solov'ev free boundary unchanged against 8/6/20
+        !! (3.50e-4 against 3.48e-4 in volume) at 60 % of the time; finer
+        !! meshes take the higher orders so the quadrature stays below the
+        !! plasma discretisation.
+        integer, intent(in) :: nodes
+        character(16) :: env
+        integer :: venv
+        if (nodes > 0 .and. nodes <= 24) then
+            sl_near_order = 4; sl_far_order = 3; sl_radial_n = 8
+        else if (nodes > 0 .and. nodes <= 48) then
+            sl_near_order = 6; sl_far_order = 4; sl_radial_n = 12
+        else
+            sl_near_order = 8; sl_far_order = 6; sl_radial_n = 20
+        end if
+        call get_environment_variable('MILCA_BEM_ORDERS', env, status=venv)
+        if (venv == 0) read (env, *) sl_near_order, sl_far_order, sl_radial_n
+        call get_environment_variable('MILCA_STEP_CAP', env, status=venv)
+        if (venv == 0) read (env, *) step_cap_fraction
+    end subroutine set_bem_orders
+
+    subroutine reseed_loop(nodes, steps)
+        !! Seeds again from the solved boundary at this mesh until wb and the
+        !! axis change by less than reseed_tolerance between seeds (at most
+        !! steps seeds).
+        integer, intent(in) :: nodes, steps
+        call observe(reseed_seen)
+        level_tolerance = seed_tolerance
+        do reseed_step = 1, steps
+            call reseed_from_solution(reseed_move)
+            if (reseed_move < reseed_tolerance) exit
+            call fb_level(nodes, .true.)
+            reseed_last = reseed_seen
+            call observe(reseed_seen)
+            ! wb relative, the axis relative to the minor radius
+            reseed_change = max(abs(reseed_seen(1)/reseed_last(1) - 1), &
+                                abs(reseed_seen(2) - reseed_last(2)))
+            print '(a,i2,a,es10.3,a,es10.3)', 'reseed', reseed_step, &
+                ': boundary moved', reseed_move, ', wb and axis changed', reseed_change
+            if (reseed_change < reseed_tolerance) exit
+        end do
+        level_tolerance = 0
+        call fb_solve(tolerance)
+    end subroutine reseed_loop
 
     subroutine reseed_from_solution(move)
         !! The solved plasma boundary (its boundary nodes) as the new seed:
