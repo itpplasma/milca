@@ -57,6 +57,20 @@ Each step on cases that run in seconds, against analytic solutions first.
    E1 (mesh tied to X), Newton converges quadratically on each frozen mesh,
    and the mesh loop converges in a few passes from an axis offset of 10 % of
    the minor radius. Then the same on the per-plane 3D O-grids (E4 case).
+   *State:* passed (`milca_label_ale`, `milca_spline_ale`, gate
+   `label_ale_axisym_gate_a1`, 10 s). X is a fixed parametric point of the
+   core block; in Newton the core translates with X and the rest follows a
+   fixed harmonic blend (1 on the core, 0 on the wall), so the residual is
+   smooth in X and Newton is quadratic (4–8 steps, one mesh pass). B error
+   2.23e-2, 4.52e-3, 9.47e-4 on 2, 4, 8 cells (E1: 2.15e-2, 4.44e-3,
+   9.25e-4), offsets up to 30 % of the minor radius in all directions (the
+   centring backtracks where the coarse ring would fold). Two findings:
+   pinning one point of the Winslow map to X (a point constraint on a
+   harmonic map, singular in the continuum) made the axis drift and B
+   converge at order 1; the core must be held as a region. Winslow between
+   core and wall converges at order p but with 1.6–2× the B error of the
+   blend on this case, so the blend is the default and Winslow is optional
+   until a case needs it (large distortion, A2).
 2. **ALE label solver, several axes (A2).** Doublet and two-axis
    configurations: one region per lobe and one outer region, the separatrix a
    region boundary of the mesh, each O-point a physical unknown followed by
@@ -88,6 +102,20 @@ Effort split (equilibrium development): ALE and common FE infrastructure
 Milestone: a robust Eulerian nested equilibrium solver on an ALE–Winslow
 mesh that reproduces VMEC fixed- and free-boundary results without the
 slide gauges of the Lagrangian map. NN2 then inherits mesh and exterior.
+
+## Optional, not an immediate priority
+
+- Harmonic boundary-conforming maps with proven invertibility for
+  nonconvex sections: Babin, Hindenlang, Maj and Köberl, *Construction of an
+  invertible mapping to boundary conforming coordinates for arbitrarily
+  shaped toroidal domains*, arXiv:2411.04683, code `map2disc`
+  (gitlab.mpcdf.mpg.de/gvec-group/map2disc). They solve Δξ = Δη = 0 (the
+  Winslow map) by boundary integrals rather than the nonlinear inverse
+  equations, then invert it. Candidate for the initial mesh and for
+  remeshing after the spline Winslow of step 1 works; check licence and
+  record the commit before reusing code (AGENTS.md provenance rule). It
+  supplies geometry only: the coupling to the Clebsch Newton, field transfer
+  and adaptation stay MILCA's work.
 
 ## State of the map lane (reference)
 

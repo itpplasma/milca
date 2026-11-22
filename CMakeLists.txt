@@ -534,7 +534,8 @@ target_sources(milca_mhd PRIVATE src/generated/milca_ideal_map_leaves.f90
     src/generated/milca_ideal_field_angle_leaves.f90
     src/generated/milca_ideal_seed_3d_leaves.f90
     src/generated/milca_winslow_seed_leaves.f90 src/mhd/winslow_seed.f90 src/mhd/ideal_seed_3d.f90
-    src/mhd/map_3d_loop.f90 src/mhd/nested_seed_input.f90)
+    src/mhd/map_3d_loop.f90 src/mhd/nested_seed_input.f90
+    src/equilibrium/spline_ale.f90 src/equilibrium/label_ale.f90)
 set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-dummy-argument")
 # N4: 3D free boundary of the map lane (Gamma_c shell, per-n exterior).
@@ -904,6 +905,10 @@ add_test(NAME eulerian_clebsch_fit_nonlinear_gate_e0
 add_executable(test_eulerian_clebsch_newton test/test_eulerian_clebsch_newton.f90)
 target_link_libraries(test_eulerian_clebsch_newton PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_clebsch_newton_gate_e1 COMMAND test_eulerian_clebsch_newton)
+# gate A1 (docs/equilibrium-roadmap.md): label lane on an ALE mesh, one axis
+add_executable(test_label_ale_axisym test/test_label_ale_axisym.f90)
+target_link_libraries(test_label_ale_axisym PRIVATE milca_eulerian_test)
+add_test(NAME label_ale_axisym_gate_a1 COMMAND test_label_ale_axisym)
 add_executable(test_eulerian_clebsch_3d test/test_eulerian_clebsch_3d.f90)
 target_link_libraries(test_eulerian_clebsch_3d PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_clebsch_3d_gate_e3 COMMAND test_eulerian_clebsch_3d)
