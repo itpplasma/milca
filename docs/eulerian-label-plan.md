@@ -410,6 +410,45 @@ needed. The registered gate runs 4, 8, 16 in 42 s and checks the 8 → 16 rates.
 - The one-sided traces of B_φ are no sheet measure: each Clebsch term is
   log-singular on the separatrix and only their sum is finite.
 
+E2 attempt (Newton on the doublet; open, not converged). Formulation tried:
+the axisymmetric system with regions (χ in continuous V0, g cut along the
+separatrix, per quadrature point the region's profile and winding form:
+lobe j about O_j in its H^(1/2) frame, outside the mean of both windings with
+the full outer flux slope, so the generated leaf `clebsch_energy_axisym` is
+unchanged), χ = 2 on the wall, multipliers for χ and grad χ at both O-points,
+staggered ALE (Newton on a fixed mesh, then O, X and the separatrix of the
+discrete label for the next mesh), Jacobi-scaled KKT solves. Profile
+derivatives are those of the tabulated interpolant. Findings at 4, 8 and 16
+cells per block side, started from the projected exact label on the exact
+mesh:
+
+- χ free on the separatrix: the residual is differentiable only on the scale
+  1e-10 (J v against central differences agrees to 1e-6 at h = 1e-10, 140 %
+  at h = 1e-8): Gauss points of the graded layer sit at |χ − 1| ≈ 1e-10 and
+  cross the log singularity of F' under any step.
+- χ = 1 pinned on the mesh separatrix (each region a Dirichlet problem; the
+  separatrix rows become the sheet-current measure of a staggered shape
+  update) and |χ − 1| smoothed to ((χ − 1)² + ε²)^(1/2) in the profiles: J
+  consistent to 1e-5 at ε = 1e-4, yet Newton stalls. Along the Newton
+  direction the second-order term is 1e2 to 1e5 times the linear one,
+  concentrated in the separatrix layer and on the O–X line of each lobe.
+- Spectrum of the scaled Newton matrix (4 cells): six exact null modes of g
+  (a constant and χ per region; removed by g = 0 on one transversal node line
+  per region), then weak coupled χ–g modes (scaled λ 1e-5 to 1e-4, about
+  95 % g) in the graded layer next to the separatrix, which carry most of
+  the step. Exact elimination of g per trial step (W is quadratic in g) and
+  a best-point line search do not restore convergence; ε = 0.1 does not
+  converge in 16 steps either.
+- Cause: in the layer g ≈ F'(χ)(θ* − θ) with F' ~ log|χ − 1|, so the residual
+  responds to δχ like δχ/(χ − 1): the Newton basin shrinks to the smallest
+  |χ − 1| of the layer nodes, and refinement (stronger grading) makes it
+  smaller. Candidates: unknowns adapted to the layer (χ − 1 in logarithmic
+  form, or the separatrix as an interface with χ − 1 proportional to the
+  distance and its position an unknown), continuation in ε with the layer
+  released from the outside in, or an axisymmetric doublet in the
+  Grad–Shafranov form (f = R B_φ prescribed) to separate the separatrix
+  topology from the label-lane representation.
+
 E4a (fixed χ_h = Π0 ψ/δ per plane, per-plane O-grid on the exact axis fitted to
 the exact boundary, winding angle in the Hessian frame of each plane,
 relative L2 error of B against the exact field, degree 2):
@@ -607,8 +646,11 @@ reaches order p at p = 2.
 3. E0, E1 in axisymmetry (done, `test_eulerian_clebsch_fit`,
    `test_eulerian_clebsch_newton`).
 4. O-line handling for several axes: E2a and E2b done (graded layers of
-   power 4 on FortFEM's doublet layout), then E2 with Newton. The graded
-   layer belongs in FortFEM's `spline_grade_knots` once E2 needs it too.
+   power 4 on FortFEM's doublet layout); E2 with Newton open (section 5,
+   E2 attempt: the log-singular flux profile at the separatrix leaves
+   Newton a basin of the size of the smallest |χ − 1| in the graded
+   layer). The graded layer belongs in FortFEM's `spline_grade_knots` once
+   E2 needs it too.
 5. 3D: E3, E3b, E4a and E4 (Newton on the sheared family, ε = 0.6) done;
    ε = 1.2 open (above); then the registered integer case against
    VMEC++, DESC and GVEC.
