@@ -506,8 +506,8 @@ cells +0.33 (energy −1.4e-5), degree 3, 6 cells +0.25 (max 0.38).
 - Not the cause: the sample jitter of the former wall origin (0.06 mm), the
   section quadrature (degree + 8 points: unchanged), the wall area.
 - Not measured: the guide-field amplification of section 3 as the mechanism
-  behind the remaining error; a decision on a 3D projection (roadmap P0b)
-  is open.
+  behind the remaining error. A 3D projection (roadmap P0b) was not needed
+  for the QA/QH axis and is dropped (2026-11-22).
 
 Pressure-driven saddles (Hessian inertia of #653, modes by
 `checks/hessian_toroidal_content.py`; pressure scaled by α at fixed ι,
@@ -634,8 +634,8 @@ Each with the run that would settle it in the roadmap (P0a–P0c).
 - Cold starts at a strong guide field: continuation works; a step
   acceptance that tolerates the curved constraint R τ det ∇u = f(s) is
   owed.
-- Projection in 3D: none is stable so far and it is off the critical path
-  (roadmap P0b). A candidate is B_h = Π_2(u_h*β) with a commuting
+- Projection in 3D: none is stable so far; dropped (roadmap P0b,
+  2026-11-22). A candidate is B_h = Π_2(u_h*β) with a commuting
   projection, in mixed form.
 - Section meshes: grading towards tips that a harmonic map under-resolves
   (wall distance 17 to 33 mm on 4 cells of QA, W7-X, li383), a certificate

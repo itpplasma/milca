@@ -84,14 +84,13 @@ negative eigenvalue); finding 2 was an error of the flux map, not of VMEC
 degree 3, the QH axis once 29 planes are used; the energy error of finding
 3 was the area of the wall fit and is removed. W7-X standard and li383 mesh
 and converge. Open from these: grading of the meshes towards tips, QH
-against a third code, the decision on P0b.
+against a third code. Decided 2026-11-22: P0b is dropped; the F2b gate in
+stationary mode (level 1 from the polar start, no axis check) is accepted.
 
 P0a, owed before the flux map is compared (in this order):
 - QA floor: plane scan at fixed section (13, 17, 21, 25), wall volume
   against VMEC, then section meshes by Winslow.
-- F2b: lowest Hessian eigenvalues at the exact and at the lower-energy
-  state; then either a stable exact 3D case for the minimiser or the gate
-  in stationary mode on three meshes.
+- F2b: done; the gate runs in stationary mode (accepted 2026-11-22).
 - Convergence on three mesh levels at degrees 2, 3, 4 of (i) B against
   the exact field and (ii) the residual of the unprojected force balance
   J×B − ∇p, evaluated independently of the energy that is minimised.
@@ -100,13 +99,12 @@ P0a, owed before the flux map is compared (in this order):
   rule: with a projected energy a pointwise guard stalled the prototype.
 - The order 1.8–1.9 of F1 (twice the projected exact label on 8 cells).
 
-P0b, projection against guide-field locking: not on the critical path. In
-F1 the pointwise solver at B_φ/B_pol ≈ 15 is at 2.2e-3 against 1.9e-3 at
-1.5; the damage is at 150. No stable 3D projection exists (all per-cell
-variants collapse in the prototype) and a projected field is neither
-tangent nor divergence-free without a commuting construction. It is taken
-up only if P1 shows amplification at realistic ratios, and then with the
-force-balance check of P0a as its acceptance.
+P0b, projection against guide-field locking: dropped (2026-11-22). The QA
+axis converges to the VMEC/DESC limit with harmonic meshes at degree 3 and
+the QH axis approaches VMEC once enough planes are used, without a
+projection. No stable 3D projection exists (all per-cell variants collapse
+in the prototype). Reopened only if P1 shows amplification at realistic
+ratios B_φ/B_pol, then with the force-balance check of P0a as acceptance.
 
 P0c, shared numerics first (was P5), because a comparison of solvers with
 penalised gauges measures the penalties:
