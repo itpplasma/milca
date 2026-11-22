@@ -1137,3 +1137,5 @@ endforeach()
 milca_test_labels(grad_shafranov_phase1_edge_readback_app fast CLASSES equilibrium
     TARGETS gs_phase1 test_gs_prescribed_q_circle)
 milca_test_labels(gs_free_xpoint_refit fast CLASSES equilibrium TARGETS gs_free)
+milca_test_labels(eulerian_clebsch_landreman_newton_gate_e4 fast CLASSES equilibrium
+    TARGETS test_eulerian_clebsch_landreman_newton)

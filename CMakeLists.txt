@@ -347,7 +347,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
 # symmetry #263 #265 and polar quadrature at point singularities #267, on
 # block sides and vertices #268).
-set(MILCA_FORTFEM_REVISION "f96be8b0225507f2bc379c353e9efdde43618f2b")
+set(MILCA_FORTFEM_REVISION "6ba9d3630af7c38383e1bde2107a1f49d409ae50")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -883,7 +883,7 @@ add_executable(test_vacuum_torus_3d test/test_vacuum_torus_3d.f90)
 target_link_libraries(test_vacuum_torus_3d PRIVATE milca)
 add_test(NAME vacuum_torus_3d_gate_g1 COMMAND test_vacuum_torus_3d)
 add_library(milca_eulerian_test STATIC test/eulerian_solovev_fields.f90
-    test/support/solovev_doublet.f90)
+    test/support/solovev_doublet.f90 test/support/landreman_sections.f90)
 target_link_libraries(milca_eulerian_test PUBLIC milca)
 add_executable(test_eulerian_solovev_labels test/test_eulerian_solovev_labels.f90)
 target_link_libraries(test_eulerian_solovev_labels PRIVATE milca_eulerian_test)
@@ -912,6 +912,9 @@ add_test(NAME eulerian_clebsch_doublet_aligned_gate_e2b COMMAND test_eulerian_cl
 add_executable(test_eulerian_clebsch_landreman test/test_eulerian_clebsch_landreman.f90)
 target_link_libraries(test_eulerian_clebsch_landreman PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_clebsch_landreman_gate_e4a COMMAND test_eulerian_clebsch_landreman)
+add_executable(test_eulerian_clebsch_landreman_newton test/test_eulerian_clebsch_landreman_newton.f90)
+target_link_libraries(test_eulerian_clebsch_landreman_newton PRIVATE milca_eulerian_test)
+add_test(NAME eulerian_clebsch_landreman_newton_gate_e4 COMMAND test_eulerian_clebsch_landreman_newton)
 add_executable(test_gs_fb_manufactured test/test_gs_fb_manufactured.f90)
 target_link_libraries(test_gs_fb_manufactured PRIVATE milca_gs_fb_test)
 add_library(milca_gs_ci_test STATIC test/support/gs_ci_fixture.f90)
