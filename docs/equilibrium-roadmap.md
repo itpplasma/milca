@@ -192,6 +192,25 @@ quasi-symmetry measures need Boozer angles on top of θ* in either map.
 Whether TIAGO's present free-boundary derivatives are finite differences
 was stated in a review and has not been checked here.
 
+**D2. Downstream exploratory: exact-force-balance solution families and
+Boozer/Hamada consistency.** See the scoped
+[research plan](exact-force-balance-coordinate-plan.md). This asks a different
+question from P0--P3: can an analytic/nonlinear representation satisfy
+interior ideal-MHD force balance *by identity* while the fit error lies in
+boundary, profile, coil or diagnostic data? Separate (E0) exact restricted
+Grad--Shafranov/Trefftz families, (E1) published exact finite-pressure 3D
+families, (E2) a high-risk divergence-free stress potential with **all**
+nonlinear MHD constitutive constraints, and (E3) a nonlinear manifold
+corrector which provides only **discrete** equilibrium accuracy unless
+independently certified. No new representation displaces either map at P3.
+Use [libneo's independent Boozer and Hamada routes](https://github.com/itpplasma/libneo/blob/47b1988cddf5e6544d92eb7418c87f83be3d7ea4/src/boozer_hybrid.f90)
+as coordinate-compatibility oracles (C0--C2), always together with direct
+force-balance checks. Do not claim universal machine precision near rational
+surfaces or from current-based Hamada coordinates at p' = 0. The smallest
+experimental slice is exact axisymmetric Solov'ev boundary/profile fitting
+and coordinate-route agreement; the experimental track is **not active**
+until it is explicitly admitted under [ROADMAP.md](../ROADMAP.md).
+
 **Dropped:** further work on the (χ, g) solvers with axis unknowns (the
 gauge work of branch `label/qa-recipe` stays unlanded), the frozen-map
 relabelling (B1–B6, R1), meshes that follow the magnetic axis, gate C as
