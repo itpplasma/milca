@@ -1,5 +1,8 @@
 # Stability, response and bifurcation
 
+Walls (ideal, thin resistive with holes, feedback coils) and the resistive-wall
+mode eigenproblem are specified in [wall-model.md](wall-model.md).
+
 Status (2026-10-21): canonical analysis-consumer specification. Model-specific
 MHD energy, linear-response and free-boundary Hessian consumers are implemented.
 The free-boundary probe now retains each full cosine/sine harmonic pair and

@@ -94,6 +94,11 @@ MILCA's model:
 Comparisons with p_b != 0 state the edge model. Against VMEC2000 the
 comparison uses p_b = 0.
 
+Coils, walls and passive structures (coil circuits, vessel currents, thin
+resistive and ideal walls, limiter contact, their use in equilibrium,
+reconstruction, stability and evolution) are specified in
+[wall-model.md](wall-model.md).
+
 ## 1. Reason
 
 The frozen-flux map takes the mesh node positions as unknowns and minimises
