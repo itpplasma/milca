@@ -30,3 +30,4 @@ __pycache__/
 *.mov
 *.apng
 .sloptools/artifacts/
+.claude/
