@@ -93,6 +93,11 @@ module milca_ideal_free_boundary
     use milca_equilibrium_boundary_3d, only: gamma_c_3d_t, gamma_c_3d_energy, &
         assignment(=)
     implicit none
+    ! largest node displacement of one free-boundary Newton step, relative
+    ! to the plasma extent
+    real(dp), public :: step_cap_fraction = 0.05_dp
+    real(dp), public :: fb_prof_seconds(13) = 0
+    integer, public :: fb_prof_calls(13) = 0
     private
     public :: ideal_fb_t, ideal_fb_report_t, ideal_fb_init, ideal_fb_set_drive
     public :: ideal_fb_gradient, ideal_fb_hessian, ideal_fb_step, ideal_fb_solve
@@ -3229,7 +3234,9 @@ contains
         call prepare_kkt_values(solver, nc, ptr, idx, values, correction, &
                                 status, symmetric)
         if (.not. status_ok(status)) return
+        call prof2(0, 7)
         call sparse_factor(solver, nr, nc, nnz, ptr, idx, values, status)
+        call prof2(1, 7)
     end subroutine
 
     subroutine refactor_kkt_raw(solver, nr, nc, nnz, ptr, idx, values, &
@@ -3246,7 +3253,9 @@ contains
         if (.not. status_ok(status)) return
         if (present(maximum_correction)) &
             maximum_correction = max(maximum_correction, correction)
+        call prof2(0, 8)
         call sparse_refactor(solver, nr, nc, nnz, ptr, idx, values, status, reused)
+        call prof2(1, 8)
     end subroutine
 
     logical function configure(solver) result(ready)
@@ -5825,7 +5834,9 @@ contains
         nt = fb%bem%nt
         allocate (gfull(fb%plasma%ndof), gx(2*fb%bem%nb), gt(nt))
         status = IDEAL_FB_OK
+        call prof(0, 1)
         call ideal_map_energy(fb%plasma, fb%plasma%x, wp, st, gfull, minp)
+        call prof(1, 1)
         if (st /= IDEAL_MAP_OK) status = IDEAL_FB_FOLDED
         grad = 0
         do a = 1, fb%plasma%nodes
@@ -5836,8 +5847,10 @@ contains
             end do
         end do
         call toroidal_energy(fb, et, grad)
+        call prof(1, 2)
         call fb_bem_terms(fb%bem, bem_coords(fb), fb%mu0, -fb%circulation, ev, gx, &
             gt, gp)
+        call prof(1, 3)
         do b = 1, fb%bem%nb
             a = fb%bem%node(b)
             do c = 1, 2
@@ -5871,16 +5884,20 @@ contains
         nb = fb%bem%nb; nt = fb%bem%nt
         ! with the field angle the plasma block comes from the map's batched
         ! assembly (position gauge, angle columns after the positions)
+        call prof(0, 4)
         if (fb%na0 > 0) then
             call ideal_map_hessian(fb%plasma, fb%plasma%x, hp)
         else
             call plasma_hessian(fb, hp)
         end if
+        call prof(1, 4)
         call toroidal_hessian(fb, ht)
+        call prof(1, 5)
         allocate (gx(2*nb), gt(nt), hxx(2*nb, 2*nb), hxt(2*nb, nt), hxp(2*nb), &
             htt(nt, nt), htp(nt), rows(2*nb))
         call fb_bem_terms(fb%bem, bem_coords(fb), fb%mu0, -fb%circulation, ev, gx, &
             gt, gp, hxx, hxt, hxp, htt, htp)
+        call prof(1, 6)
         do b = 1, nb
             do c = 1, 2
                 rows(2*(b - 1) + c) = pidx(fb, c, 1, fb%bem%node(b))
@@ -6158,12 +6175,14 @@ contains
             n_pos = fb%np + fb%nx - fb%unstable
             n_neg = fb%nx + fb%nf + nslide + fb%unstable
         end if
-        cap = 0.02_dp*maxval(maxval(fb%plasma%reference, dim=2) &
+        cap = step_cap_fraction*maxval(maxval(fb%plasma%reference, dim=2) &
             - minval(fb%plasma%reference, dim=2))
         allocate (grad(fb%n), gtrial(fb%n), diag(fb%n), w(fb%n), shift(fb%n + nslide), &
                   sol(fb%n + nslide))
         factored = .false.
+        call prof3(0, 11)
         call exact_blocks(fb, st)
+        call prof3(1, 11)
         if (st == IDEAL_FB_OK) call state_energy(fb, grad, energy, minjac, st)
         if (st /= IDEAL_FB_OK) then
             status = IDEAL_FB_FOLDED; return
@@ -6197,7 +6216,9 @@ contains
             end if
             if (it == max_iterations) exit
             sscale = sum(diag(1:fb%np))/fb%np
+            call prof3(0, 10)
             call ideal_fb_slide_system(fb, rowptr, colidx, val, sscale, srows, scols, smat)
+            call prof3(1, 10)
             shift = 0
             shift(1:fb%np) = diag(1:fb%np) + 1.0e-12_dp*maxval(diag)
             u0 = state_vector(fb)
@@ -6205,26 +6226,34 @@ contains
             do tries = 1, 30
                 near = tries == 1 .and. growths < 2 .and. gnorm < 1.0e-3_dp*gnorm0 &
                     .and. last_ratio > 0.5_dp
+                call prof3(0, 9)
                 call inertia_newton_factor(opt, srows, scols, smat, shift, n_pos, n_neg, &
                     solver, delta, st, minimum=dmin, any_inertia=near)
+                call prof3(1, 9)
                 factored = st == INERTIA_NEWTON_OK
                 if (.not. factored) then
                     if (talk) print '(a,3i8,a,2i8)', '   inertia', opt%inertia, &
                         ' target', n_pos, n_neg
                     status = IDEAL_FB_SOLVE_FAILED; exit
                 end if
+                call prof3(0, 13)
                 call inertia_newton_solve(opt, solver, [-grad, (0.0_dp, i = 1, nslide)], &
                     sol, st)
+                call prof3(1, 13)
                 if (st /= INERTIA_NEWTON_OK) then
                     status = IDEAL_FB_SOLVE_FAILED; exit
                 end if
                 s = sol(:fb%n)
+                call prof3(0, 12)
                 call map_steps(fb, s, disp, rot)
+                call prof3(1, 12)
                 if (disp > cap) s = s*(cap/disp)
                 hs = csr_apply(s)
                 predicted = -(dot_product(grad, s) + 0.5_dp*dot_product(s, hs))
                 call ideal_fb_step(fb, s, 1.0_dp)
+                call prof3(0, 11)
                 call exact_blocks(fb, st)
+                call prof3(1, 11)
                 if (st == IDEAL_FB_OK) call state_energy(fb, gtrial, etrial, minjac, st)
                 if (st == IDEAL_FB_OK) then
                     gp = gtrial
@@ -6261,7 +6290,9 @@ contains
                 if (inertia_watchdog_check(watchdog, energy) == WATCHDOG_RESTORE) then
                     if (talk) print '(a)', '   watchdog: back to the checkpoint'
                     call set_state_vector(fb, watchdog%state)
+                    call prof3(0, 11)
                     call exact_blocks(fb, st)
+                    call prof3(1, 11)
                     grad = watchdog%gradient; energy = watchdog%merit
                 end if
             end if
@@ -6622,5 +6653,43 @@ contains
         if (k /= chain(1)) return
         status = 0
     end subroutine
+
+    subroutine prof(mode, slot)
+        !! Wall-clock accumulators (mode 0 starts, 1 adds to slot and restarts).
+        integer, intent(in) :: mode, slot
+        integer(8), save :: last = 0
+        integer(8) :: now, rate
+        call system_clock(now, rate)
+        if (mode == 1) then
+            fb_prof_seconds(slot) = fb_prof_seconds(slot) + real(now - last, dp)/rate
+            fb_prof_calls(slot) = fb_prof_calls(slot) + 1
+        end if
+        last = now
+    end subroutine prof
+
+    subroutine prof2(mode, slot)
+        !! As prof with its own clock (factorisations nest inside prof spans).
+        integer, intent(in) :: mode, slot
+        integer(8), save :: last = 0
+        integer(8) :: now, rate
+        call system_clock(now, rate)
+        if (mode == 1) then
+            fb_prof_seconds(slot) = fb_prof_seconds(slot) + real(now - last, dp)/rate
+            fb_prof_calls(slot) = fb_prof_calls(slot) + 1
+        end if
+        last = now
+    end subroutine prof2
+
+    subroutine prof3(mode, slot)
+        integer, intent(in) :: mode, slot
+        integer(8), save :: last(13) = 0
+        integer(8) :: now, rate
+        call system_clock(now, rate)
+        if (mode == 1) then
+            fb_prof_seconds(slot) = fb_prof_seconds(slot) + real(now - last(slot), dp)/rate
+            fb_prof_calls(slot) = fb_prof_calls(slot) + 1
+        end if
+        last(slot) = now
+    end subroutine prof3
 
 end module milca_ideal_free_boundary
