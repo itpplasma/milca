@@ -200,6 +200,84 @@ element) is unstable: the energy collapses.
   of gates E6) and regions (one map per island or lobe, separatrices as
   aligned interfaces, label plan section 4a).
 
+## 5a. Separatrices, X-lines and the model per region
+
+Decision of 2026-11-22 (argued here; nothing of it is implemented or
+measured in the flux-map form).
+
+The singularity. Any field-line label is singular at a separatrix: a field
+line needs infinitely many toroidal turns to pass the X-line, so q → ∞
+like log|ψ − ψ_X|. For the flux map this means
+
+- θ* is constant along each separatrix branch away from the X-line and its
+  whole variation is squeezed into the neighbourhood of the X-line,
+- det ∇u → 0 like 1/log along the whole separatrix, while B (a diverging
+  profile times a vanishing determinant) and A stay smooth.
+
+It does not depend on the direction of the map: the inverse map of VMEC has
+the same singularity. Measured in the (χ, g) form
+([plan](eulerian-label-plan.md), E2a, E2b, E5u): B at order 1/2 near a
+separatrix on an unaligned mesh, order p on an aligned mesh graded towards
+it with fixed labels; Newton on that mesh only at a weak guide field.
+
+Why Grad–Shafranov has no such problem. Symmetry supplies (i) a surface
+label that is a component of A (ψ = R A_φ, smooth at a saddle) and (ii) the
+toroidal field as f(ψ)/R, without a field-line label. Without a continuous
+symmetry neither exists, and B·∇ has to be inverted somewhere:
+
+| Route | Where B·∇ is inverted | Cost |
+|---|---|---|
+| Ampère iterated with J from force balance (the Picard loop of GS in 3D; PIES, HINT) | magnetic differential equation for J_∥ | 1/(m ι − n) currents; not developed here |
+| A ∈ V1 with a label and B·∇χ = 0 as a constraint ([eulerian-3d.md](eulerian-3d.md)) | the constraint | locks (13 % in B at every mesh) |
+| Clebsch field, flux map | the representation | labels singular at separatrices |
+
+Region rule that follows.
+
+- Flux map: volumes of closed surfaces bounded by good surfaces. The core
+  map ends at a chosen surface s = s_i inside the separatrix, not on it;
+  an island interior likewise ends inside its own separatrix.
+- A-based model (NN2, Beltrami or vacuum): the separatrix layer, X-lines,
+  open field lines (scrape-off layer, private flux region) and chaotic
+  volumes, where B and A are smooth and labels are not. In 3D that layer is
+  chaotic anyway, so nested ideal surfaces up to the separatrix are not the
+  physics there.
+- Interface at s = s_i: B·n = 0 from both sides, continuity of the
+  tangential trace of A (fluxes), balance of p + B²/2, and a transport-flux
+  law where NN2 meets the map. Its position is an unknown; the mesh follows
+  it.
+- In axisymmetry the combination reduces to Grad–Shafranov. An
+  axisymmetric diverted tokamak is solved in the Grad–Shafranov lane (gate
+  A2a has two axes and an X-point); the flux map adds something there only
+  when q or ι is prescribed instead of f.
+- Kept as alternatives, not planned first: the aligned, graded mesh up to
+  the separatrix (E2b, fixed labels only); the analytic form of the map at
+  an X-line built into the discretisation (Reiman, Pomphrey and Boozer 1989,
+  cited in the label plan; untested).
+
+Why not A everywhere. That is the NN2 lane, a different physical model and
+not the same model in other variables:
+
+- B·∇p = 0 needs a closure: a constraint (locks), flat pressure per relaxed
+  region (the SPEC model) or strongly anisotropic transport (NN2);
+- profiles are outcomes of sources and transport, not inputs, so p(s) and
+  ι(s) of a VMEC deck cannot be posed one to one;
+- topology is not preserved: islands open where the model allows;
+- anisotropic transport on an unaligned mesh pollutes the perpendicular
+  balance, so alignment returns in another form (roadmap step 5);
+- no flux coordinates for kinetic and neoclassical consumers and no ideal δW
+  from the solve.
+
+The flux map gives exact surfaces, prescribed profiles, the ideal limit and
+flux coordinates where surfaces are good; NN2 is strong exactly where the
+map is singular. Which lane leads depends on the application: nested
+stellarator equilibria at VMEC quality need the map in 3D (F2); islands,
+X-lines and edges need NN2 with the map as its ideal core.
+
+Open: the coupling does not exist; the interface conditions above are to be
+derived from the variation of the shared interface (label plan, section 7);
+the choice of s_i and its effect on the solution; the state of NN2 against
+these needs has not been reviewed.
+
 ## 6. Open
 
 - Projection space in 3D. Candidate: B_h = Π_2(u_h*β), the 2-form space of

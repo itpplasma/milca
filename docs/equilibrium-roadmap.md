@@ -194,6 +194,18 @@ reference. Order of work ([flux-map.md](flux-map.md), section 5):
 6. **Coupled regions**: labels where surfaces survive, NN2 or Beltrami
    elsewhere, with physical jump and conservation conditions at the
    interfaces (island divertor, mixed topology).
+   *Region rule (2026-11-22, [flux-map.md](flux-map.md), section 5a):* the
+   flux map covers volumes of closed surfaces and ends at a good surface
+   inside every separatrix, because field-line labels are log-singular
+   there (det ∇u → 0 along the whole separatrix) while A is smooth; the
+   separatrix layer, X-lines, open field lines and chaotic volumes are
+   solved in A (NN2, Beltrami, vacuum). In axisymmetry this reduces to
+   Grad–Shafranov, which stays the lane for axisymmetric diverted
+   tokamaks. A everywhere is NN2, a different physical model (closure for
+   B·∇p = 0, profiles as outcomes, topology free), not a replacement of the
+   ideal lane. The lane that leads follows the application: nested
+   stellarator equilibria need F2; islands, X-lines and edges need NN2 with
+   the map as its ideal core. Nothing of the coupling exists yet.
 7. **Stability and reconstruction** on the same linearisations, keeping the
    ideal energy Hessian distinct from the dynamical linearisation of NN2.
 
