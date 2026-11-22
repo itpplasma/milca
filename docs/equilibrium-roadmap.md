@@ -139,11 +139,12 @@ Each step on cases that run in seconds, against analytic solutions first.
    even with g broken along the level set and the log slope factored out
    (2.2e-2 at 32 cells against 1.9e-3 aligned, the gap growing like
    h^(-1.3)). Field-line labels are log-singular at separatrices; B and A are
-   not. Rule: only codimension-2 lines (O and X lines) may be tracked, so
-   islands and separatrices go to the A representation (constrained A, NN2),
-   and the label lane stays in regions bounded by tracked surfaces. Gate C
-   decides whether the constrained A converges at order p across an
-   unaligned separatrix without locking.
+   not. This confirms the region design of the plan (section 4a, step 2):
+   a separatrix is a region interface of the mesh, aligned and graded
+   (E2b), with g cut there; it is not a level set crossed by one label field
+   on an unaligned mesh. (An earlier note here, that only codimension-2
+   lines may be tracked, contradicted step 2 and is withdrawn.) Gate C
+   still compares the constrained A on the same cases.
 4. **VMEC parity in the ideal lane.** Fixed boundary, then free boundary
    (E6 with the exterior map and coils from mgrid), prescribed ι or I,
    realistic pressure, stellarator geometry. Against VMEC2000, VMEC++, GVEC
@@ -161,8 +162,12 @@ Each step on cases that run in seconds, against analytic solutions first.
    them, as in VMEC, which also never sees islands; (b) the guide field:
    B_φ/B_pol ≈ 14 on QA, the obstruction of the E2 diagnosis above (energy
    runs from 0.24 to 0.38 against 0.2818 of VMEC). The Jacobian is exact
-   (finite differences to 1e-8). Until (b) is resolved, VMEC parity goes
-   through the A representation (gate C), not the labels.
+   (finite differences to 1e-8). (b) is the amplification of the label
+   error by (B_φ/B_pol)² (plan, section 4b), cured by order p ≥ 4 and
+   continuation in the guide field (E1: B_φ/B_pol ≈ 15 asymptotic on 2–4
+   cells at p = 4, ≈ 50 reached by continuation); next: QA with the recipe
+   of section 4b (p = 4, frames and adapted forms with a toroidal form along
+   the axis, one period, gauge by constraint, continuation).
 5. **NN2 on the shared ALE mesh**, with Winslow alignment against
    perpendicular pollution in anisotropic transport; existing 3D NN2 tests,
    then island formation and stochastic regions.

@@ -79,8 +79,15 @@ contains
     end subroutine clebsch_node_gradients
 
     subroutine clebsch_axisym_system(derham, quad, profiles, axis, chi, g, energy, &
-                                     gradient, hessian)
-        !! Unknowns ordered (chi(1:n0), g(1:n0)).
+                                     gradient, hessian, angle_shift, frame)
+        !! Unknowns ordered (chi(1:n0), g(1:n0)). With angle_shift (V0
+        !! coefficients of a single-valued psi) the winding form is
+        !! grad theta_X + grad psi_h: a closed form of the same class, chosen
+        !! near the straight-field-line angle so that g stays small (the
+        !! toroidal field then needs no cancellation between g and the form).
+        !! With frame (M, typically H^(1/2) of chi at X) the angle is atan2 of
+        !! u = M (x - X): at an elliptic axis it follows the straight-field-line
+        !! angle, so g has no O(F') jump at X.
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
         procedure(clebsch_profiles) :: profiles
@@ -88,8 +95,10 @@ contains
         real(dp), intent(out) :: energy
         real(dp), allocatable, intent(out) :: gradient(:)
         type(csr_t), intent(out) :: hessian
+        real(dp), intent(in), optional :: angle_shift(:), frame(2, 2)
         real(dp), allocatable :: v0(:, :, :), gn(:, :, :), du(:, :), vals(:)
         integer, allocatable :: d0(:), rows(:), cols(:), idx(:)
+        real(dp) :: uf(2)
         real(dp) :: s(2), wq, c, gc(2), gg(2), th(2), rho2, f(3), gp(3), pr(3), w, &
                     gu(5), h(15), hm(5, 5), jet(2, 6)
         real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
@@ -118,8 +127,14 @@ contains
                 c = dot_product(v0(1, :, q), chi(d0))
                 gc = matmul(gn(:, :, q), chi(d0))
                 gg = matmul(gn(:, :, q), g(d0))
-                rho2 = (s(1) - axis(1))**2 + (s(2) - axis(2))**2
-                th = [-(s(2) - axis(2)), s(1) - axis(1)]/rho2
+                if (present(frame)) then
+                    uf = matmul(frame, s - axis)
+                    th = matmul(transpose(frame), [-uf(2), uf(1)])/(uf(1)**2 + uf(2)**2)
+                else
+                    rho2 = (s(1) - axis(1))**2 + (s(2) - axis(2))**2
+                    th = [-(s(2) - axis(2)), s(1) - axis(1)]/rho2
+                end if
+                if (present(angle_shift)) th = th + matmul(gn(:, :, q), angle_shift(d0))
                 call profiles(c, f, gp, pr)
                 call clebsch_energy_axisym(s(1), c, gc(1), gc(2), gg(1), gg(2), th(1), th(2), &
                                            f(1), f(2), f(3), gp(1), gp(2), gp(3), pr(1), &
