@@ -21,16 +21,22 @@ edge iota, the axis distance and, for a wout, the largest distance of the
 s = 1 surface from the exact boundary.
 
 Results (beta 1.7 %, iota 0.39 to 0.28, 41 x 41 grid, 64 rings; the grid
-spacing does not change them):
+spacing does not change them; 8 threads, Apple M-class):
 
 | code | resolution | time | volume | axis | boundary |
 |---|---|---|---|---|---|
 | VMEC2000 | mpol 8, ns 64 | 0.48 s | 7.4e-4 | 3.4 mm | 4.0 mm |
 | VMEC2000 | mpol 12, ns 128 | 1.3 s | 3.6e-4 | 1.4 mm | 2.2 mm |
 | VMEC++ | mpol 8, ns 64 | 2.1 s | 7.4e-4 | 3.4 mm | 4.0 mm |
-| MILCA, vacuum bem | automatic | 11 s | 2.1e-2 | 41 mm | |
-| MILCA, vacuum shell | automatic | fails (status 6) | | | |
+| MILCA, vacuum bem | 16 boundary nodes | 4.2 s | 3.5e-4 | 0.8 mm | |
+| MILCA, vacuum bem | 32 boundary nodes | 20 s | 2.7e-4 | 0.5 mm | |
+| MILCA, fixed boundary on the exact D | automatic | 0.9 s | 6e-6 | 0.14 mm | |
 
-VMEC converges at first order in 1/ns. MILCA's axisymmetric BEM vacuum
-converges to a wrong state (its own mesh-error estimate does not fall);
-the shell vacuum does not converge at this beta. Both are open.
+VMEC converges at first order in 1/ns. MILCA's free boundary keeps the frozen
+field of its seed (the field-line labelling of the starting boundary): from
+the elliptic start it converged to a state 2.1 % off in volume and 4 cm off
+in the axis, independent of the mesh. It now seeds again from the solved
+boundary until wb and the axis stop changing (six seeds here). The shell
+vacuum does not converge on this case (open), and MILCA is still 3x slower
+than VMEC2000 at equal accuracy (the first solve from the elliptic seed is
+1.4 of the 4.2 s).

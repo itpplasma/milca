@@ -59,6 +59,11 @@ program nested_equilibrium
     real(dp) :: iota_tolerance, iota_error
     real(dp) :: observed(4), previous_observed(4)
     real(dp), allocatable :: boundary_input(:, :, :)
+    ! free boundary: seeds from the solved boundary (axisymmetric decks)
+    integer, parameter :: max_reseeds = 10, reseed_modes = 16
+    real(dp), parameter :: reseed_tolerance = 1e-6_dp
+    integer :: reseed_step
+    real(dp) :: reseed_move, reseed_change, reseed_seen(4), reseed_last(4)
     type(ideal_map_t) :: previous_map
     real(dp), allocatable :: previous_seed(:, :, :)
     real(dp) :: phiedge, tolerance
@@ -214,6 +219,24 @@ program nested_equilibrium
     if (free_boundary) then
         call free_boundary_setup()
         call fb_level(boundary_nodes, .true.)
+        ! the frozen field carries the seed's labelling: seed again from the
+        ! solved boundary until it stops moving (axisymmetric decks)
+        if (ntor == 0) then
+            call observe(reseed_seen)
+            do reseed_step = 1, max_reseeds
+                call reseed_from_solution(reseed_move)
+                if (reseed_move < reseed_tolerance) exit
+                call fb_level(boundary_nodes, .true.)
+                reseed_last = reseed_seen
+                call observe(reseed_seen)
+                ! wb relative, the axis relative to the minor radius
+                reseed_change = max(abs(reseed_seen(1)/reseed_last(1) - 1), &
+                                    abs(reseed_seen(2) - reseed_last(2)))
+                print '(a,i2,a,es10.3,a,es10.3)', 'reseed', reseed_step, &
+                    ': boundary moved', reseed_move, ', wb and axis changed', reseed_change
+                if (reseed_change < reseed_tolerance) exit
+            end do
+        end if
     else
         call mesh_ladder()
     end if
@@ -1108,6 +1131,108 @@ contains
         change = max(abs(observed(1)/previous_observed(1) - 1), &
             maxval(abs(observed(2:) - previous_observed(2:))))
     end function
+
+    subroutine reseed_from_solution(move)
+        !! The solved plasma boundary (its boundary nodes) as the new seed:
+        !! least-squares Fourier series of R and Z in the geometric angle about
+        !! the nodes' centroid (cosines of R, sines of Z; all four when the
+        !! deck is up-down asymmetric), at most reseed_modes and half the
+        !! nodes. move: the largest change of a node's seed position against
+        !! the previous seed, relative to the minor radius.
+        real(dp), intent(out) :: move
+        real(dp), allocatable :: x(:, :), th(:), a(:, :), b(:, :), sv(:), work(:), old(:, :)
+        real(dp) :: c(2), radius, value
+        integer :: nb, i, m, mm, ncol, rank, info, lwork, a_node
+        logical :: asym
+        interface
+            subroutine dgelss(m, n, nrhs, a, lda, b, ldb, s, rcond, rank, work, lwork, info)
+                import :: dp
+                integer, intent(in) :: m, n, nrhs, lda, ldb, lwork
+                real(dp), intent(inout) :: a(lda, *), b(ldb, *)
+                real(dp), intent(out) :: s(*), work(*)
+                real(dp), intent(in) :: rcond
+                integer, intent(out) :: rank, info
+            end subroutine dgelss
+        end interface
+        nb = count(fb%plasma%boundary)
+        allocate (x(2, nb), th(nb))
+        i = 0
+        do a_node = 1, fb%plasma%nodes
+            if (.not. fb%plasma%boundary(a_node)) cycle
+            i = i + 1
+            x(:, i) = fb%plasma%x(1:2, 1, a_node)
+        end do
+        c = sum(x, 2)/nb
+        th = atan2(x(2, :) - c(2), x(1, :) - c(1))
+        radius = sqrt(maxval(sum((x - spread(c, 2, nb))**2, 1)))
+        asym = any(abs(boundary_input(2:3, :, :)) > 0)
+        mm = min(reseed_modes, nb/2 - 1)
+        ncol = mm + 1
+        if (asym) ncol = 2*mm + 1
+        allocate (a(nb, ncol), b(max(nb, ncol), 2), sv(ncol))
+        do i = 1, nb
+            a(i, 1:mm + 1) = cos([(m*th(i), m=0, mm)])
+            if (asym) a(i, mm + 2:) = sin([(m*th(i), m=1, mm)])
+        end do
+        b(:nb, 1) = x(1, :)
+        b(:nb, 2) = x(2, :)
+        ! R in cosines (and sines), Z in sines (and cosines): two fits
+        allocate (old(2, nb))
+        do i = 1, nb
+            old(:, i) = seed_point(th(i))
+        end do
+        lwork = -1
+        allocate (work(1))
+        call dgelss(nb, ncol, 1, a, nb, b(:, 1), max(nb, ncol), sv, -1.0_dp, rank, work, &
+                    lwork, info)
+        lwork = int(work(1))
+        deallocate (work)
+        allocate (work(lwork))
+        block
+            real(dp), allocatable :: ar(:, :), az(:, :), bz(:)
+            ar = a
+            call dgelss(nb, ncol, 1, ar, nb, b(:, 1), max(nb, ncol), sv, -1.0_dp, rank, &
+                        work, lwork, info)
+            ! Z: sines first (m = 1..mm), then cosines when asymmetric
+            allocate (az(nb, ncol))
+            do i = 1, nb
+                az(i, 1) = 0
+                az(i, 1:mm) = sin([(m*th(i), m=1, mm)])
+                if (asym) az(i, mm + 1:) = cos([(m*th(i), m=0, mm)])
+            end do
+            bz = b(:, 2)
+            call dgelss(nb, merge(ncol, mm, asym), 1, az, nb, bz, max(nb, ncol), sv, &
+                        -1.0_dp, rank, work, lwork, info)
+            deallocate (boundary_input)
+            mpol = mm
+            allocate (boundary_input(4, -ntor:ntor, 0:mpol), source=0.0_dp)
+            boundary_input(1, 0, 0:mm) = b(1:mm + 1, 1)
+            boundary_input(4, 0, 1:mm) = bz(1:mm)
+            if (asym) then
+                boundary_input(2, 0, 1:mm) = b(mm + 2:2*mm + 1, 1)
+                boundary_input(3, 0, 0:mm) = bz(mm + 1:2*mm + 1)
+            end if
+        end block
+        call set_toroidal_level(ntor_level)
+        move = 0
+        do i = 1, nb
+            value = norm2(seed_point(th(i)) - old(:, i))
+            move = max(move, value)
+        end do
+        move = move/radius
+    end subroutine reseed_from_solution
+
+    function seed_point(theta) result(p)
+        !! (R, Z) of the present seed boundary at the angle theta (n = 0).
+        real(dp), intent(in) :: theta
+        real(dp) :: p(2)
+        integer :: m
+        p = 0
+        do m = 0, ubound(boundary_input, 3)
+            p(1) = p(1) + boundary_input(1, 0, m)*cos(m*theta) + boundary_input(2, 0, m)*sin(m*theta)
+            p(2) = p(2) + boundary_input(3, 0, m)*cos(m*theta) + boundary_input(4, 0, m)*sin(m*theta)
+        end do
+    end function seed_point
 
     subroutine set_toroidal_level(modes)
         ! boundary padded with zero coefficients up to the map's modes
