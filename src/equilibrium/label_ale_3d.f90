@@ -62,6 +62,10 @@ module milca_label_ale_3d
         ! low magnetic shear leaves near-null label modes (m iota ~ n)
         real(dp) :: levenberg = 0
         logical :: use_levenberg = .false. ! opt-in, capped at 1e-4
+        ! gauge g -> g + k(chi) removed by constraints (plan, section 4):
+        ! sum_i g_i P_k(chi_i) = 0, k < gauge_k, Legendre P_k on [0, 1];
+        ! multipliers in mu(nt + 1:nt + gauge_k). 0: the ridge instead.
+        integer :: gauge_k = 0
         integer :: passes = 0, newton_total = 0
         real(dp), allocatable :: history(:)
         logical :: verbose = .false.
@@ -92,7 +96,8 @@ contains
         if (s%verbose) print '(a,es10.2)', '  max |core vertex - centre|', &
             maxval(norm2(s%anchor - centre, 1))
         s%x = s%anchor
-        if (.not. allocated(s%mu)) allocate (s%mu(s%nt), source=0.0_dp)
+        if (allocated(s%mu)) deallocate (s%mu)
+        allocate (s%mu(s%nt + s%gauge_k), source=0.0_dp)
         if (.not. allocated(s%frames)) then
             allocate (s%frames(2, 2, s%nt), source=0.0_dp)
             do k = 1, s%nt
@@ -328,10 +333,60 @@ contains
         if (.not. allocated(s%g)) allocate (s%g(ntot), source=0.0_dp)
         call clebsch_3d_system(s%derham, s%aquad, s%nt, profiles, s%x(:, 1), s%chi, s%g, energy, &
                                grad, hessian, s%x, node_coordinates(s, s%x), s%frames)
-        call add_ridge(hessian, ntot, s%ridge)
-        allocate (delta(2*ntot))
-        call eu_constrained_solve(hessian, -grad, [(i, i=1, ntot)], 0*s%chi, delta, status)
-        if (status == 0) s%g = s%g + delta(ntot + 1:)
+        if (s%gauge_k == 0) then
+            call add_ridge(hessian, ntot, s%ridge)
+            allocate (delta(2*ntot))
+            call eu_constrained_solve(hessian, -grad, [(i, i=1, ntot)], 0*s%chi, delta, status)
+            if (status == 0) s%g = s%g + delta(ntot + 1:)
+            return
+        end if
+        ! [H C; C^T 0] with the gauge rows C(i, k) = P_k(chi_i) on g
+        block
+            integer, allocatable :: rows(:), cols(:)
+            real(dp), allocatable :: vals(:), rhs(:)
+            real(dp) :: pk(s%gauge_k), dpk(s%gauge_k)
+            type(csc_t) :: m
+            type(csr_t) :: a
+            type(fortsparse_status_t) :: info
+            integer :: nz, p, kk, n
+            n = 2*ntot + s%gauge_k
+            allocate (rows(size(hessian%val) + 2*ntot*s%gauge_k + s%gauge_k), &
+                      cols(size(hessian%val) + 2*ntot*s%gauge_k + s%gauge_k), &
+                      vals(size(hessian%val) + 2*ntot*s%gauge_k + s%gauge_k))
+            nz = 0
+            do i = 1, 2*ntot
+                do p = hessian%row_ptr(i), hessian%row_ptr(i + 1) - 1
+                    nz = nz + 1
+                    rows(nz) = i; cols(nz) = hessian%col(p); vals(nz) = hessian%val(p)
+                end do
+            end do
+            allocate (rhs(n), source=0.0_dp)
+            rhs(1:2*ntot) = -grad
+            do i = 1, ntot
+                call legendre01(s%chi(i), s%gauge_k, pk, dpk)
+                do kk = 1, s%gauge_k
+                    nz = nz + 1
+                    rows(nz) = ntot + i; cols(nz) = 2*ntot + kk; vals(nz) = pk(kk)
+                    nz = nz + 1
+                    rows(nz) = 2*ntot + kk; cols(nz) = ntot + i; vals(nz) = pk(kk)
+                    rhs(2*ntot + kk) = rhs(2*ntot + kk) - pk(kk)*s%g(i)
+                end do
+            end do
+            do kk = 1, s%gauge_k
+                nz = nz + 1
+                rows(nz) = 2*ntot + kk; cols(nz) = 2*ntot + kk; vals(nz) = 0
+            end do
+            call csc_from_triplet(n, n, cols(:nz), rows(:nz), vals(:nz), m, info)
+            if (info%code /= 0) error stop 'label3d: g gauge triplets'
+            a%nrow = n
+            a%ncol = n
+            a%row_ptr = m%col_ptr
+            a%col = m%row_idx
+            a%val = m%val
+            allocate (delta(n))
+            call eu_constrained_solve(a, rhs, [(i, i=1, ntot)], 0*s%chi, delta, status)
+            if (status == 0) s%g = s%g + delta(ntot + 1:2*ntot)
+        end block
     end subroutine label3d_solve_g
 
     real(dp) function label3d_energy(s, profiles) result(energy)
@@ -386,7 +441,7 @@ contains
                                    grad, plane_axis=x, plane_nodes=node_coordinates(s, x), &
                                    plane_frames=s%frames)
         end if
-        allocate (r(nf + 3*s%nt))
+        allocate (r(nf + 3*s%nt + s%gauge_k))
         r(1:nf) = grad
         do k = 1, s%nt
             associate (chik => chi((k - 1)*n0 + 1:k*n0))
@@ -397,8 +452,39 @@ contains
                 r(nf + 2*s%nt + k) = dot_product(s%nrow, chik)
             end associate
         end do
+        if (s%gauge_k > 0) then
+            block
+                real(dp) :: pk(s%gauge_k), dpk(s%gauge_k)
+                do i = 1, ntot
+                    call legendre01(chi(i), s%gauge_k, pk, dpk)
+                    r(ntot + i) = r(ntot + i) + dot_product(pk, mu(s%nt + 1:))
+                    r(nf + 3*s%nt + 1:) = r(nf + 3*s%nt + 1:) + pk*g(i)
+                end do
+            end block
+        end if
         r(s%wall) = 0
     end subroutine residual
+
+    pure subroutine legendre01(x, k, p, dp_)
+        !! Legendre polynomials P_0..P_(k-1) of 2x - 1 and their x derivatives.
+        real(dp), intent(in) :: x
+        integer, intent(in) :: k
+        real(dp), intent(out) :: p(k), dp_(k)
+        real(dp) :: t
+        integer :: j
+        t = 2*x - 1
+        p(1) = 1
+        dp_(1) = 0
+        if (k >= 2) then
+            p(2) = t
+            dp_(2) = 2
+        end if
+        do j = 2, k - 1
+            ! (j) P_j = (2j - 1) t P_(j-1) - (j - 1) P_(j-2), index shifted by 1
+            p(j + 1) = ((2*j - 1)*t*p(j) - (j - 1)*p(j - 1))/j
+            dp_(j + 1) = ((2*j - 1)*(2*p(j) + t*dp_(j)) - (j - 1)*dp_(j - 1))/j
+        end do
+    end subroutine legendre01
 
     subroutine label3d_newton(s, profiles, tolerance, max_steps, steps, status)
         !! Newton on (chi, g, X_k, mu_k) with the cores following X_k. Status
@@ -437,11 +523,11 @@ contains
                 exit
             end if
             if (it > max_steps) exit
-            call add_ridge(hessian, ntot, s%newton_ridge)
+            if (s%gauge_k == 0) call add_ridge(hessian, ntot, s%newton_ridge)
             if (s%levenberg > 0) call shift_chi(hessian, ntot, s%levenberg)
             call newton_matrix(s, hessian, dgdx, jac_t)
             if (it == 1 .and. jacobian_check_on()) call jacobian_check(s, profiles, jac_t)
-            allocate (delta(nf + 3*nt))
+            allocate (delta(nf + 3*nt + s%gauge_k))
             call eu_constrained_solve(jac_t, -r, s%wall, 0*s%chi(s%wall), delta, st)
             if (st /= 0) then
                 status = 1
@@ -635,7 +721,11 @@ contains
         x = s%x
         s%samples = samples
         call build_meshes(s, x, status)
-        if (status /= 0) return
+        if (status /= 0) then
+            if (s%verbose) print '(a,i0)', '  set_walls: meshes with the cores on X failed: ', &
+                status
+            return
+        end if
         s%x = s%anchor
     end subroutine label3d_set_walls
 
@@ -760,7 +850,7 @@ contains
         nt = s%nt
         ntot = n0*nt
         nf = 2*ntot
-        allocate (v(nf + 3*nt), jv(nf + 3*nt))
+        allocate (v(nf + 3*nt + s%gauge_k), jv(nf + 3*nt + s%gauge_k))
         do blk = 1, 4
             select case (blk)
             case (1)
@@ -770,7 +860,7 @@ contains
             case (3)
                 lo = nf + 1; hi = nf + 2*nt
             case default
-                lo = nf + 2*nt + 1; hi = nf + 3*nt
+                lo = nf + 2*nt + 1; hi = nf + 3*nt + s%gauge_k
             end select
             v = 0
             do j = lo, hi
@@ -814,7 +904,8 @@ contains
         nt = s%nt
         nf = 2*n0*nt
         nx = 2*nt
-        cap = size(hessian%val) + nx*size(dgdx, 1) + 6*n0*nt + 4*nt
+        cap = size(hessian%val) + nx*size(dgdx, 1) + 6*n0*nt + 4*nt + &
+              s%gauge_k*(3*n0*nt + 1) + n0*nt
         allocate (rows(cap), cols(cap), vals(cap))
         nz = 0
         do i = 1, nf
@@ -841,10 +932,30 @@ contains
             end do
             call add(nf + nx + k, nf + nx + k, 0.0_dp)
         end do
-        call csc_from_triplet(nf + 3*nt, nf + 3*nt, rows(:nz), cols(:nz), vals(:nz), m, info)
+        if (s%gauge_k > 0) then
+            block
+                real(dp) :: pk(s%gauge_k), dpk(s%gauge_k)
+                integer :: kk, ntot
+                ntot = n0*nt
+                do i = 1, ntot
+                    call legendre01(s%chi(i), s%gauge_k, pk, dpk)
+                    do kk = 1, s%gauge_k
+                        call add(ntot + i, nf + 3*nt + kk, pk(kk))
+                        call add(nf + 3*nt + kk, ntot + i, pk(kk))
+                        call add(nf + 3*nt + kk, i, dpk(kk)*s%g(i))
+                    end do
+                    call add(ntot + i, i, dot_product(dpk, s%mu(nt + 1:)))
+                end do
+                do kk = 1, s%gauge_k
+                    call add(nf + 3*nt + kk, nf + 3*nt + kk, 0.0_dp)
+                end do
+            end block
+        end if
+        call csc_from_triplet(nf + 3*nt + s%gauge_k, nf + 3*nt + s%gauge_k, rows(:nz), cols(:nz), &
+                              vals(:nz), m, info)
         if (info%code /= 0) error stop 'label3d: Newton triplets'
-        jac_t%nrow = nf + 3*nt
-        jac_t%ncol = nf + 3*nt
+        jac_t%nrow = nf + 3*nt + s%gauge_k
+        jac_t%ncol = nf + 3*nt + s%gauge_k
         jac_t%row_ptr = m%col_ptr
         jac_t%col = m%row_idx
         jac_t%val = m%val

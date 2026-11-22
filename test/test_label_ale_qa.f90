@@ -11,7 +11,8 @@ program test_label_ale_qa
     !! to the output directory for benchmarks/label-qa/compare.py.
     !!
     !! Arguments: deck, output directory, cells per block side (2), planes
-    !! per period (21), fs (1), gs (1), continuation steps in the shaping (1: none).
+    !! per period (21), fs (1), gs (1), continuation steps in the shaping (1: none),
+    !! added shear (0), degree (2), iota stages (1: none; k: iota 2^(k-1) down to 1).
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_equilibrium_import, only: imported_equilibrium_t, IMPORT_OK
     use milca_import_vmec, only: import_vmec
@@ -28,7 +29,10 @@ program test_label_ale_qa
     real(dp) :: fs = 1, gs = 1, phiedge, t0, t1, w0, energy, shaping = 1
     real(dp), allocatable :: steps_lambda(:)
     integer :: istep, nsteps = 1
-    real(dp) :: extra_shear = 0
+    real(dp) :: extra_shear = 0, iota_scale = 1
+    integer :: degree = 2, iota_stages = 1, ist
+    real(dp) :: newton_ridge = 1e-8_dp
+    integer :: gauge_k = 0
     real(dp), allocatable :: iota_c(:), samples(:, :, :), centre(:, :)
     real(dp) :: axis(2), rz(2, nray, 3), levels(3) = [0.25_dp, 0.5_dp, 1.0_dp], phi
     character(4), parameter :: tags(3) = ['0.25', '0.50', '1.00']
@@ -57,6 +61,22 @@ program test_label_ale_qa
         call get_command_argument(8, arg)
         read (arg, *) extra_shear
     end if
+    if (command_argument_count() >= 9) then
+        call get_command_argument(9, arg)
+        read (arg, *) degree
+    end if
+    if (command_argument_count() >= 10) then
+        call get_command_argument(10, arg)
+        read (arg, *) iota_stages
+    end if
+    if (command_argument_count() >= 11) then
+        call get_command_argument(11, arg)
+        read (arg, *) newton_ridge
+    end if
+    if (command_argument_count() >= 12) then
+        call get_command_argument(12, arg)
+        read (arg, *) gauge_k
+    end if
     allocate (steps_lambda(nsteps))
     steps_lambda = [(real(istep, dp)/nsteps, istep=1, nsteps)]
     if (nsteps > 1) steps_lambda = [(real(istep - 1, dp)/(nsteps - 1), istep=1, nsteps)]
@@ -77,28 +97,38 @@ program test_label_ale_qa
     allocate (samples(2, nsamples, nt), centre(2, nt))
     ! continuation in the shaping: boundary = axisymmetric ellipse (m <= 1,
     ! n = 0) + lambda (rest), lambda over steps_lambda
-    do istep = 1, nsteps
+    ! continuation: shaping at the largest rotational transform (iota scaled
+    ! by 2^(iota_stages - 1), B_phi/B_pol smaller), then iota down to the
+    ! deck's; g restarts from 0 at every stage (no gauge leftovers)
+    do ist = 1, nsteps + iota_stages - 1
+        istep = min(ist, nsteps)
         shaping = steps_lambda(istep)
+        iota_scale = 2.0_dp**max(0, iota_stages - 1 - max(0, ist - nsteps))
         do k = 1, nt
             phi = 2*pi*(k - 1)/(nt*eq%nfp)
             call plane_curve(phi, samples(:, :, k), centre(:, k))
         end do
-        if (istep == 1) then
+        if (ist == 1) then
+            s%degree = degree
+            s%newton_ridge = newton_ridge
+            s%gauge_k = gauge_k
             call label3d_init(s, samples, centre, cells, st)
             if (st /= 0) error stop 'meshes'
             call label3d_initial_labels(s)
-        else
+        else if (ist <= nsteps) then
             call label3d_set_walls(s, samples, st)
             if (st /= 0) error stop 'continuation meshes'
         end if
         call label3d_frames(s)
+        if (allocated(s%g)) s%g = 0
         call label3d_solve_g(s, profiles, st)
         if (st /= 0) error stop 'initial g'
-        if (istep == 1) w0 = label3d_energy(s, profiles)
+        if (ist == 1) w0 = label3d_energy(s, profiles)
         s%verbose = .true.
         call label3d_solve(s, profiles, 1e-9_dp, 0.05_dp, 6, 16, st)
-        print '(a,f6.3,a,i0,a,i0,a,es14.7)', 'shaping', shaping, '  status ', st, '  Newton ', &
-            s%newton_total, '  W', label3d_energy(s, profiles)
+        print '(a,f6.3,a,f6.2,a,i0,a,i0,a,es14.7)', 'shaping', shaping, '  iota scale', &
+            iota_scale, '  status ', st, '  Newton ', s%newton_total, '  W', &
+            label3d_energy(s, profiles)
         if (st /= 0) exit
     end do
     energy = label3d_energy(s, profiles)
@@ -215,7 +245,7 @@ contains
         io(1) = io(1) + extra_shear*chi
         io(2) = io(2) + extra_shear
         f = [fs*(-phiedge/(2*pi)), 0.0_dp, 0.0_dp]
-        g = gs*(-phiedge/(2*pi))*io
+        g = gs*(-phiedge/(2*pi))*io*iota_scale
         p = 0
     end subroutine profiles
 
