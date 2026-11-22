@@ -12,7 +12,7 @@ program gen_eulerian_clebsch
     ! derivatives (fpp, fppp, gpp, gppp, pp, ppp), so d/dchi is the chain
     ! rule below. Outputs: w, its gradient in u and the upper triangle of the
     ! Hessian.
-    use fortsym_expr, only: expr_t, sym, operator(+), operator(-), &
+    use fortsym_expr, only: expr_t, sym, pi_expr, operator(+), operator(-), &
         operator(*), operator(/), operator(**)
     use fortsym_diff, only: diff
     use fortsym_subs, only: subs
@@ -74,9 +74,11 @@ program gen_eulerian_clebsch
         'fppp', 'gp  ', 'gpp ', 'gppp', 'pres', 'pp  ', 'ppp '], &
         ['w               ', gnames, hnames], [density, gradient, hessian])
     call emit_3d()
+    call emit_3d_ref()
+    call emit_shell_ref()
     call w%line('end module milca_eulerian_clebsch_leaves')
     call w%close()
-    print '(a)', '[V] FortSym tangency (2D, 3D), g gradient, Hessian symmetry and the 3D reduction proved; Clebsch leaves generated'
+    print '(a)', '[V] FortSym tangency (2D, 3D, reference), g gradient, Hessian symmetry, the 3D reduction and the identity maps proved; Clebsch and shell leaves generated'
 
 contains
 
@@ -130,6 +132,196 @@ contains
             ['w               ', g7, h7], [dens, grad7, hess7])
 
     end subroutine emit_3d
+
+    subroutine emit_3d_ref()
+        !! The 3D density in reference coordinates of a moving section (E6,
+        !! analytic shape derivatives): per unit reference area ds0 and unit t
+        !! (phi = 2 pi t), w_ref = 2 pi det(F) w with w the density of
+        !! emit_3d. The field enters through mesh-independent locals: c, its
+        !! reference gradient (a1, a2) = grad_s0 c and its nodal t derivative
+        !! ct, likewise g (b1, b2, gt). The section map at the point gives s,
+        !! F = ds/ds0 (f_ij = ds_i/ds0_j) and the mesh velocity v = ds/dt:
+        !! grad_s c = F^-T (a1, a2), (1/R) d_phi c = (ct - v.grad_s c)/(2 pi R)
+        !! at fixed (R, Z). The winding form about the axis X(t) in the frame
+        !! M(t): u = M (s - X), theta = atan2(u), grad theta = M^T (-u2, u1)/|u|^2
+        !! and (1/R) d_phi theta = (u x u_t)/(|u|^2 2 pi R) with u_t = M_t (s - X)
+        !! - M X_t. Outputs: w_ref, its gradient in the field locals l =
+        !! (c, a1, a2, ct, b1, b2, gt), their Hessian (upper triangle) and the
+        !! mixed derivatives d^2 w_ref/(dl dq) in the geometry q = (s1, s2, f11,
+        !! f21, f12, f22, v1, v2, x1, x2, xd1, xd2): the residual and its
+        !! derivatives with respect to the nodes and the axis curve.
+        type(expr_t) :: a1, a2, ct, b1, gt, s1, s2, f11, f21, f12, f22, v1, v2, x1, x2, &
+            xd1, xd2, m11, m21, m12, m22, md11, md21, md12, md22, det, two_pi
+        type(expr_t) :: gcv(3), ggv(3), hv(3), gphi(3), bv(3), w3, wref, rt1, rt2, uu1, uu2, &
+            ud1, ud2, rho2, l(7), q(12), grad(7), hff(28), hfg(84), w3sub, wid
+        character(16) :: gn(7), hn(28), mn(84)
+        character(4), parameter :: ln(7) = ['c   ', 'a1  ', 'a2  ', 'ct  ', 'b1  ', 'b2  ', &
+                                            'gt  ']
+        character(4), parameter :: qn(12) = ['s1  ', 's2  ', 'f11 ', 'f21 ', 'f12 ', 'f22 ', &
+                                             'v1  ', 'v2  ', 'x1  ', 'x2  ', 'xd1 ', 'xd2 ']
+        integer :: a, b2i, m
+
+        two_pi = 2*pi_expr()
+        a1 = sym('a1'); a2 = sym('a2'); ct = sym('ct')
+        b1 = sym('b1')
+        gt = sym('gt')
+        s1 = sym('s1'); s2 = sym('s2')
+        f11 = sym('f11'); f21 = sym('f21'); f12 = sym('f12'); f22 = sym('f22')
+        v1 = sym('v1'); v2 = sym('v2'); x1 = sym('x1'); x2 = sym('x2')
+        xd1 = sym('xd1'); xd2 = sym('xd2')
+        m11 = sym('m11'); m21 = sym('m21'); m12 = sym('m12'); m22 = sym('m22')
+        md11 = sym('md11'); md21 = sym('md21'); md12 = sym('md12'); md22 = sym('md22')
+        det = f11*f22 - f12*f21
+        gcv(1) = (f22*a1 - f21*a2)/det
+        gcv(3) = (f11*a2 - f12*a1)/det
+        gcv(2) = (ct - v1*gcv(1) - v2*gcv(3))/(two_pi*s1)
+        ggv(1) = (f22*b1 - f21*sym('b2'))/det
+        ggv(3) = (f11*sym('b2') - f12*b1)/det
+        ggv(2) = (gt - v1*ggv(1) - v2*ggv(3))/(two_pi*s1)
+        rt1 = s1 - x1
+        rt2 = s2 - x2
+        uu1 = m11*rt1 + m12*rt2
+        uu2 = m21*rt1 + m22*rt2
+        ud1 = md11*rt1 + md12*rt2 - (m11*xd1 + m12*xd2)
+        ud2 = md21*rt1 + md22*rt2 - (m21*xd1 + m22*xd2)
+        rho2 = uu1**2 + uu2**2
+        hv(1) = (m11*(-uu2) + m21*uu1)/rho2
+        hv(3) = (m12*(-uu2) + m22*uu1)/rho2
+        hv(2) = (uu1*ud2 - uu2*ud1)/(rho2*two_pi*s1)
+        gphi = [0*s1, 1/s1, 0*s1]
+        do a = 1, 3
+            bv(a) = cross3e(ggv, gcv, a) + fp*cross3e(gcv, hv, a) + gp*cross3e(gcv, gphi, a)
+        end do
+        w3 = s1*(bv(1)**2 + bv(2)**2 + bv(3)**2)/2 - s1*pres
+        wref = two_pi*det*w3
+        ! B is tangent to the label surfaces in reference form as well
+        proof = engine%zero_test(bv(1)*gcv(1) + bv(2)*gcv(2) + bv(3)*gcv(3))
+        if (proof%verdict /= VERDICT_TRUE) error stop '3D reference tangency unproved'
+        ! the identity map (F = I, v = 0) gives 2 pi times the density of
+        ! emit_3d with c_r = a1, c_z = a2, c_p = ct/(2 pi R) and the winding form
+        w3sub = subs(subs(subs(subs(subs(subs(w3, f11, 1 + 0*s1), f22, 1 + 0*s1), f12, 0*s1), &
+                               f21, 0*s1), v1, 0*s1), v2, 0*s1)
+        wid = subs(subs(subs(subs(subs(subs(wref, f11, 1 + 0*s1), f22, 1 + 0*s1), f12, 0*s1), &
+                              f21, 0*s1), v1, 0*s1), v2, 0*s1)
+        proof = engine%zero_test(wid - two_pi*w3sub)
+        if (proof%verdict /= VERDICT_TRUE) error stop '3D reference identity map unproved'
+        l = [c, a1, a2, ct, b1, sym('b2'), gt]
+        q = [s1, s2, f11, f21, f12, f22, v1, v2, x1, x2, xd1, xd2]
+        do a = 1, 7
+            grad(a) = deriv_l(wref, l, a)
+            gn(a) = 'w_'//trim(ln(a))
+        end do
+        m = 0
+        do a = 1, 7
+            do b2i = a, 7
+                m = m + 1
+                hff(m) = deriv_l(grad(a), l, b2i)
+                hn(m) = 'h_'//trim(ln(a))//'_'//trim(ln(b2i))
+            end do
+        end do
+        m = 0
+        do a = 1, 7
+            do b2i = 1, 12
+                m = m + 1
+                hfg(m) = diff(grad(a), q(b2i))
+                mn(m) = 'm_'//trim(ln(a))//'_'//trim(qn(b2i))
+            end do
+        end do
+        call w%emit('clebsch_energy_3d_ref', &
+            ['c   ', 'a1  ', 'a2  ', 'ct  ', 'b1  ', 'b2  ', 'gt  ', 's1  ', 's2  ', 'f11 ', &
+            'f21 ', 'f12 ', 'f22 ', 'v1  ', 'v2  ', 'x1  ', 'x2  ', 'xd1 ', 'xd2 ', 'm11 ', &
+            'm21 ', 'm12 ', 'm22 ', 'md11', 'md21', 'md12', 'md22', 'fp  ', 'fpp ', 'fppp', &
+            'gp  ', 'gpp ', 'gppp', 'pres', 'pp  ', 'ppp '], &
+            ['w               ', gn, hn, mn], [wref, grad, hff, hfg])
+    end subroutine emit_3d_ref
+
+    subroutine emit_shell_ref()
+        !! The vacuum shell of the free boundary (E6) in reference
+        !! coordinates: per unit reference area and unit t, w = 2 pi det(F) R
+        !! |B + grad Phi|^2/2 with the source field B = (b_r, b_p, b_z) at the
+        !! point (coils, passive currents, the plasma-current filament) and
+        !! grad Phi from the mesh-independent locals of Phi: reference gradient
+        !! (a1, a2) and nodal t derivative ct, as in emit_3d_ref. Outputs: w,
+        !! its gradient in (a1, a2, ct), their Hessian, and the mixed
+        !! derivatives in the geometry (s1, s2, f11, f21, f12, f22, v1, v2) and
+        !! in the source field (b_r, b_p, b_z); the shape derivative of the
+        !! residual is the geometry part plus the source part times grad B.
+        type(expr_t) :: a1, a2, ct, s1, s2, f11, f21, f12, f22, v1, v2, br, bp, bz, det, &
+            two_pi, gpv(3), bt(3), wsh, l(3), q(11), grad(3), hll(6), hlq(33)
+        character(16) :: gn(3), hn(6), mn(33)
+        character(4), parameter :: ln(3) = ['a1  ', 'a2  ', 'ct  ']
+        character(4), parameter :: qn(11) = ['s1  ', 's2  ', 'f11 ', 'f21 ', 'f12 ', 'f22 ', &
+                                             'v1  ', 'v2  ', 'b_r ', 'b_p ', 'b_z ']
+        integer :: a, b, m
+
+        two_pi = 2*pi_expr()
+        a1 = sym('a1'); a2 = sym('a2'); ct = sym('ct')
+        s1 = sym('s1'); s2 = sym('s2')
+        f11 = sym('f11'); f21 = sym('f21'); f12 = sym('f12'); f22 = sym('f22')
+        v1 = sym('v1'); v2 = sym('v2')
+        br = sym('b_r'); bp = sym('b_p'); bz = sym('b_z')
+        det = f11*f22 - f12*f21
+        gpv(1) = (f22*a1 - f21*a2)/det
+        gpv(3) = (f11*a2 - f12*a1)/det
+        gpv(2) = (ct - v1*gpv(1) - v2*gpv(3))/(two_pi*s1)
+        bt(1) = br + gpv(1)
+        bt(2) = bp + gpv(2)
+        bt(3) = bz + gpv(3)
+        wsh = two_pi*det*s1*(bt(1)**2 + bt(2)**2 + bt(3)**2)/2
+        ! the identity map gives 2 pi R |B + (a1, ct/(2 pi R), a2)|^2/2
+        proof = engine%zero_test(subs(subs(subs(subs(subs(subs(wsh, f11, 1 + 0*s1), f22, &
+            1 + 0*s1), f12, 0*s1), f21, 0*s1), v1, 0*s1), v2, 0*s1) - two_pi*s1* &
+            ((br + a1)**2 + (bp + ct/(two_pi*s1))**2 + (bz + a2)**2)/2)
+        if (proof%verdict /= VERDICT_TRUE) error stop 'shell identity map unproved'
+        l = [a1, a2, ct]
+        q = [s1, s2, f11, f21, f12, f22, v1, v2, br, bp, bz]
+        do a = 1, 3
+            grad(a) = diff(wsh, l(a))
+            gn(a) = 'w_'//trim(ln(a))
+        end do
+        m = 0
+        do a = 1, 3
+            do b = a, 3
+                m = m + 1
+                hll(m) = diff(grad(a), l(b))
+                hn(m) = 'h_'//trim(ln(a))//'_'//trim(ln(b))
+            end do
+        end do
+        m = 0
+        do a = 1, 3
+            do b = 1, 11
+                m = m + 1
+                hlq(m) = diff(grad(a), q(b))
+                mn(m) = 'm_'//trim(ln(a))//'_'//trim(qn(b))
+            end do
+        end do
+        call w%emit('shell_energy_ref', &
+            ['a1  ', 'a2  ', 'ct  ', 's1  ', 's2  ', 'f11 ', 'f21 ', 'f12 ', 'f22 ', 'v1  ', &
+            'v2  ', 'b_r ', 'b_p ', 'b_z '], ['w               ', gn, hn, mn], &
+            [wsh, grad, hll, hlq])
+    end subroutine emit_shell_ref
+
+    function cross3e(x, y, i) result(z)
+        !! Component i of x x y.
+        type(expr_t), intent(in) :: x(3), y(3)
+        integer, intent(in) :: i
+        type(expr_t) :: z
+        type(expr_t) :: all(3)
+
+        all = cross(x, y)
+        z = all(i)
+    end function cross3e
+
+    function deriv_l(e, l, i) result(d)
+        !! d e/d l_i, with l_1 = chi entering also through the profile values.
+        type(expr_t), intent(in) :: e, l(:)
+        integer, intent(in) :: i
+        type(expr_t) :: d
+
+        d = diff(e, l(i))
+        if (i == 1) d = d + diff(e, fp)*fpp + diff(e, fpp)*fppp + diff(e, gp)*gpp &
+                        + diff(e, gpp)*gppp + diff(e, pres)*pp + diff(e, pp)*ppp
+    end function deriv_l
 
     function cross(x, y) result(z)
         type(expr_t), intent(in) :: x(3), y(3)

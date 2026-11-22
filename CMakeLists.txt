@@ -347,7 +347,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
 # symmetry #263 #265 and polar quadrature at point singularities #267, on
 # block sides and vertices #268).
-set(MILCA_FORTFEM_REVISION "6ba9d3630af7c38383e1bde2107a1f49d409ae50")
+set(MILCA_FORTFEM_REVISION "08d5e8b0fddae18071157df3a451d2acdd612b36")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -921,6 +921,8 @@ add_test(NAME eulerian_clebsch_free_boundary_gate_e6a COMMAND test_eulerian_cleb
 add_executable(test_eulerian_clebsch_free_boundary_3d test/test_eulerian_clebsch_free_boundary_3d.f90)
 target_link_libraries(test_eulerian_clebsch_free_boundary_3d PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_clebsch_free_boundary_3d_gate_e6b COMMAND test_eulerian_clebsch_free_boundary_3d)
+add_test(NAME eulerian_clebsch_free_boundary_3d_exterior
+    COMMAND test_eulerian_clebsch_free_boundary_3d 3 7 4 0.01 no exterior)
 add_executable(test_gs_fb_manufactured test/test_gs_fb_manufactured.f90)
 target_link_libraries(test_gs_fb_manufactured PRIVATE milca_gs_fb_test)
 add_library(milca_gs_ci_test STATIC test/support/gs_ci_fixture.f90)
