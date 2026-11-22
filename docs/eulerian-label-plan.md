@@ -247,7 +247,7 @@ of a reconstruction from measured profiles and magnetics.
 | E4a | exact 3D Landreman equilibria, fixed labels, g fitted | B at order p against the exact field |
 | E4 | E4a with χ, g and the axis curve by Newton (sheared family), then the registered integer case against VMEC++, DESC and GVEC | B and χ at order p; time to accuracy |
 | E5 | tokamak with a resonant boundary perturbation, island chain, ΔΦ_I as input | continuous to the nested solution at ΔΦ_I → 0, derivatives against finite differences, minimum-energy width against a published SPEC or HINT case |
-| E6 | free boundary: plasma (2) coupled to V1 vacuum and the wall operator | the 2D spline free-boundary results, then Landreman–Paul QA (L5) |
+| E6 | free boundary: plasma (2) coupled to V1 vacuum and the wall operator | E6a: axisymmetric, exact manufactured solution; E6b: 3D, exact (oracle field as source); then Landreman–Paul QA (L5) |
 
 E0 and E1 also run the multiplier formulation with the same enrichment of A
 (V1 ⊕ span{f_k(χ_h) h}) for comparison. The representation that passes E1
@@ -487,6 +487,79 @@ axis columns, 4 nt assemblies per step, dominate).
 - The ι of the sheared family (scan over ε, S, λ, δ): shear grows with S and
   δ and is independent of λ; at S = 1.4 it is below 2e-2 for every ε.
 
+E6a (`test_eulerian_clebsch_free_boundary`, axisymmetric free boundary).
+Formulation:
+
+- Plasma: E1 inside Γ_p (χ = 1 on Γ_p, χ, g, X, μ), on an O-grid whose wall
+  is Γ_p and whose core is centred on X (FortFEM `centre_core`), so X is
+  always the central vertex. With the default core X lies on a cell edge
+  (up-down symmetry), a boundary deformation moves it across, the polar
+  rule switches cells and the residual is not differentiable in Γ_p.
+- Shell: ψ in V0 of an O-grid with an annulus between Γ_p (interface) and
+  the fixed Γ_c (wall); the functions inside Γ_p, interface included, are
+  tied to one unknown ψ_b, so ψ is constant there and adds no energy, and
+  continuity across Γ_p is exact. Energy ∫ |∇ψ|²/(2R) − fψ plus the
+  exterior terms of `gs_spline_vacuum_setup` on Γ_c (Steklov–Poincaré map
+  and coil data). B_φ = F_vac/R in the shell.
+- Γ_p: R = (r0, 0) + r(θ)(cos θ, sin θ), r a Fourier series of 2M + 1
+  coefficients. Rows: the pressure balance ∮ (p + |B_in|²/2) w_m =
+  ∮ |B_out|²/2 w_m tested with the same modes; ψ_b: the current through
+  Γ_p from both sides. Each side on its own representation of Γ_p.
+- Newton: the trace rows differentiated by the chain rule, the X and Γ_p
+  columns by central differences with both meshes rebuilt (ALE).
+  Globalisation: Γ_p frozen first (E1 with the axis free), then all free;
+  a monotone backtracking search in a trust region; mesh continuation (the
+  previous level's solution projected onto the next mesh), because the
+  axis basin shrinks with h (E3b).
+
+Manufactured exact case: the Solov'ev field of E1 everywhere inside Γ_c,
+Γ_p = {ψ = ψ_b}, Γ_c = {ψ = 2ψ_b}; the shell carries the known toroidal
+current of a distributed coil (f = −(8α + 2β) R, Δ*ψ = (8α + 2β) R²), the
+exterior sees ψ and ∂_nψ on Γ_c as coil data, p = 0 and B continuous on
+Γ_p. Start: Γ_p radius, its m = 1 modes and ψ_b by 1 %, the axis by
+(6e-3, 3e-3), the labels by 1.5 % χ(1 − χ). M = 10 (truncation of the
+exact Γ_p 5e-5). Degree 2:
+
+| cells | 6 | 12 |
+|---|---|---|
+| L2 error of B in the plasma | 2.59e-3 | 4.78e-4 |
+| L2 error of ψ in the shell | 4.98e-4 | 1.06e-4 |
+| max radial error of Γ_p | 6.88e-4 | 2.14e-4 |
+| axis | 1.20e-2 | 1.41e-3 |
+| Newton steps (stage 2, \|r\| < 5e-8) | 4 | 4 (from 6 cells) |
+
+Rates: B 2.44, ψ 2.23, Γ_p 1.68, axis 3.09 (4 → 8 cells with M = 8: 3.13, 2.25,
+1.98, 3.35; at 8 cells B is 1.2 times the E1 interpolation error). \|r\|
+at 12 cells: 8.3e-1, 2.8e-2, 2.6e-4, 1.5e-7, 3.1e-8. The gate takes 2 min
+(slow): the 2M + 3 difference columns rebuild both meshes twice each.
+
+- The Newton matrix agrees with differences of the residual to 1e-8 or
+  better in every block (argument `jacobian`).
+- 2 and 4 cells are pre-asymptotic: the discrete equilibrium lies far from
+  the exact one along the weakly restored rigid displacements (the
+  smallest singular values at 2 cells belong to the vertical and the
+  radial shift of plasma and axis), so Newton from the exact state needs
+  4 cells and the gate starts at 6.
+- FortFEM's `spline_interface_quadrature` finds no points on the interface
+  next to the periodic annulus; the shell traces use the side quadrature of
+  the interface tag, restricted to the annulus block.
+- To do: analytic shape-derivative columns (fast gate), the plasma current
+  as an input (I_p instead of G'), and a coil-only Γ_c (filament coils as
+  in `gs_spline_free`).
+
+E6b (3D, design). The plasma is E4 on per-plane O-grids whose wall is
+Γ_p(θ, φ) and whose core follows the axis curve. The shell field is split,
+B = B_s + ∇Φ: B_s a given divergence-free source field (the coil field by
+Biot–Savart, or in the manufactured case the oracle field itself) and Φ
+single valued in V0 of the shell section times the trigonometric nodal
+basis in φ, with ΔΦ = 0, ∂_nΦ = −B_s·n on Γ_p (B·n = 0) and, first, a
+conducting wall ∂_nΦ = 0 on Γ_c (the per-mode exterior map later). Γ_p
+is a double Fourier series of normal offsets about the reference axis
+curve, its rows the pressure balance tested with the same modes. With the
+oracle field as B_s, Γ_c an oracle flux surface and the edge pressure
+zero at ψ = δ, the exact solution has Φ = 0; a perturbed Γ_p sees a
+nonzero vacuum response and must return.
+
 FortFEM supplies the separatrix-aligned layouts for E2b and E5:
 `layout_doublet` (18 blocks, X of valence 8) and `layout_island_chain` (any
 m ≥ 2), V0 cut across `LAYOUT_SEPARATRIX`, one-sided traces and grading
@@ -512,8 +585,9 @@ reaches order p at p = 2.
 6. Islands and rational surfaces, E5. Open whether Newton from nested
    initial labels finds the island topology, or whether the topology has to
    be seeded.
-7. Free boundary, E6, and the solver: Newton–Krylov with AMS for the V1 part
-   and AMG for χ and g.
+7. Free boundary, E6: E6a (axisymmetric) done; E6b (3D, scalar-potential
+   shell with the coil split) next. Then the solver: Newton–Krylov with AMS
+   for the V1 part and AMG for χ and g.
 
 ## 7. Open
 
