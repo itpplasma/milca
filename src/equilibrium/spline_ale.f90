@@ -344,15 +344,17 @@ contains
 
     end subroutine spline_winslow
 
-    subroutine spline_blend_weights(space, inner_cells, wall, w, status)
+    subroutine spline_blend_weights(space, inner_cells, wall, w, status, inner_dofs)
         !! Weights per control point for a translation that follows an
-        !! interior point: w = 1 on the control points of inner_cells, 0 on
+        !! interior point: w = 1 on the control points of inner_cells (and on
+        !! inner_dofs), 0 on
         !! `wall`, harmonic in the block parameters between (reference
         !! Laplace, int grad_xi w . grad_xi v dxi = 0).
         type(spline_space_t), intent(in) :: space
         integer, intent(in) :: inner_cells(:), wall(:)
         real(dp), allocatable, intent(out) :: w(:)
         integer, intent(out) :: status
+        integer, intent(in), optional :: inner_dofs(:)
         type(spline_quadrature_t) :: quad
         real(dp), allocatable :: xj(:, :, :), vals(:), rhs(:), val(:)
         integer, allocatable :: br(:), rows(:), cols(:), inner(:), fixed(:)
@@ -399,6 +401,7 @@ contains
         k%row_ptr = m%col_ptr
         k%col = m%row_idx
         k%val = m%val
+        if (present(inner_dofs)) is_inner(inner_dofs) = .true.
         inner = pack([(i, i=1, n)], is_inner)
         fixed = [inner, wall]
         val = [(1.0_dp, i=1, size(inner)), (0.0_dp, i=1, size(wall))]

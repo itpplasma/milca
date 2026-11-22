@@ -1129,6 +1129,7 @@ foreach(entry
         "eulerian_clebsch_fit_nonlinear_gate_e0 test_eulerian_clebsch_fit"
         "eulerian_clebsch_newton_gate_e1 test_eulerian_clebsch_newton"
         "label_ale_axisym_gate_a1 test_label_ale_axisym"
+        "label_ale_doublet_gate_a2a test_label_ale_doublet"
         "eulerian_clebsch_3d_gate_e3 test_eulerian_clebsch_3d"
         "eulerian_clebsch_doublet_fit_gate_e2a test_eulerian_clebsch_doublet_fit"
         "eulerian_clebsch_doublet_fit_circular_gate_e2a test_eulerian_clebsch_doublet_fit"
