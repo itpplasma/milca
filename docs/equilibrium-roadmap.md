@@ -107,7 +107,8 @@ Each step on cases that run in seconds, against analytic solutions first.
    the cores are 0.4 of them); renewing the pins removes that. E2 in the
    direct-Clebsch form (gate `label_ale_doublet_clebsch_gate_e2`, O and X
    fixed): Newton converges quadratically at B_φ/B_pol ≈ 1 (toroidal field
-   scaled by κ = 1e-3; B at the fixed-label fit on 4 and 8 cells) and fails
+   scaled by κ = 1e-3; B at the fixed-label fit on 4 and 8 cells; at 16 cells, with the
+   layer cells finer, Newton stalls even there) and fails
    at the doublet's B_φ/B_pol ≈ 1e3, equally with the log terms of the
    profiles removed. The obstruction is the guide field, not the separatrix:
    after eliminating g the label Hessian has O(B_φ²) negative grid-scale

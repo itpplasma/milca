@@ -507,7 +507,7 @@ Solov'ev state); the E2 doublet has B_φ/B_pol ≈ 1e3 κ.
 
 | κ (B_φ/B_pol) | log-singular profiles | log terms removed |
 |---|---|---|
-| 1e-3 (≈ 1) | 9 steps, quadratic (4 cells); 7 (8 cells) | |
+| 1e-3 (≈ 1) | 9 steps, quadratic (4 cells); 7 (8 cells); stalls at 16 cells (\|r\| 6e-5 of 1.9e-1) | |
 | 1e-2 (≈ 10) | 23 steps | 21 steps |
 | 1e-1, 1 (≈ 100, 1000) | no progress (α ≈ 1e-3 per step) | no progress |
 
