@@ -76,6 +76,16 @@ Not at parity, three findings, none explained by a run yet:
    degrees 2, 3, 4 on 4 cells against 0.06 % at degree 2 on 8 cells).
    Suspects: the spline fit of the wall, the C0 block corners.
 
+State of 2026-11-22 after the harmonic section meshes
+([flux-map.md](flux-map.md), "Section meshes by harmonic maps"): finding 1
+is a pressure-driven saddle (none of the standard decks with pressure has a
+negative eigenvalue); finding 2 was an error of the flux map, not of VMEC
+(DESC agrees with VMEC's limit), and the QA axis converges to that limit at
+degree 3, the QH axis once 29 planes are used; the energy error of finding
+3 was the area of the wall fit and is removed. W7-X standard and li383 mesh
+and converge. Open from these: grading of the meshes towards tips, QH
+against a third code, the decision on P0b.
+
 P0a, owed before the flux map is compared (in this order):
 - QA floor: plane scan at fixed section (13, 17, 21, 25), wall volume
   against VMEC, then section meshes by Winslow.
@@ -235,10 +245,9 @@ share goes to P0–P2 and the infrastructure share to P0c.
   shaped toroidal domains*, arXiv:2411.04683, code `map2disc`
   (gitlab.mpcdf.mpg.de/gvec-group/map2disc). They solve Δξ = Δη = 0 (the
   Winslow map) by boundary integrals rather than the nonlinear inverse
-  equations, then invert it. Candidate for the initial mesh and for
-  the section meshes of P0a and for remeshing; check licence and
-  record the commit before reusing code (AGENTS.md provenance rule). It
-  supplies geometry only.
+  equations, then invert it. The construction is implemented from the
+  paper in FortFEM (`fortfem_harmonic_disc`) and is the section mesh of the
+  flux map; their code was not read or used.
 
 ## State of the Lagrangian map lane
 
