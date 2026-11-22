@@ -16,11 +16,14 @@ module landreman_sections
     private
 
     real(dp), parameter :: pi = acos(-1.0_dp)
-    integer, parameter :: samples_n = 128
+    integer, parameter :: samples_n = 128, cheb_n = 24
     type(nested_oracle_t), public :: section_oracle
+    ! Chebyshev coefficients in x = 2 chi - 1 of Phi(psi(chi)) with its first
+    ! three chi derivatives, and of iota with its first two
+    real(dp) :: cphi(0:cheb_n - 1, 0:3), ciota(0:cheb_n - 1, 0:2)
 
     public :: section_axis, section_label, section_exact_b, section_boundary_radius, &
-              section_sqrt_hessian, section_layout
+              section_sqrt_hessian, section_layout, section_fit_profiles, section_profiles
 
 contains
 
@@ -69,22 +72,26 @@ contains
         b = [v(3)*cos(x(2)) + v(4)*sin(x(2)), -v(3)*sin(x(2)) + v(4)*cos(x(2)), v(5)]
     end subroutine section_exact_b
 
-    real(dp) function section_boundary_radius(phi, centre, angle) result(r)
-        !! Distance from centre to chi = 1 along a ray in the plane phi.
+    real(dp) function section_boundary_radius(phi, centre, angle, level) result(r)
+        !! Distance from centre to chi = level (default 1) along a ray in the
+        !! plane phi.
         real(dp), intent(in) :: phi, centre(2), angle
-        real(dp) :: lo, hi, e(2)
+        real(dp), intent(in), optional :: level
+        real(dp) :: lo, hi, e(2), target
         integer :: k
 
+        target = 1
+        if (present(level)) target = level
         e = [cos(angle), sin(angle)]
         lo = 0
         hi = 0.05_dp
-        do while (section_label(centre(1) + hi*e(1), phi, centre(2) + hi*e(2)) < 1)
+        do while (section_label(centre(1) + hi*e(1), phi, centre(2) + hi*e(2)) < target)
             lo = hi
             hi = 1.5_dp*hi
         end do
         do k = 1, 60
             r = (lo + hi)/2
-            if (section_label(centre(1) + r*e(1), phi, centre(2) + r*e(2)) < 1) then
+            if (section_label(centre(1) + r*e(1), phi, centre(2) + r*e(2)) < target) then
                 lo = r
             else
                 hi = r
@@ -143,5 +150,91 @@ contains
         call layout_set_curve(layout, LAYOUT_WALL, samples, st, centre_core=.true.)
         if (st /= 0) error stop 'landreman_sections: boundary curve'
     end subroutine section_layout
+
+    subroutine section_fit_profiles()
+        !! Phi(psi) and iota(psi) of the oracle (sheared family) as Chebyshev
+        !! series in x = 2 psi/delta - 1 from a discrete transform at
+        !! Chebyshev-Gauss nodes of [0, delta] (the axis is not sampled), and
+        !! their chi derivatives by the standard recurrence.
+        real(dp) :: x(cheb_n), phi(cheb_n), iota(cheb_n), psi
+        integer :: j, k, st
+
+        do j = 1, cheb_n
+            x(j) = cos(pi*(j - 0.5_dp)/cheb_n)
+            psi = section_oracle%delta*(x(j) + 1)/2
+            call section_oracle%flux(psi, 1e-12_dp, phi(j), st)
+            if (st /= 0) error stop 'landreman_sections: oracle flux'
+            call section_oracle%rotation(psi, 1, 1e-10_dp, iota(j), st)
+            if (st /= 0) error stop 'landreman_sections: oracle rotation'
+        end do
+        do k = 0, cheb_n - 1
+            cphi(k, 0) = 2.0_dp/cheb_n*sum(phi*cos(k*acos(x)))
+            ciota(k, 0) = 2.0_dp/cheb_n*sum(iota*cos(k*acos(x)))
+        end do
+        do k = 1, 3
+            cphi(:, k) = derivative_series(cphi(:, k - 1))
+            if (k <= 2) ciota(:, k) = derivative_series(ciota(:, k - 1))
+        end do
+        print '(a,es11.3,a,2f9.5)', 'Phi(delta)', chebyshev(cphi(:, 0), 1.0_dp), &
+            '  iota at axis and edge', chebyshev(ciota(:, 0), -1.0_dp), &
+            chebyshev(ciota(:, 0), 1.0_dp)
+        print '(a,2es10.2)', 'last Chebyshev coefficients of Phi, iota', &
+            abs(cphi(cheb_n - 1, 0)), abs(ciota(cheb_n - 1, 0))
+    end subroutine section_fit_profiles
+
+    function derivative_series(c) result(d)
+        !! d/dx of sum' c_k T_k(x), times dx/dchi = 2.
+        real(dp), intent(in) :: c(0:)
+        real(dp) :: d(0:size(c) - 1)
+        integer :: n, j
+
+        n = size(c)
+        d = 0
+        d(n - 2) = 2*(n - 1)*c(n - 1)
+        do j = n - 3, 0, -1
+            d(j) = d(j + 2) + 2*(j + 1)*c(j + 1)
+        end do
+        d = 2*d
+    end function derivative_series
+
+    pure real(dp) function chebyshev(c, x) result(f)
+        !! sum' c_k T_k(x) by Clenshaw.
+        real(dp), intent(in) :: c(0:), x
+        real(dp) :: b0, b1, b2
+        integer :: k
+
+        b1 = 0
+        b2 = 0
+        do k = size(c) - 1, 1, -1
+            b0 = 2*x*b1 - b2 + c(k)
+            b2 = b1
+            b1 = b0
+        end do
+        f = x*b1 - b2 + c(0)/2
+    end function chebyshev
+
+    subroutine section_profiles(chi, f, g, p)
+        !! f = (F', F'', F'''), g = (G', G'', G'''), p = (p, p', p'') at chi
+        !! (milca_eulerian_clebsch's clebsch_profiles), psi = delta chi:
+        !! F = -Phi/(2 pi), G' = -iota Phi'/(2 pi) (the sign pair of E4a),
+        !! p = (delta - psi)/lambda^2, zero on the boundary psi = delta.
+        real(dp), intent(in) :: chi
+        real(dp), intent(out) :: f(3), g(3), p(3)
+        real(dp) :: x, d(3), io(0:2)
+        integer :: m
+
+        x = 2*chi - 1
+        do m = 1, 3
+            d(m) = chebyshev(cphi(:, m), x)
+        end do
+        do m = 0, 2
+            io(m) = chebyshev(ciota(:, m), x)
+        end do
+        f = -d/(2*pi)
+        g = -[io(0)*d(1), io(1)*d(1) + io(0)*d(2), io(2)*d(1) + 2*io(1)*d(2) + io(0)*d(3)] &
+            /(2*pi)
+        p = [section_oracle%delta*(1 - chi), -section_oracle%delta, 0.0_dp]/ &
+            section_oracle%lam**2
+    end subroutine section_profiles
 
 end module landreman_sections

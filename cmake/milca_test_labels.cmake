@@ -1141,3 +1141,5 @@ milca_test_labels(eulerian_clebsch_landreman_newton_gate_e4 fast CLASSES equilib
     TARGETS test_eulerian_clebsch_landreman_newton)
 milca_test_labels(eulerian_clebsch_free_boundary_gate_e6a slow CLASSES equilibrium
     TARGETS test_eulerian_clebsch_free_boundary)
+milca_test_labels(eulerian_clebsch_free_boundary_3d_gate_e6b slow CLASSES equilibrium
+    TARGETS test_eulerian_clebsch_free_boundary_3d)

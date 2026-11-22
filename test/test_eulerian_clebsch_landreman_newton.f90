@@ -9,7 +9,7 @@ program test_eulerian_clebsch_landreman_newton
     !! Label chi = psi/delta (1 on the boundary), profiles of the exact state:
     !!
     !!   F(chi) = -Phi(psi)/(2 pi),  G'(chi) = -iota(psi) Phi'(chi)/(2 pi)
-    !!   p(chi) = -psi/lambda^2 (+ const),   psi = delta chi,
+    !!   p(chi) = (delta - psi)/lambda^2,   psi = delta chi,
     !!
     !! (the sign pair that E4a selects) with Phi and iota Chebyshev series fitted to the oracle's flux
     !! and rotation on [0, delta], so the residual is smooth in chi (a
@@ -47,9 +47,9 @@ program test_eulerian_clebsch_landreman_newton
     use milca_nested_oracles, only: NESTED_SHEARED
     use solovev_label_fields, only: triplet_list
     use landreman_sections, only: section_oracle, section_label, section_exact_b, &
-        section_sqrt_hessian, section_layout
+        section_sqrt_hessian, section_layout, section_fit_profiles, section_profiles
     implicit none
-    integer, parameter :: degree = 2, cheb_n = 24
+    integer, parameter :: degree = 2
     ! ridge on the g block: of the fixed-label g solve, and of the Newton
     ! matrix only (not the residual), where it damps the discrete near-null
     ! g -> g + k(chi_h) without changing the solution
@@ -58,9 +58,6 @@ program test_eulerian_clebsch_landreman_newton
     integer :: cells(3) = [2, 4, 8]
     real(dp) :: axis_offset = 2e-3_dp, amplitude = 0.02_dp, plane_phi
     logical :: jacobian_check = .false.
-    ! Chebyshev coefficients in x = 2 chi - 1 of Phi(psi(chi)) with its first
-    ! three chi derivatives, and of iota with its first two
-    real(dp) :: cphi(0:cheb_n - 1, 0:3), ciota(0:cheb_n - 1, 0:2)
     real(dp), allocatable :: err(:), err_fixed(:), chi_err(:), axis_err(:)
     integer, allocatable :: steps(:)
     type(spline_space_t) :: space
@@ -106,7 +103,7 @@ program test_eulerian_clebsch_landreman_newton
         read (arg, *) section_oracle%delta
     end if
     if (.not. section_oracle%valid()) error stop 'sheared oracle parameters'
-    call fit_profiles()
+    call section_fit_profiles()
     print '(a,f5.2,a,f5.2,a,f7.4,a,i3,a,es9.2,a,es9.2)', 'sheared family eps', section_oracle%eps, &
         '  S', section_oracle%saxis, '  delta', section_oracle%delta, &
         '  planes', nt, '  axis offset', axis_offset, '  label perturbation', amplitude
@@ -147,88 +144,6 @@ contains
             failures = failures + 1
         end if
     end subroutine check
-
-    subroutine fit_profiles()
-        !! Discrete Chebyshev transform of Phi and iota at Chebyshev-Gauss
-        !! nodes of [0, delta] in psi (interior: the axis is not sampled),
-        !! then the derivative series by the standard recurrence.
-        real(dp) :: x(cheb_n), phi(cheb_n), iota(cheb_n), psi
-        integer :: j, k, st
-
-        do j = 1, cheb_n
-            x(j) = cos(pi*(j - 0.5_dp)/cheb_n)
-            psi = section_oracle%delta*(x(j) + 1)/2
-            call section_oracle%flux(psi, 1e-12_dp, phi(j), st)
-            if (st /= 0) error stop 'oracle flux'
-            call section_oracle%rotation(psi, 1, 1e-10_dp, iota(j), st)
-            if (st /= 0) error stop 'oracle rotation'
-        end do
-        do k = 0, cheb_n - 1
-            cphi(k, 0) = 2.0_dp/cheb_n*sum(phi*cos(k*acos(x)))
-            ciota(k, 0) = 2.0_dp/cheb_n*sum(iota*cos(k*acos(x)))
-        end do
-        do k = 1, 3
-            cphi(:, k) = derivative_series(cphi(:, k - 1))
-            if (k <= 2) ciota(:, k) = derivative_series(ciota(:, k - 1))
-        end do
-        print '(a,es11.3,a,2f9.5)', 'Phi(delta)', chebyshev(cphi(:, 0), 1.0_dp), &
-            '  iota at axis and edge', chebyshev(ciota(:, 0), -1.0_dp), &
-            chebyshev(ciota(:, 0), 1.0_dp)
-        print '(a,2es10.2)', 'last Chebyshev coefficients of Phi, iota', &
-            abs(cphi(cheb_n - 1, 0)), abs(ciota(cheb_n - 1, 0))
-    end subroutine fit_profiles
-
-    function derivative_series(c) result(d)
-        !! d/dx of sum' c_k T_k(x), times dx/dchi = 2.
-        real(dp), intent(in) :: c(0:)
-        real(dp) :: d(0:size(c) - 1)
-        integer :: n, j
-
-        n = size(c)
-        d = 0
-        d(n - 2) = 2*(n - 1)*c(n - 1)
-        do j = n - 3, 0, -1
-            d(j) = d(j + 2) + 2*(j + 1)*c(j + 1)
-        end do
-        d = 2*d
-    end function derivative_series
-
-    pure real(dp) function chebyshev(c, x) result(f)
-        !! sum' c_k T_k(x) by Clenshaw.
-        real(dp), intent(in) :: c(0:), x
-        real(dp) :: b0, b1, b2
-        integer :: k
-
-        b1 = 0
-        b2 = 0
-        do k = size(c) - 1, 1, -1
-            b0 = 2*x*b1 - b2 + c(k)
-            b2 = b1
-            b1 = b0
-        end do
-        f = x*b1 - b2 + c(0)/2
-    end function chebyshev
-
-    subroutine profiles(chi, f, g, p)
-        !! f = (F', F'', F'''), g = (G', G'', G'''), p = (p, p', p'') at chi:
-        !! F = -Phi/(2 pi), G' = -iota Phi'/(2 pi), p = -delta chi/lambda^2.
-        real(dp), intent(in) :: chi
-        real(dp), intent(out) :: f(3), g(3), p(3)
-        real(dp) :: x, d(3), io(0:2)
-        integer :: m
-
-        x = 2*chi - 1
-        do m = 1, 3
-            d(m) = chebyshev(cphi(:, m), x)
-        end do
-        do m = 0, 2
-            io(m) = chebyshev(ciota(:, m), x)
-        end do
-        f = -d/(2*pi)
-        g = -[io(0)*d(1), io(1)*d(1) + io(0)*d(2), io(2)*d(1) + 2*io(1)*d(2) + io(0)*d(3)] &
-            /(2*pi)
-        p = [-section_oracle%delta*chi, -section_oracle%delta, 0.0_dp]/section_oracle%lam**2
-    end subroutine profiles
 
     subroutine coordinate(block, xi, t, values)
         integer, intent(in) :: block
@@ -359,11 +274,11 @@ contains
         n0 = size(nrow)
         nf = 2*n0*nt
         if (present(ferr)) then
-            call clebsch_3d_system(derham, quad, nt, profiles, a(:, 1), chi, g, energy, grad, &
+            call clebsch_3d_system(derham, quad, nt, section_profiles, a(:, 1), chi, g, energy, grad, &
                                    hessian, x, nodes_at(base, w, a, x), frames, &
                                    section_exact_b, ferr)
         else
-            call clebsch_3d_system(derham, quad, nt, profiles, a(:, 1), chi, g, energy, grad, &
+            call clebsch_3d_system(derham, quad, nt, section_profiles, a(:, 1), chi, g, energy, grad, &
                                    hessian, x, nodes_at(base, w, a, x), frames)
         end if
         allocate (r(nf + 3*nt))
@@ -440,13 +355,13 @@ contains
         ! fixed-label fit (E4a) on this mesh: the interpolation level of B
         allocate (g(ntot), delta(nf))
         g = 0
-        call clebsch_3d_system(derham, aquad, nt, profiles, a(:, 1), chi0, g, energy, grad, &
+        call clebsch_3d_system(derham, aquad, nt, section_profiles, a(:, 1), chi0, g, energy, grad, &
                                hessian, a, base, frames)
         call add_g_ridge(hessian, ntot)
         call eu_constrained_solve(hessian, -grad, [(i, i=1, ntot)], 0*chi0, delta, st)
         if (st /= 0) error stop 'fixed-label g solve'
         g = delta(ntot + 1:)
-        call clebsch_3d_system(derham, aquad, nt, profiles, a(:, 1), chi0, g, energy, grad, &
+        call clebsch_3d_system(derham, aquad, nt, section_profiles, a(:, 1), chi0, g, energy, grad, &
                                plane_axis=a, plane_nodes=base, plane_frames=frames, &
                                exact_field=section_exact_b, field_error=ferr)
         err_fixed = sqrt(ferr(1)/ferr(2))
@@ -463,7 +378,7 @@ contains
         end do
         chi(wall) = 1
         g = 0
-        call clebsch_3d_system(derham, aquad, nt, profiles, a(:, 1), chi, g, energy, grad, &
+        call clebsch_3d_system(derham, aquad, nt, section_profiles, a(:, 1), chi, g, energy, grad, &
                                hessian, x, nodes_at(base, w, a, x), frames)
         call add_g_ridge(hessian, ntot)
         call eu_constrained_solve(hessian, -grad, [(i, i=1, ntot)], 0*chi, delta, st)
