@@ -16,6 +16,17 @@ module milca_eulerian_vacuum
     private
 
     public :: eu_curl_curl, eu_constrained_solve, eu_to_csr, eu_ams_solve
+    public :: eu_constrained_t, eu_constrained_factor, eu_constrained_apply, &
+              eu_constrained_free
+
+    type :: eu_constrained_t
+        !! A factorised free block of K (fixed rows and columns removed), for
+        !! several right-hand sides with homogeneous fixed values: a Newton
+        !! step and its simplified corrections (affine-covariant damping).
+        type(sparse_direct_factor_t) :: factor
+        integer, allocatable :: free(:)
+        integer :: n = 0
+    end type eu_constrained_t
 
 contains
 
@@ -104,6 +115,64 @@ contains
         call sparse_direct_free(factor)
         if (status == 0) a(free) = x
     end subroutine eu_constrained_solve
+
+    subroutine eu_constrained_factor(k, fixed, c, status)
+        !! Factorises the free block of K (K stored by rows of K^T, as in
+        !! eu_constrained_solve).
+        type(csr_t), intent(in) :: k
+        integer, intent(in) :: fixed(:)
+        type(eu_constrained_t), intent(out) :: c
+        integer, intent(out) :: status
+        integer, allocatable :: local(:), colptr(:), rowind(:)
+        real(dp), allocatable :: val(:)
+        integer :: nf, i, j, p, nz
+
+        c%n = k%nrow
+        allocate (local(c%n))
+        local = 1
+        local(fixed) = 0
+        c%free = pack([(i, i=1, c%n)], local == 1)
+        nf = size(c%free)
+        local = 0
+        local(c%free) = [(i, i=1, nf)]
+        allocate (colptr(nf + 1), rowind(size(k%val)), val(size(k%val)))
+        colptr(1) = 1
+        nz = 0
+        do j = 1, nf
+            i = c%free(j)
+            do p = k%row_ptr(i), k%row_ptr(i + 1) - 1
+                if (local(k%col(p)) > 0) then
+                    nz = nz + 1
+                    rowind(nz) = local(k%col(p))
+                    val(nz) = k%val(p)
+                end if
+            end do
+            colptr(j + 1) = nz + 1
+        end do
+        call sparse_direct_factor_csc(c%factor, nf, colptr, rowind(:nz), val(:nz), status)
+    end subroutine eu_constrained_factor
+
+    subroutine eu_constrained_apply(c, rhs, a, status)
+        !! a = K_ff^(-1) rhs_f on the free rows, 0 on the fixed rows.
+        type(eu_constrained_t), intent(inout) :: c
+        real(dp), intent(in) :: rhs(:)
+        real(dp), intent(out) :: a(:)
+        integer, intent(out) :: status
+        real(dp), allocatable :: x(:)
+
+        allocate (x(size(c%free)))
+        call sparse_direct_solve_factored(c%factor, rhs(c%free), x, status)
+        a = 0
+        if (status == 0) a(c%free) = x
+    end subroutine eu_constrained_apply
+
+    subroutine eu_constrained_free(c)
+        type(eu_constrained_t), intent(inout) :: c
+
+        call sparse_direct_free(c%factor)
+        if (allocated(c%free)) deallocate (c%free)
+        c%n = 0
+    end subroutine eu_constrained_free
 
     subroutine eu_ams_solve(k, grad, interpolation, n0, fixed, values, fixed_nodes, a, &
                             rtol, iterations, status, mass)

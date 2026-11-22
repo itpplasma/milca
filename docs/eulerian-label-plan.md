@@ -616,6 +616,52 @@ evaluate the whole 3D residual.
   on Gamma_c instead of the conducting wall; the solver moved from the test
   into a module and an application.
 
+E6c (same test, argument 6 `ideal`, `exterior` or `shape`): the 3D
+free-boundary gate with analytic shape columns, the plasma current and the
+exterior map.
+
+- Shape columns. FortSym emits `clebsch_energy_3d_ref` and
+  `shell_energy_ref`: the energy densities in reference coordinates with
+  their mixed second derivatives in the unknowns and in the geometry (s, F,
+  v, X, Ẋ, M, Ṁ), with proofs of reference tangency and the identity map.
+  `clebsch_3d_shape_system` assembles ∂residual/∂nodes from them, chained
+  with ∂nodes/∂(ρ, X) from plane rebuilds (control points of the geometry,
+  no projection). Shape matrix against differences 1.5e-8; the 2-cell case
+  from 20.8 s to 4.0 s, the 4-cell gate from 4.5 min to 37 s.
+- Null directions, measured by the SVD of the Newton matrix (MILCA_SVD,
+  MILCA_CHECK_AT) instead of held by ridges. g → g + k(χ) is the gauge of
+  the continuum: g + a + bχ_h is exactly null (χ_h lies in the space of
+  g) and every other k(χ_h) nearly so (σ/σ₁ = 7e-7 at 3 cells, more modes
+  under refinement); Newton crept along them and stalled. Fixed by
+  orthogonality of g to T_j(2χ₀ − 1), j < pn + 1, with the reference
+  label χ₀ and the reference measure: linear constant rows with
+  multipliers, no shape derivative, so they commute with the ALE
+  parametrisation. Φ → Φ + a by one pinned value. The circulation c in
+  units of the plasma's (it was 1e-9 of σ₁ in SI units alone). The ridges
+  (1e-8 on g, 1e-10 on Φ) are gone and the Jacobian agrees with
+  differences to 1e-12 in g (was 4e-8). Remaining smallest modes: smooth χ
+  modes with the axis, σ/σ₁ ≈ 2e-5.
+- Ideal wall (4 cells, 9 planes, M = 6): stage 1 4 steps, stage 2 3
+  steps (\|r\| 3.1e-2, 2.1e-3, 1.7e-5, 3.2e-9), Γ_p 5.65e-3 against the
+  truncation 5.87e-3, 37 s on 13 threads.
+- Exterior map. The plasma current is a filament along the axis curve
+  scaled to the oracle's circulation, its coefficient c an unknown with the
+  row c ∮B_fil·dl = mean ∮B·dl; beyond an axisymmetric artificial wall Φ
+  is the exterior per-mode Steklov–Poincaré map (FortFEM `tm_bem`) plus the
+  source cross term −∮Φ (B_s + c B_fil)·n. Verified alone against a ring
+  source with density cos(nφ) (exact energy by a fine rule): every mode
+  n ≤ (nt − 1)/2 within 1.4e-3 at 32 wall nodes, 9e-5 at 64. The exact
+  state solves the exterior problem to the discretisation level (shell rows
+  1.1e-2, balance rows 1.8e-2 at 4 cells, M = 6). Newton converges
+  quadratically: 3 cells, 7 planes, M = 4 in 5 + 5 steps; 5 cells, 9 planes,
+  M = 6 in 11 + 4 steps, c within 1.7e-4. With 4 cells and M = 6 (above
+  M ≈ 4n/3, the E6b limit of the boundary cells) stage 2 stalls. On coarse
+  meshes Γ_p is mesh-limited in both wall models (3 cells: ideal 1.7e-2,
+  exterior 2.1e-2, truncation 1.6e-2). B·n of the oracle on the
+  axisymmetric wall decays slowly in n (8e-2, 6e-2, 1e-2, 4e-3, 1.6e-3 for
+  n = 0, 2, 4, 6, 8), so the planes must resolve the wall data as well as
+  the plasma.
+
 E6b (3D, design). The plasma is E4 on per-plane O-grids whose wall is
 Γ_p(θ, φ) and whose core follows the axis curve. The shell field is split,
 B = B_s + ∇Φ: B_s a given divergence-free source field (the coil field by
@@ -657,10 +703,13 @@ reaches order p at p = 2.
 6. Islands and rational surfaces, E5. Open whether Newton from nested
    initial labels finds the island topology, or whether the topology has to
    be seeded.
-7. Free boundary, E6: E6a (axisymmetric) and E6b (3D, scalar-potential
-   shell with a conducting wall, exact oracle case) done; next the plasma
-   current and filament coils, the exterior map, analytic shape columns. Then the solver: Newton–Krylov with AMS
-   for the V1 part and AMG for χ and g.
+7. Free boundary, E6: E6a (axisymmetric), E6b (3D, scalar-potential
+   shell with a conducting wall, exact oracle case) and E6c (analytic shape
+   columns, gauge by orthogonality, plasma current, exterior map) done;
+   next an exact exterior case with a vacuum region (E6a's Solov'ev coils
+   in 3D), the solver module with coils and passive structures
+   (docs/wall-model.md), then Newton–Krylov with AMS for the V1 part and AMG
+   for χ and g.
 
 ## 7. Open
 

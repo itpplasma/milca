@@ -12,7 +12,8 @@ module milca_eulerian_clebsch
     use fortsparse_csr, only: csr_t
     use fortsparse_csc, only: csc_t, csc_from_triplet
     use fortsparse_status, only: fortsparse_status_t
-    use milca_eulerian_clebsch_leaves, only: clebsch_energy_axisym, clebsch_energy_3d
+    use milca_eulerian_clebsch_leaves, only: clebsch_energy_axisym, clebsch_energy_3d, &
+        clebsch_energy_3d_ref
     implicit none
     private
 
@@ -33,7 +34,7 @@ module milca_eulerian_clebsch
     end interface
 
     public :: clebsch_profiles, clebsch_axisym_system, clebsch_node_gradients, &
-              clebsch_3d_system, clebsch_exact_field
+              clebsch_3d_system, clebsch_exact_field, clebsch_3d_shape_system
 
 contains
 
@@ -410,6 +411,276 @@ contains
         hessian%col = mm%row_idx
         hessian%val = mm%val
     end subroutine clebsch_3d_system
+
+    subroutine clebsch_3d_shape_system(derham, quad, nt, profiles, chi, g, plane_axis, &
+                                       plane_nodes, plane_frames, energy, gradient, hessian, &
+                                       shape)
+        !! The 3D label lane of clebsch_3d_system (with plane_axis, plane_nodes
+        !! and plane_frames) from the reference-coordinate leaf
+        !! clebsch_energy_3d_ref, and its exact derivatives with respect to the
+        !! geometry: shape(i, j) = d gradient_i / d gamma_j with gamma the node
+        !! coordinates of every plane, column ((k - 1) n0 + i - 1) 2 + c for
+        !! component c of node i on plane k, then the axis points, column
+        !! 2 n0 nt + 2 (k - 1) + c. The field locals (value, reference gradient,
+        !! nodal t derivative) do not depend on the geometry, so the shape
+        !! derivative is the mixed second derivative of the leaf.
+        type(spline_derham_t), intent(in) :: derham
+        type(spline_quadrature_t), intent(in) :: quad
+        integer, intent(in) :: nt
+        procedure(clebsch_profiles) :: profiles
+        real(dp), intent(in) :: chi(:), g(:), plane_axis(:, :), plane_nodes(:, :, :), &
+                                plane_frames(:, :, :)
+        real(dp), intent(out) :: energy
+        real(dp), allocatable, intent(out) :: gradient(:)
+        type(csr_t), intent(out) :: hessian, shape
+        real(dp), allocatable :: v0(:, :, :), gn(:, :, :), sx(:, :, :), sy(:, :, :), &
+                                 am(:, :, :, :, :), as(:, :, :, :, :), ax(:, :, :, :, :), &
+                                 tb(:, :, :), gloc(:, :), hv(:), sv(:), hvl(:, :), svl(:, :)
+        integer, allocatable :: d0(:), rh(:), ch(:), rs(:), cs(:)
+        real(dp) :: lt(nt, 2), ht(nt, 2), lv(7), qv(12), mf(2, 2), md(2, 2), f(3), gp(3), &
+                    pr(3), w, gl(7), hh(28), hm(84), hmat(7, 7), gmat(7, 12), t, wt, s(2), &
+                    fm(2, 2), vel(2), xa(2), xd(2), ck(nt), gk(nt), cak(2, nt), gak(2, nt)
+        real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
+        integer :: n0, ntot, nqt, cell, q, p, m, k, i, a, b, nloc, nl2, nc2, ct1, ct2, &
+                   col, nz_h, nz_s, blk_h, blk_s, c, ncol, ki, kj, idx_col
+        type(csc_t) :: mm
+        type(fortsparse_status_t) :: info
+
+        n0 = derham%dimension(0)
+        ntot = n0*nt
+        nqt = 2*nt + 2
+        ncol = 2*n0*nt + 2*nt
+        allocate (gradient(2*ntot))
+        gradient = 0
+        energy = 0
+        blk_h = (2*(derham%degree + 1)**2*nt)**2
+        blk_s = (2*(derham%degree + 1)**2*nt)*(2*(derham%degree + 1)**2*nt + 2*nt)
+        allocate (rh(size(quad%point_offset)*blk_h), ch(size(quad%point_offset)*blk_h), &
+                  hv(size(quad%point_offset)*blk_h), rs(size(quad%point_offset)*blk_s), &
+                  cs(size(quad%point_offset)*blk_s), sv(size(quad%point_offset)*blk_s))
+        rh = 1
+        ch = 1
+        hv = 0
+        rs = 1
+        cs = 1
+        sv = 0
+        !$omp parallel do schedule(dynamic) default(shared) &
+        !$omp private(cell, v0, gn, d0, nloc, nl2, nc2, sx, sy, am, as, ax, tb, gloc, hvl, svl, &
+        !$omp         m, t, lt, ht, q, p, k, ck, gk, cak, gak, lv, s, fm, vel, xa, xd, mf, md, qv, &
+        !$omp         f, gp, pr, w, gl, hh, hm, hmat, gmat, wt, i, a, b, c, ct1, ct2, col, &
+        !$omp         ki, kj, nz_h, nz_s, idx_col) reduction(+:energy)
+        do cell = 1, size(quad%point_offset)
+            call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
+            nloc = size(d0)
+            nl2 = 2*nloc
+            nc2 = 2*nloc
+            allocate (sx(7, nl2, 2), sy(12, nc2, 2), am(nl2, nl2, 2, 2, nqt), &
+                      as(nl2, nc2, 2, 2, nqt), ax(nl2, 2, 2, 2, nqt), tb(nt, 2, nqt), &
+                      gloc(nt, nl2))
+            am = 0
+            as = 0
+            ax = 0
+            gloc = 0
+            do m = 1, nqt
+                t = (m - 1)/real(nqt, dp)
+                call spline_derham_t_basis(nt, t, lt, ht)
+                tb(:, :, m) = lt
+                xa = matmul(plane_axis, lt(:, 1))
+                xd = matmul(plane_axis, lt(:, 2))
+                mf = 0
+                md = 0
+                do k = 1, nt
+                    mf = mf + lt(k, 1)*plane_frames(:, :, k)
+                    md = md + lt(k, 2)*plane_frames(:, :, k)
+                end do
+                do q = 1, quad%points_per_cell
+                    p = quad%point_offset(cell) + q - 1
+                    ! field and geometry locals per plane, then in t
+                    do k = 1, nt
+                        ck(k) = dot_product(v0(1, :, q), chi(d0 + n0*(k - 1)))
+                        gk(k) = dot_product(v0(1, :, q), g(d0 + n0*(k - 1)))
+                        cak(:, k) = matmul(gn(:, :, q), chi(d0 + n0*(k - 1)))
+                        gak(:, k) = matmul(gn(:, :, q), g(d0 + n0*(k - 1)))
+                    end do
+                    lv = [dot_product(lt(:, 1), ck), dot_product(lt(:, 1), cak(1, :)), &
+                          dot_product(lt(:, 1), cak(2, :)), dot_product(lt(:, 2), ck), &
+                          dot_product(lt(:, 1), gak(1, :)), dot_product(lt(:, 1), gak(2, :)), &
+                          dot_product(lt(:, 2), gk)]
+                    s = 0
+                    fm = 0
+                    vel = 0
+                    do k = 1, nt
+                        s = s + lt(k, 1)*matmul(plane_nodes(:, d0, k), v0(1, :, q))
+                        fm = fm + lt(k, 1)*matmul(plane_nodes(:, d0, k), transpose(gn(:, :, q)))
+                        vel = vel + lt(k, 2)*matmul(plane_nodes(:, d0, k), v0(1, :, q))
+                    end do
+                    qv = [s(1), s(2), fm(1, 1), fm(2, 1), fm(1, 2), fm(2, 2), vel(1), vel(2), &
+                          xa(1), xa(2), xd(1), xd(2)]
+                    call profiles(lv(1), f, gp, pr)
+                    call clebsch_energy_3d_ref(lv(1), lv(2), lv(3), lv(4), lv(5), lv(6), lv(7), &
+                        qv(1), qv(2), qv(3), qv(4), qv(5), qv(6), qv(7), qv(8), qv(9), qv(10), &
+                        qv(11), qv(12), mf(1, 1), mf(2, 1), mf(1, 2), mf(2, 2), md(1, 1), &
+                        md(2, 1), md(1, 2), md(2, 2), f(1), f(2), f(3), gp(1), gp(2), gp(3), &
+                        pr(1), pr(2), pr(3), w, gl(1), gl(2), gl(3), gl(4), gl(5), gl(6), &
+                        gl(7), hh(1), hh(2), hh(3), hh(4), hh(5), hh(6), hh(7), hh(8), hh(9), &
+                        hh(10), hh(11), hh(12), hh(13), hh(14), hh(15), hh(16), hh(17), hh(18), &
+                        hh(19), hh(20), hh(21), hh(22), hh(23), hh(24), hh(25), hh(26), hh(27), &
+                        hh(28), hm(1), hm(2), hm(3), hm(4), hm(5), hm(6), hm(7), hm(8), hm(9), &
+                        hm(10), hm(11), hm(12), hm(13), hm(14), hm(15), hm(16), hm(17), hm(18), &
+                        hm(19), hm(20), hm(21), hm(22), hm(23), hm(24), hm(25), hm(26), hm(27), &
+                        hm(28), hm(29), hm(30), hm(31), hm(32), hm(33), hm(34), hm(35), hm(36), &
+                        hm(37), hm(38), hm(39), hm(40), hm(41), hm(42), hm(43), hm(44), hm(45), &
+                        hm(46), hm(47), hm(48), hm(49), hm(50), hm(51), hm(52), hm(53), hm(54), &
+                        hm(55), hm(56), hm(57), hm(58), hm(59), hm(60), hm(61), hm(62), hm(63), &
+                        hm(64), hm(65), hm(66), hm(67), hm(68), hm(69), hm(70), hm(71), hm(72), &
+                        hm(73), hm(74), hm(75), hm(76), hm(77), hm(78), hm(79), hm(80), hm(81), &
+                        hm(82), hm(83), hm(84))
+                    wt = quad%weight(p)/nqt
+                    energy = energy + wt*w
+                    k = 0
+                    do a = 1, 7
+                        do b = a, 7
+                            k = k + 1
+                            hmat(a, b) = hh(k)
+                            hmat(b, a) = hh(k)
+                        end do
+                    end do
+                    gmat = transpose(reshape(hm, [12, 7]))
+                    ! section factors of the field locals: column 1 with L_k,
+                    ! column 2 with L_k'
+                    sx = 0
+                    sy = 0
+                    do i = 1, nloc
+                        sx(1, i, 1) = v0(1, i, q)
+                        sx(2, i, 1) = gn(1, i, q)
+                        sx(3, i, 1) = gn(2, i, q)
+                        sx(4, i, 2) = v0(1, i, q)
+                        sx(5, nloc + i, 1) = gn(1, i, q)
+                        sx(6, nloc + i, 1) = gn(2, i, q)
+                        sx(7, nloc + i, 2) = v0(1, i, q)
+                        do c = 1, 2
+                            ! node coordinate (i, c): s_c, f_c1, f_c2 with L_k, v_c with L_k'
+                            sy(c, 2*(i - 1) + c, 1) = v0(1, i, q)
+                            sy(2 + c, 2*(i - 1) + c, 1) = gn(1, i, q)
+                            sy(4 + c, 2*(i - 1) + c, 1) = gn(2, i, q)
+                            sy(6 + c, 2*(i - 1) + c, 2) = v0(1, i, q)
+                        end do
+                    end do
+                    do ct1 = 1, 2
+                        do i = 1, nl2
+                            do k = 1, nt
+                                gloc(k, i) = gloc(k, i) + wt*dot_product(gl, sx(:, i, ct1))*lt(k, ct1)
+                            end do
+                        end do
+                        do ct2 = 1, 2
+                            am(:, :, ct1, ct2, m) = am(:, :, ct1, ct2, m) + &
+                                wt*matmul(transpose(sx(:, :, ct1)), matmul(hmat, sx(:, :, ct2)))
+                            as(:, :, ct1, ct2, m) = as(:, :, ct1, ct2, m) + &
+                                wt*matmul(transpose(sx(:, :, ct1)), matmul(gmat, sy(:, :, ct2)))
+                        end do
+                        ! axis: x_c with L_k, xd_c with L_k'
+                        do c = 1, 2
+                            ax(:, c, ct1, 1, m) = ax(:, c, ct1, 1, m) + &
+                                wt*matmul(transpose(sx(:, :, ct1)), gmat(:, 8 + c))
+                            ax(:, c, ct1, 2, m) = ax(:, c, ct1, 2, m) + &
+                                wt*matmul(transpose(sx(:, :, ct1)), gmat(:, 10 + c))
+                        end do
+                    end do
+                end do
+            end do
+            ! expand over the planes: rows (plane ki, local l), columns
+            allocate (hvl(nl2*nt, nl2*nt), svl(nl2*nt, nc2*nt + 2*nt))
+            hvl = 0
+            svl = 0
+            do m = 1, nqt
+                do ct1 = 1, 2
+                    do ct2 = 1, 2
+                        do kj = 1, nt
+                            do ki = 1, nt
+                                hvl((ki - 1)*nl2 + 1:ki*nl2, (kj - 1)*nl2 + 1:kj*nl2) = &
+                                    hvl((ki - 1)*nl2 + 1:ki*nl2, (kj - 1)*nl2 + 1:kj*nl2) + &
+                                    tb(ki, ct1, m)*tb(kj, ct2, m)*am(:, :, ct1, ct2, m)
+                                svl((ki - 1)*nl2 + 1:ki*nl2, (kj - 1)*nc2 + 1:kj*nc2) = &
+                                    svl((ki - 1)*nl2 + 1:ki*nl2, (kj - 1)*nc2 + 1:kj*nc2) + &
+                                    tb(ki, ct1, m)*tb(kj, ct2, m)*as(:, :, ct1, ct2, m)
+                                do c = 1, 2
+                                    svl((ki - 1)*nl2 + 1:ki*nl2, nc2*nt + 2*(kj - 1) + c) = &
+                                        svl((ki - 1)*nl2 + 1:ki*nl2, nc2*nt + 2*(kj - 1) + c) + &
+                                        tb(ki, ct1, m)*tb(kj, ct2, m)*ax(:, c, ct1, ct2, m)
+                                end do
+                            end do
+                        end do
+                    end do
+                end do
+            end do
+            do ki = 1, nt
+                do i = 1, nl2
+                    !$omp atomic
+                    gradient(global_row(i, ki, nloc, d0, n0, ntot)) = gradient(global_row(i, ki, nloc, d0, n0, ntot)) + gloc(ki, i)
+                end do
+            end do
+            nz_h = (cell - 1)*blk_h
+            do kj = 1, nt
+                do b = 1, nl2
+                    do ki = 1, nt
+                        do a = 1, nl2
+                            nz_h = nz_h + 1
+                            rh(nz_h) = global_row(a, ki, nloc, d0, n0, ntot)
+                            ch(nz_h) = global_row(b, kj, nloc, d0, n0, ntot)
+                            hv(nz_h) = hvl((ki - 1)*nl2 + a, (kj - 1)*nl2 + b)
+                        end do
+                    end do
+                end do
+            end do
+            nz_s = (cell - 1)*blk_s
+            do col = 1, nc2*nt + 2*nt
+                if (col <= nc2*nt) then
+                    kj = (col - 1)/nc2 + 1
+                    i = mod(col - 1, nc2) + 1
+                    idx_col = ((kj - 1)*n0 + d0((i - 1)/2 + 1) - 1)*2 + mod(i - 1, 2) + 1
+                else
+                    idx_col = 2*n0*nt + col - nc2*nt
+                end if
+                do ki = 1, nt
+                    do a = 1, nl2
+                        nz_s = nz_s + 1
+                        rs(nz_s) = global_row(a, ki, nloc, d0, n0, ntot)
+                        cs(nz_s) = idx_col
+                        sv(nz_s) = svl((ki - 1)*nl2 + a, col)
+                    end do
+                end do
+            end do
+            deallocate (sx, sy, am, as, ax, tb, gloc, hvl, svl)
+        end do
+        !$omp end parallel do
+        call csc_from_triplet(2*ntot, 2*ntot, ch, rh, hv, mm, info)
+        if (info%code /= 0) error stop 'Clebsch 3D shape: Hessian triplets'
+        hessian%nrow = 2*ntot
+        hessian%ncol = 2*ntot
+        hessian%row_ptr = mm%col_ptr
+        hessian%col = mm%row_idx
+        hessian%val = mm%val
+        ! shape(i, j): stored by rows (CSR) from the transposed CSC
+        call csc_from_triplet(ncol, 2*ntot, cs, rs, sv, mm, info)
+        if (info%code /= 0) error stop 'Clebsch 3D shape: shape triplets'
+        shape%nrow = 2*ntot
+        shape%ncol = ncol
+        shape%row_ptr = mm%col_ptr
+        shape%col = mm%row_idx
+        shape%val = mm%val
+    end subroutine clebsch_3d_shape_system
+
+    pure integer function global_row(l, k, nloc, d0, n0, ntot)
+        !! Global unknown of local field dof l (chi 1..nloc, g nloc + 1..2 nloc)
+        !! on plane k.
+        integer, intent(in) :: l, k, nloc, d0(:), n0, ntot
+
+        if (l <= nloc) then
+            global_row = d0(l) + n0*(k - 1)
+        else
+            global_row = ntot + d0(l - nloc) + n0*(k - 1)
+        end if
+    end function global_row
 
     pure function cross3(a, b) result(c)
         !! Cross product in right-handed (R, phi, Z) components.
