@@ -223,13 +223,52 @@ the same fluxes and lower energy (by 4.4e-5 and 2.3e-5), its axis about
 the gradient norm, any Hessian signature) the 8-cell solve started from the
 4-cell solution converges quadratically to the state next to the exact one
 (B 2.48e-3, rate 1.6 from 4 cells) while its axis error grows to 5.6e-3:
-the axis displacement is a very soft direction. Read as: this equilibrium
-is at or beyond marginal stability for an axis-displacing mode of the γ = 0
-energy, and a minimiser cannot be expected to return it; not verified by
-an eigenvalue of the Hessian. The label lane met the same case as "Newton
-stagnates, then diverges" (label plan, E4, ε = 1.2). The gate therefore
-runs 2 and 4 cells from the polar start; options of the test: `nested`,
-`stationary`, degree, planes.
+the axis displacement is a very soft direction. The label lane met the same
+case as "Newton stagnates, then diverges" (label plan, E4, ε = 1.2). The gate
+therefore runs 2 and 4 cells from the polar start; options of the test:
+`nested`, `stationary`, degree, planes.
+
+Hessian spectra (2026-11-22; `MILCA_FM3_HESSIAN=prefix` makes the driver
+write the Hessian, the state and a per-plane L² mass matrix of δu at every
+level; `benchmarks/flux-map-spike/hessian_spectrum.py` gives the lowest
+eigenvalues μ of H v = μ M v over the free slots, with the gauge penalty
+included). μ compares between meshes; the volume of the metric converges
+(2.835, 2.869, 2.871 on 2, 4, 8 cells). For scale, W/V ≈ 3.2e-2.
+
+| state (13 planes, degree 2) | negative μ | lowest μ |
+|---|---|---|
+| next to the exact state, 2 cells, polar start | 6 | −1.13e-2 … −3.0e-3 |
+| next to the exact state, 4 cells, polar start | 6 | −1.35e-2 … −5.0e-3 |
+| next to the exact state, 8 cells, stationary from 4 cells | 6 | −1.23e-2 … −3.9e-3 |
+| lower state, 4 cells, from 2 cells | 0 | +7.0e-4 |
+| lower state, 8 cells, from 4 cells (nested) / polar | 1 / 1 | −2.5e-4 / −9.3e-5 |
+
+- The state next to the exact one is a saddle with six unstable directions
+  whose eigenvalues converge in the section mesh. It is not marginal, and
+  the polar-start minimiser stops there only because its shift (1e-9)
+  makes it Newton, which converges to any stationary point. The earlier
+  reading "one soft axis-displacing mode" is withdrawn.
+- The lower states are minima up to one small negative μ at 8 cells
+  (2 % of the unstable ones), half of it along the rigid rotation of u;
+  presumably the θ* gauge against the symmetric penalty rows, not checked.
+- The count depends on the toroidal resolution, not on the section mesh:
+  8 negative μ on 17 planes at 2 cells (−1.27e-2 … −2.9e-3). On 21 planes
+  the polar start goes directly to a state with axis 0.14 from the exact
+  one and lower energy (2 cells: W 9.44446e-2 against 9.49015e-2, one
+  μ = −6e-5; 4 cells, stationary from it: W 9.2164e-2, gradient 2.6e-5,
+  not converged).
+- Hypothesis tested and ruled out as stated: the unstable modes are the
+  ideal internal kink at ι = 5 (ι runs from 4.73 on the axis to 5.11 at the
+  wall) and the lower state is its saturated helical core. Then the axis
+  displacement of the lower state would be dominated by |n| = 5. Measured
+  (FFT of δR + iδZ over the planes): 13 planes, n = −6 (2.5e-2), +6
+  (7.3e-3), −4 (5.6e-3), ±5 below 1e-3; 21 planes, n = −4 (8.7e-2),
+  +4, −6. On 13 planes n = 6 is the highest harmonic of the planes.
+- Open: whether the instability belongs to the continuous γ = 0 energy of
+  this exact state or to the toroidal discretisation. Deciding runs: the
+  spectrum at the state next to the exact one on 21 and more planes (needs
+  a start prolonged in t from 13 planes), and an independent stability
+  check of the exact state (forward map Hessian, Mercier criterion).
 
 QA driver (`test_flux_map_qa`, opt-in, not a registered test): the
 Landreman–Paul QA deck of [benchmarks/label-qa](../benchmarks/label-qa/README.md),

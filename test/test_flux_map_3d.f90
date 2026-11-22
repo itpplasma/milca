@@ -19,12 +19,16 @@ program test_flux_map_3d
     !! plane (2), extra section quadrature points (4), start of the levels after
     !! the first: 'cold' (default, the polar start), 'nested' (the previous
     !! level, minimisation) or 'stationary' (the previous level, Newton on
-    !! stationarity); cells of the first level (2); verbose.
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    !! stationarity); cells of the first level (2); verbose. With the
+    !! environment variable MILCA_FM3_HESSIAN=prefix every landreman level
+    !! writes its Hessian at the solution to prefix_<cells>_<degree>.bin
+    !! (benchmarks/flux-map-spike/hessian_spectrum.py).
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int32
     use fortfem_curve_chart, only: curve_chart_cylindrical
     use milca_nested_oracles, only: NESTED_SHEARED
-    use milca_eulerian_clebsch, only: clebsch_nfp
+    use milca_eulerian_clebsch, only: clebsch_nfp, clebsch_node_gradients
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
+    use fortsparse_csr, only: csr_t
     use flux_map_sections
     use solovev_label_fields, only: solovev_profiles, exact_b, boundary_samples, r0, alpha, &
         psi_b, chart
@@ -268,13 +272,70 @@ contains
             call fm3_axis(c, (k - 1)/real(nt, dp), landreman_fm, axis, st)
             if (st /= 0) error stop 'axis'
             a_err = max(a_err, norm2(axis - a(:, k)))
+            if (verbose) print '(a,i3,2es13.5)', '  axis minus exact axis, plane', k, axis - a(:, k)
         end do
         call system_clock(clock1)
         t1 = real(clock1 - clock0, dp)/rate
         print '(a,i2,a,i0,a,i3,a,es10.3,a,es10.3,a,es16.9,a,f7.2,a)', 'cells', n, '  unknowns ', &
             2*c%n0*nt, '  Newton', c%fm%steps, '  B error', e, '  axis', a_err, '  W', w, &
             '  (', t1, ' s)'
+        call dump_hessian(c, n, deg)
         previous = c
     end subroutine run_landreman
+
+    subroutine dump_hessian(c, n, deg)
+        !! Hessian of W at c%fm%z (with the gauge penalty, if any) as CSR,
+        !! with the fixed slots, the state and which section functions are
+        !! wall functions; stream file of 4-byte integers and 8-byte reals.
+        type(fm3_case_t), intent(in) :: c
+        integer, intent(in) :: n, deg
+        type(csr_t) :: h
+        real(dp), allocatable :: g(:)
+        real(dp) :: w
+        character(512) :: prefix, path
+        integer :: unit, length
+
+        call get_environment_variable('MILCA_FM3_HESSIAN', prefix, length)
+        if (length == 0) return
+        call flux_map3d_system(c%fm, c%derham, c%quad, landreman_fm, c%base, c%fm%z, w, g, h)
+        write (path, '(a,a,i0,a,i0,a)') trim(prefix), '_', n, '_', deg, '.bin'
+        open (newunit=unit, file=trim(path), access='stream', form='unformatted', &
+              status='replace')
+        write (unit) int(h%nrow, int32), int(size(h%val), int32), int(c%n0, int32), &
+            int(c%nt, int32), int(size(c%fm%fixed), int32), int(size(c%fm%gauge_target), int32)
+        write (unit) int(h%row_ptr, int32), int(h%col, int32), h%val, c%fm%z, g, &
+            int(c%fm%fixed, int32), merge(1_int32, 0_int32, c%fm%is_wall), w
+        write (unit) section_mass(c), c%base
+        close (unit)
+        print '(2a)', '  Hessian written to ', trim(path)
+    end subroutine dump_hessian
+
+    function section_mass(c) result(m)
+        !! Per plane k the mass matrix int phi_i phi_j R dA (2 pi/nt) of the
+        !! section functions in the geometry of plane k: with it H v = mu M v
+        !! has eigenvalues mu that compare between meshes (an L2 metric of
+        !! the perturbation of u; the wall angle slot taken as |delta u|).
+        type(fm3_case_t), intent(in) :: c
+        real(dp) :: m(c%n0, c%n0, c%nt)
+        real(dp), allocatable :: v0(:, :, :), gn(:, :, :)
+        integer, allocatable :: d0(:)
+        real(dp) :: f(2, 2), r, dv
+        integer :: cell, q, p, k
+
+        m = 0
+        do cell = 1, size(c%quad%point_offset)
+            call clebsch_node_gradients(c%derham, c%quad, cell, v0, d0, gn)
+            do q = 1, c%quad%points_per_cell
+                p = c%quad%point_offset(cell) + q - 1
+                do k = 1, c%nt
+                    f = matmul(c%base(:, d0, k), transpose(gn(:, :, q)))
+                    r = dot_product(c%base(1, d0, k), v0(1, :, q))
+                    dv = c%quad%weight(p)*abs(f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1))*r*2*pi/c%nt
+                    m(d0, d0, k) = m(d0, d0, k) + dv*spread(v0(1, :, q), 2, size(d0))* &
+                                   spread(v0(1, :, q), 1, size(d0))
+                end do
+            end do
+        end do
+    end function section_mass
 
 end program test_flux_map_3d
