@@ -33,6 +33,10 @@ module milca_eulerian_clebsch
         end subroutine clebsch_exact_field
     end interface
 
+    !! Field periods of the 3D systems: the planes span one period, phi =
+    !! 2 pi t / clebsch_nfp, so d/dphi = clebsch_nfp d/dt / (2 pi); the
+    !! energy is that of the whole torus (one period times clebsch_nfp).
+    integer, public :: clebsch_nfp = 1
     public :: clebsch_profiles, clebsch_axisym_system, clebsch_node_gradients, &
               clebsch_3d_system, clebsch_exact_field, clebsch_3d_shape_system
 
@@ -228,7 +232,8 @@ contains
         ferr = 0
         !$omp parallel do schedule(dynamic) default(private) &
         !$omp shared(derham, quad, nt, chi, g, axis, plane_axis, plane_nodes, plane_frames, &
-        !$omp        gradient, rows, cols, vals, n0, ntot, nqt, blk, hessian, field_error) &
+        !$omp        gradient, rows, cols, vals, n0, ntot, nqt, blk, hessian, field_error, &
+        !$omp        clebsch_nfp) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
             call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
@@ -258,6 +263,7 @@ contains
                 do m = 1, nqt
                     t = (m - 1)/real(nqt, dp)
                     call spline_derham_t_basis(nt, t, lt, ht)
+                    lt(:, 2) = clebsch_nfp*lt(:, 2)
                     ! the point, F = ds/ds0, the mesh velocity ds/dt and the axis
                     sm = s
                     fm = reshape([1.0_dp, 0.0_dp, 0.0_dp, 1.0_dp], [2, 2])
@@ -328,7 +334,7 @@ contains
                         ! B = grad g x grad chi + F' grad chi x h + G' grad chi x grad phi
                         bv = cross3(gg, gc) + f(1)*cross3(gc, hv) &
                              + gp(1)*cross3(gc, [0.0_dp, 1/sm(1), 0.0_dp])
-                        call exact_field([sm(1), two_pi*t, sm(2)], bx)
+                        call exact_field([sm(1), two_pi*t/clebsch_nfp, sm(2)], bx)
                         ferr = ferr + wt*[sum((bv - bx)**2), sum(bx**2)]
                     end if
                     gloc = gloc + wt*matmul(gu, du)
@@ -484,6 +490,7 @@ contains
             do m = 1, nqt
                 t = (m - 1)/real(nqt, dp)
                 call spline_derham_t_basis(nt, t, lt, ht)
+                lt(:, 2) = clebsch_nfp*lt(:, 2)
                 tb(:, :, m) = lt
                 xa = matmul(plane_axis, lt(:, 1))
                 xd = matmul(plane_axis, lt(:, 2))
