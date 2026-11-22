@@ -7,7 +7,8 @@ module milca_eulerian_vacuum
     use fortfem_spline_eval, only: spline_quadrature_t
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_mass, derham_metric
     use fortfem_sparse_direct, only: sparse_direct_factor_t, sparse_direct_factor_csc, &
-        sparse_direct_solve_factored, sparse_direct_free
+        sparse_direct_solve_factored, sparse_direct_free, sparse_direct_refactor_csc, &
+        sparse_direct_factor_symmetric_csc, sparse_direct_inertia, SPARSE_DIRECT_LOWER
     use fortsparse_csr, only: csr_t, csr_transpose, csr_multiply, csr_budget_t, csr_matvec
     use fortsparse_status, only: fortsparse_status_t
     use fortsparse_pcg, only: pcg_params_t, pcg_handle_t, pcg_setup_ams, pcg_solve, &
@@ -17,7 +18,7 @@ module milca_eulerian_vacuum
 
     public :: eu_curl_curl, eu_constrained_solve, eu_to_csr, eu_ams_solve
     public :: eu_constrained_t, eu_constrained_factor, eu_constrained_apply, &
-              eu_constrained_free
+              eu_constrained_free, eu_constrained_refactor, eu_constrained_inertia
 
     type :: eu_constrained_t
         !! A factorised free block of K (fixed rows and columns removed), for
@@ -26,6 +27,8 @@ module milca_eulerian_vacuum
         type(sparse_direct_factor_t) :: factor
         integer, allocatable :: free(:)
         integer :: n = 0
+        !! K given as its upper triangle by rows, factorised by LDL^T
+        logical :: symmetric = .false.
     end type eu_constrained_t
 
 contains
@@ -116,18 +119,24 @@ contains
         if (status == 0) a(free) = x
     end subroutine eu_constrained_solve
 
-    subroutine eu_constrained_factor(k, fixed, c, status)
+    subroutine eu_constrained_factor(k, fixed, c, status, symmetric)
         !! Factorises the free block of K (K stored by rows of K^T, as in
-        !! eu_constrained_solve).
+        !! eu_constrained_solve). With symmetric, K is symmetric and k holds
+        !! only its upper triangle (columns >= row, diagonal included); the
+        !! free block is factorised by LDL^T, which also gives the inertia
+        !! (eu_constrained_inertia).
         type(csr_t), intent(in) :: k
         integer, intent(in) :: fixed(:)
         type(eu_constrained_t), intent(out) :: c
         integer, intent(out) :: status
+        logical, intent(in), optional :: symmetric
         integer, allocatable :: local(:), colptr(:), rowind(:)
         real(dp), allocatable :: val(:)
         integer :: nf, i, j, p, nz
 
         c%n = k%nrow
+        c%symmetric = .false.
+        if (present(symmetric)) c%symmetric = symmetric
         allocate (local(c%n))
         local = 1
         local(fixed) = 0
@@ -149,8 +158,60 @@ contains
             end do
             colptr(j + 1) = nz + 1
         end do
-        call sparse_direct_factor_csc(c%factor, nf, colptr, rowind(:nz), val(:nz), status)
+        if (c%symmetric) then
+            ! the rows of the upper triangle are the columns of the lower one
+            call sparse_direct_factor_symmetric_csc(c%factor, nf, colptr, rowind(:nz), &
+                val(:nz), status, SPARSE_DIRECT_LOWER)
+        else
+            call sparse_direct_factor_csc(c%factor, nf, colptr, rowind(:nz), val(:nz), status)
+        end if
     end subroutine eu_constrained_factor
+
+    subroutine eu_constrained_refactor(k, fixed, c, status, symmetric)
+        !! As eu_constrained_factor for a K whose sparsity pattern and fixed
+        !! slots equal those of the last factorisation of c (Newton steps,
+        !! shifted Hessians): FortSparse keeps the fill-reducing ordering and
+        !! the symbolic analysis and redoes only the numerical factorisation.
+        !! A first call (c not factorised), another size, or another
+        !! symmetric flag factorises afresh. symmetric as in
+        !! eu_constrained_factor (k the upper triangle).
+        type(csr_t), intent(in) :: k
+        integer, intent(in) :: fixed(:)
+        type(eu_constrained_t), intent(inout) :: c
+        integer, intent(out) :: status
+        logical, intent(in), optional :: symmetric
+        integer, allocatable :: local(:), colptr(:), rowind(:)
+        real(dp), allocatable :: val(:)
+        integer :: nf, i, j, p, nz
+        logical :: sym
+
+        sym = .false.
+        if (present(symmetric)) sym = symmetric
+        if (c%n /= k%nrow .or. .not. allocated(c%free) .or. (c%symmetric .neqv. sym)) then
+            call eu_constrained_free(c)
+            call eu_constrained_factor(k, fixed, c, status, sym)
+            return
+        end if
+        nf = size(c%free)
+        allocate (local(c%n))
+        local = 0
+        local(c%free) = [(i, i=1, nf)]
+        allocate (colptr(nf + 1), rowind(size(k%val)), val(size(k%val)))
+        colptr(1) = 1
+        nz = 0
+        do j = 1, nf
+            i = c%free(j)
+            do p = k%row_ptr(i), k%row_ptr(i + 1) - 1
+                if (local(k%col(p)) > 0) then
+                    nz = nz + 1
+                    rowind(nz) = local(k%col(p))
+                    val(nz) = k%val(p)
+                end if
+            end do
+            colptr(j + 1) = nz + 1
+        end do
+        call sparse_direct_refactor_csc(c%factor, nf, colptr, rowind(:nz), val(:nz), status)
+    end subroutine eu_constrained_refactor
 
     subroutine eu_constrained_apply(c, rhs, a, status)
         !! a = K_ff^(-1) rhs_f on the free rows, 0 on the fixed rows.
@@ -166,12 +227,25 @@ contains
         if (status == 0) a(c%free) = x
     end subroutine eu_constrained_apply
 
+    subroutine eu_constrained_inertia(c, negative, zero, positive, reliable, status)
+        !! Eigenvalue counts of the free block of the last symmetric
+        !! factorisation of c (Sylvester inertia of its LDL^T); status /= 0
+        !! for an LU factor.
+        type(eu_constrained_t), intent(inout) :: c
+        integer, intent(out) :: negative, zero, positive
+        logical, intent(out) :: reliable
+        integer, intent(out) :: status
+
+        call sparse_direct_inertia(c%factor, negative, zero, positive, status, reliable)
+    end subroutine eu_constrained_inertia
+
     subroutine eu_constrained_free(c)
         type(eu_constrained_t), intent(inout) :: c
 
         call sparse_direct_free(c%factor)
         if (allocated(c%free)) deallocate (c%free)
         c%n = 0
+        c%symmetric = .false.
     end subroutine eu_constrained_free
 
     subroutine eu_ams_solve(k, grad, interpolation, n0, fixed, values, fixed_nodes, a, &

@@ -243,6 +243,19 @@ included). μ compares between meshes; the volume of the metric converges
 | lower state, 4 cells, from 2 cells | 0 | +7.0e-4 |
 | lower state, 8 cells, from 4 cells (nested) / polar | 1 / 1 | −2.5e-4 / −9.3e-5 |
 
+Inertia without the dump (2026-11-22): `flux_map3d_system` assembles only the
+upper triangle of the Hessian (local blocks la <= lb, blocks (1,1), (1,2),
+(2,2) of the section-pair sums, the (2,1) block being the transpose of (1,2)),
+so it is symmetric by construction, and `flux_map3d_solve` factorises that
+triangle with FortSparse's LDL^T (`options%triangle`), which reports the
+Sylvester inertia. At convergence the solver factorises the unshifted
+Hessian once more and sets `flux_map3d_t%negative_eigenvalues`, printed with
+`verbose`. It reproduces the dense spectra: 6 on the 4-cell, 13-plane
+Landreman state, 0 on the QA vacuum stages (9, 13, 29 planes), 2, 2, 4 on the
+Solov'ev states of 2, 4, 8 cells (also saddles of W; the gate checks these).
+`flux_map3d_expand_symmetric` mirrors the triangle where a full matrix is
+needed (the dump).
+
 - The state next to the exact one is a saddle with six unstable directions
   whose eigenvalues converge in the section mesh. It is not marginal, and
   the polar-start minimiser stops there only because its shift (1e-9)

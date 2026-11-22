@@ -21,14 +21,15 @@ module milca_flux_map_3d
     !! = y_ik (interior; unused and fixed for wall functions). Kernel:
     !! generated leaf flux_map_energy_3d. B enters pointwise: every per-cell
     !! projection tried in 3D was unstable (docs/flux-map.md).
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use fortfem_spline_eval, only: spline_quadrature_t
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_t_basis
-    use fortsparse_csr, only: csr_t, csr_matvec
+    use fortsparse_csr, only: csr_t
     use fortsparse_csc, only: csc_t, csc_from_triplet
     use fortsparse_status, only: fortsparse_status_t
     use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp, clebsch_exact_field
-    use milca_eulerian_vacuum, only: eu_constrained_solve
+    use milca_eulerian_vacuum, only: eu_constrained_t, eu_constrained_refactor, &
+        eu_constrained_apply, eu_constrained_free, eu_constrained_inertia
     use milca_flux_map, only: flux_map_profiles
     use milca_flux_map_leaves, only: flux_map_energy_3d
     implicit none
@@ -56,11 +57,21 @@ module milca_flux_map_3d
         integer :: steps = 0
         real(dp) :: energy = 0, gradient_norm = 0
         logical :: converged = .false., verbose = .false.
+        !! Newton steps by the symmetric LDL^T factorisation of the upper
+        !! triangle of the Hessian (FortSparse); .false.: LU of the mirrored
+        !! full matrix (same triangle assembly), which gives no inertia.
+        logical :: symmetric_solver = .true.
+        !! Inertia of the free block of the Hessian (gauge penalty included)
+        !! at the converged state: numbers of negative and zero eigenvalues
+        !! (-1: not computed, i.e. not converged or LU), and whether every
+        !! pivot was clear of its rounding threshold.
+        integer :: negative_eigenvalues = -1, zero_eigenvalues = -1
+        logical :: inertia_reliable = .false.
     end type flux_map3d_t
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
     public :: flux_map3d_init, flux_map3d_gauge_row, flux_map3d_system, flux_map3d_solve, &
-              flux_map3d_point
+              flux_map3d_point, flux_map3d_expand_symmetric
 
 contains
 
@@ -167,8 +178,12 @@ contains
 
     subroutine flux_map3d_system(fm, derham, quad, profiles, plane_nodes, z, energy, gradient, &
                                  hessian, exact_field, field_error)
-        !! Energy at z; with gradient and hessian also the derivatives (the
-        !! Hessian by rows, symmetric). derham and quad belong to the section
+        !! Energy at z; with gradient and hessian also the derivatives. The
+        !! Hessian is symmetric and only its UPPER triangle (columns >= row,
+        !! diagonal included) is assembled, by rows (CSR): symmetric by
+        !! construction, a third of the work of the full matrix.
+        !! flux_map3d_expand_symmetric mirrors it where a full matrix is
+        !! needed. derham and quad belong to the section
         !! geometry the gradients of clebsch_node_gradients refer to (plane 1
         !! of the callers here); plane_nodes(2, n0, nt) are the (R, Z) node
         !! coordinates of every plane. field_error: sum of w |B - B_exact|^2
@@ -183,10 +198,10 @@ contains
         type(csr_t), intent(out), optional :: hessian
         procedure(clebsch_exact_field), optional :: exact_field
         real(dp), intent(out), optional :: field_error(2)
-        real(dp), allocatable :: v0(:, :, :), gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :, :), &
+        real(dp), allocatable :: v0(:, :, :), gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :), &
                                  tb(:, :, :), gloc(:), hloc(:, :), vals(:), zx(:, :), zy(:, :), &
                                  ax(:), ay(:), bx(:), by(:), lam(:), mw(:, :), gsec(:, :), &
-                                 hs(:, :), lm(:)
+                                 hs(:, :), lm(:), ltab(:, :, :)
         integer, allocatable :: d0(:), ix(:), iy(:), idx(:), rows(:), cols(:)
         logical, allocatable :: is_w(:)
         real(dp) :: lt(fm%nt, 2), ht(fm%nt, 2), sk(2, fm%nt), gk(2, 2, fm%nt), sm(2), f(2, 2), &
@@ -194,7 +209,7 @@ contains
                     tau(3), gp(3), pr(3), w, wg(8), wh(36), h8(8, 8), ref, shift, k11, k12, &
                     vm(3), et(3), c3(3), gs(3), bv(3), bx3(3), ferr(2), resid, sn, cs
         integer :: n0, nt, ntot, nqt, cell, q, p, m, i, j, k, a, b, c1, c2, nloc, nsec, nl, &
-                   nz, blk, il, jl, la, lb, row
+                   nz, blk, il, jl, la, lb, row, gi, gj, nlmax, ia, ib
         logical :: derivs
         type(csc_t) :: mm
         type(fortsparse_status_t) :: info
@@ -206,7 +221,17 @@ contains
         derivs = present(gradient)
         energy = 0
         ferr = 0
-        blk = (2*(derham%degree + 1)**2*nt)**2
+        nlmax = 2*(derham%degree + 1)**2*nt
+        ! triplets of the upper triangle of one cell's local Hessian
+        blk = nlmax*(nlmax + 1)/2
+        ! the toroidal basis at the nqt points t_m, the same for every section
+        ! point (one evaluation costs O(nt^2) trigonometric functions)
+        allocate (ltab(nt, 2, nqt))
+        do m = 1, nqt
+            call spline_derham_t_basis(nt, (m - 1)/real(nqt, dp), lt, ht)
+            ltab(:, 1, m) = lt(:, 1)
+            ltab(:, 2, m) = clebsch_nfp*lt(:, 2)
+        end do
         if (derivs) then
             allocate (gradient(2*ntot), source=0.0_dp)
             if (present(hessian)) then
@@ -221,7 +246,7 @@ contains
         end if
         !$omp parallel do schedule(dynamic) default(private) &
         !$omp shared(fm, derham, quad, plane_nodes, z, gradient, rows, cols, vals, n0, nt, &
-        !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error) &
+        !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error, ltab) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
             call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
@@ -245,7 +270,7 @@ contains
             allocate (sx(8, nsec, 2), gsec(nsec, 2), hs(nsec, nsec), idx(nl), gloc(nl))
             if (present(hessian)) then
                 if (allocated(am)) deallocate (am, tb, hloc)
-                allocate (am(nsec, nsec, 2, 2, nqt), tb(nt, 2, nqt), hloc(nl, nl))
+                allocate (am(nsec, nsec, 3, nqt), tb(nt, 2, nqt), hloc(nl, nl))
                 am = 0
                 hloc = 0
             end if
@@ -277,8 +302,7 @@ contains
                 end do
                 do m = 1, nqt
                     t = (m - 1)/real(nqt, dp)
-                    call spline_derham_t_basis(nt, t, lt, ht)
-                    lt(:, 2) = clebsch_nfp*lt(:, 2)
+                    lt = ltab(:, :, m)
                     sm = matmul(sk, lt(:, 1))
                     vel = matmul(sk, lt(:, 2))
                     f = 0
@@ -332,12 +356,13 @@ contains
                         end do
                     end do
                     tb(:, :, m) = lt
-                    do c2 = 1, 2
-                        do c1 = 1, 2
-                            am(:, :, c1, c2, m) = am(:, :, c1, c2, m) + &
-                                wt*matmul(transpose(sx(:, :, c1)), matmul(h8, sx(:, :, c2)))
-                        end do
-                    end do
+                    ! blocks (1,1), (1,2), (2,2); (2,1) is the transpose of (1,2)
+                    am(:, :, 1, m) = am(:, :, 1, m) + &
+                        wt*matmul(transpose(sx(:, :, 1)), matmul(h8, sx(:, :, 1)))
+                    am(:, :, 2, m) = am(:, :, 2, m) + &
+                        wt*matmul(transpose(sx(:, :, 1)), matmul(h8, sx(:, :, 2)))
+                    am(:, :, 3, m) = am(:, :, 3, m) + &
+                        wt*matmul(transpose(sx(:, :, 2)), matmul(h8, sx(:, :, 2)))
                     if (sig > 0) then
                         ! second derivatives of the wall part, contracted with wg
                         sn = sin(th)
@@ -355,10 +380,9 @@ contains
                             do i = 1, nloc
                                 if (.not. is_w(i)) cycle
                                 a = ix(i)
-                                am(a, b, 1, 1, m) = am(a, b, 1, 1, m) + wt*(k11*lam(i)*lam(j) &
-                                                    + lam(i)*lm(j) + lam(j)*lm(i))
-                                am(a, b, 1, 2, m) = am(a, b, 1, 2, m) + wt*k12*lam(i)*lam(j)
-                                am(a, b, 2, 1, m) = am(a, b, 2, 1, m) + wt*k12*lam(i)*lam(j)
+                                am(a, b, 1, m) = am(a, b, 1, m) + wt*(k11*lam(i)*lam(j) &
+                                                 + lam(i)*lm(j) + lam(j)*lm(i))
+                                am(a, b, 2, m) = am(a, b, 2, m) + wt*k12*lam(i)*lam(j)
                             end do
                         end do
                     end if
@@ -370,31 +394,38 @@ contains
                 gradient(idx(i)) = gradient(idx(i)) + gloc(i)
             end do
             if (.not. present(hessian)) cycle
+            ! upper block triangle of the local Hessian: block (la, lb), la <= lb,
+            ! is sum_m [t1a t1b A11 + t1a t2b A12 + t2a t1b A12^T + t2a t2b A22]
             do m = 1, nqt
-                do c2 = 1, 2
-                    do c1 = 1, 2
-                        hs = am(:, :, c1, c2, m)
-                        do lb = 1, nt
-                            if (tb(lb, c2, m) == 0) cycle
-                            do la = 1, nt
-                                w = tb(la, c1, m)*tb(lb, c2, m)
-                                if (w == 0) cycle
-                                il = (la - 1)*nsec
-                                jl = (lb - 1)*nsec
-                                hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
-                                    hloc(il + 1:il + nsec, jl + 1:jl + nsec) + w*hs
-                            end do
-                        end do
+                do lb = 1, nt
+                    do la = 1, lb
+                        il = (la - 1)*nsec
+                        jl = (lb - 1)*nsec
+                        w = tb(la, 1, m)*tb(lb, 1, m)
+                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
+                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + w*am(:, :, 1, m)
+                        w = tb(la, 1, m)*tb(lb, 2, m)
+                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
+                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + w*am(:, :, 2, m)
+                        w = tb(la, 2, m)*tb(lb, 1, m)
+                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
+                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + &
+                            w*transpose(am(:, :, 2, m))
+                        w = tb(la, 2, m)*tb(lb, 2, m)
+                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
+                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + w*am(:, :, 3, m)
                     end do
                 end do
             end do
+            ! local entries (ia, ib), ia <= ib (a pair once; the diagonal blocks
+            ! hold both orders, only ia <= ib is taken), to global (min, max)
             nz = (cell - 1)*blk
-            do j = 1, nl
-                do i = 1, nl
+            do ib = 1, nl
+                do ia = 1, ib
                     nz = nz + 1
-                    rows(nz) = idx(i)
-                    cols(nz) = idx(j)
-                    vals(nz) = hloc(i, j)
+                    rows(nz) = min(idx(ia), idx(ib))
+                    cols(nz) = max(idx(ia), idx(ib))
+                    vals(nz) = hloc(ia, ib)
                 end do
             end do
         end do
@@ -410,10 +441,10 @@ contains
                 if (derivs) gradient(cg) = gradient(cg) + fm%gauge_weight*resid*vg
                 if (present(hessian)) then
                     do b = 1, size(cg)
-                        do a = 1, size(cg)
+                        do a = 1, b
                             nz = nz + 1
-                            rows(nz) = cg(a)
-                            cols(nz) = cg(b)
+                            rows(nz) = min(cg(a), cg(b))
+                            cols(nz) = max(cg(a), cg(b))
                             vals(nz) = fm%gauge_weight*vg(a)*vg(b)
                         end do
                     end do
@@ -517,14 +548,21 @@ contains
         real(dp), intent(in) :: plane_nodes(:, :, :), tolerance
         integer, intent(in) :: max_steps
         integer, intent(out) :: status
-        type(csr_t) :: hessian, shifted
+        type(csr_t) :: hessian, shifted, full
+        type(eu_constrained_t) :: factor
         real(dp), allocatable :: grad(:), diag(:), delta(:), hd(:), zt(:), zero(:), gt(:)
         real(dp) :: w, wt, lam, dmin, pred, alpha
-        integer :: it, i, p, n, st
-        logical :: accepted
+        integer :: it, i, p, n, st, nneg, nzero, npos
+        logical :: accepted, sure
         logical, allocatable :: free(:)
+        integer(int64) :: c0, c1, rate
+        real(dp) :: t_hess, t_energy, t_solve
 
         n = 2*fm%n0*fm%nt
+        t_hess = 0
+        t_energy = 0
+        t_solve = 0
+        call system_clock(c0, rate)
         allocate (diag(n), delta(n), hd(n), free(n), zero(size(fm%fixed)))
         zero = 0
         free = .true.
@@ -532,6 +570,9 @@ contains
         lam = 1e-9_dp
         fm%steps = 0
         fm%converged = .false.
+        fm%negative_eigenvalues = -1
+        fm%zero_eigenvalues = -1
+        fm%inertia_reliable = .false.
         status = 2
         if (fm%gauge_weight == 0 .and. size(fm%gauge_target) > 0) then
             call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, fm%z, w, grad, hessian)
@@ -539,7 +580,9 @@ contains
             fm%gauge_weight = sum(abs(diag), free)/count(free)
         end if
         do it = 0, max_steps
+            call tick(c0)
             call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, fm%z, w, grad, hessian)
+            call tock(c0, t_hess)
             call diagonal(hessian, diag)
             grad(fm%fixed) = 0
             fm%energy = w
@@ -549,21 +592,31 @@ contains
             if (fm%gradient_norm < tolerance) then
                 fm%converged = .true.
                 status = 0
+                call inertia_at_convergence()
+                call report()
                 return
             end if
-            if (it == max_steps) return
+            if (it == max_steps) then
+                call report()
+                return
+            end if
             dmin = minval(abs(diag), free)
             accepted = .false.
             if (fm%stationary) then
-                call eu_constrained_solve(hessian, -grad, fm%fixed, zero, delta, st)
+                call tick(c0)
+                call constrained_solve(hessian, -grad, delta, st)
+                call tock(c0, t_solve)
                 if (st /= 0) then
                     status = 1
+                    call report()
                     return
                 end if
                 alpha = 1
                 do while (alpha > 1e-4_dp)
                     zt = fm%z + alpha*delta
+                    call tick(c0)
                     call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zt, wt, gt)
+                    call tock(c0, t_energy)
                     gt(fm%fixed) = 0
                     if (norm2(pack(gt/sqrt(abs(diag) + tiny(1.0_dp)), free)) < &
                         (1 - alpha/4)*fm%gradient_norm) then
@@ -574,6 +627,7 @@ contains
                 end do
                 if (.not. accepted) then
                     status = 1
+                    call report()
                     return
                 end if
                 fm%z = zt
@@ -587,12 +641,16 @@ contains
                         if (shifted%col(p) == i) shifted%val(p) = shifted%val(p) + lam*dmin
                     end do
                 end do
-                call eu_constrained_solve(shifted, -grad, fm%fixed, zero, delta, st)
+                call tick(c0)
+                call constrained_solve(shifted, -grad, delta, st)
+                call tock(c0, t_solve)
                 if (st == 0) then
-                    call csr_matvec(hessian, delta, hd)
+                    call upper_matvec(hessian, delta, hd)
                     pred = -(dot_product(grad, delta) + 0.5_dp*dot_product(delta, hd))
                     zt = fm%z + delta
+                    call tick(c0)
                     call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zt, wt)
+                    call tock(c0, t_energy)
                     if (pred > 0 .and. wt == wt .and. &
                         w - wt > 1e-4_dp*pred - 1e-14_dp*abs(w)) then
                         fm%z = zt
@@ -606,10 +664,140 @@ contains
             end do
             if (.not. accepted) then
                 status = 1
+                call report()
                 return
             end if
         end do
+
+    contains
+
+        subroutine tick(c)
+            integer(int64), intent(out) :: c
+            call system_clock(c)
+        end subroutine tick
+
+        subroutine tock(c, acc)
+            integer(int64), intent(in) :: c
+            real(dp), intent(inout) :: acc
+            integer(int64) :: now
+            call system_clock(now)
+            acc = acc + real(now - c, dp)/rate
+        end subroutine tock
+
+        subroutine constrained_solve(k, rhs, x, status)
+            !! K x = rhs on the free slots, x = 0 on the fixed ones; one factor
+            !! object for the whole solve, so the ordering and the symbolic
+            !! analysis of the fixed pattern are computed once.
+            type(csr_t), intent(in) :: k
+            real(dp), intent(in) :: rhs(:)
+            real(dp), intent(out) :: x(:)
+            integer, intent(out) :: status
+
+            call factorise(k, status)
+            if (status == 0) call eu_constrained_apply(factor, rhs, x, status)
+        end subroutine constrained_solve
+
+        subroutine factorise(k, status)
+            !! k: upper triangle of a symmetric matrix of the pattern of the
+            !! Hessian: LDL^T of it, or LU of its mirror.
+            type(csr_t), intent(in) :: k
+            integer, intent(out) :: status
+
+            if (fm%symmetric_solver) then
+                call eu_constrained_refactor(k, fm%fixed, factor, status, symmetric=.true.)
+            else
+                call flux_map3d_expand_symmetric(k, full)
+                call eu_constrained_refactor(full, fm%fixed, factor, status)
+            end if
+        end subroutine factorise
+
+        subroutine inertia_at_convergence()
+            !! Inertia of the Hessian itself (no shift) at the final state.
+            if (.not. fm%symmetric_solver) return
+            call tick(c0)
+            call factorise(hessian, st)
+            call tock(c0, t_solve)
+            ! an exactly singular block still has its counts
+            call eu_constrained_inertia(factor, nneg, nzero, npos, sure, st)
+            if (st /= 0) return
+            fm%negative_eigenvalues = nneg
+            fm%zero_eigenvalues = nzero
+            fm%inertia_reliable = sure
+            if (fm%verbose) print '(a,i0,a,i0,a,i0,a,l1)', &
+                '    Hessian inertia at the solution (negative, zero, positive): ', nneg, ', ', &
+                nzero, ', ', npos, '  reliable ', sure
+        end subroutine inertia_at_convergence
+
+        subroutine report()
+            call eu_constrained_free(factor)
+            if (fm%verbose) print '(a,3f9.2)', '    time: energy+gradient+Hessian, energy(+gradient), linear solves (s)', &
+                t_hess, t_energy, t_solve
+        end subroutine report
     end subroutine flux_map3d_solve
+
+    subroutine flux_map3d_expand_symmetric(upper, full)
+        !! The full symmetric matrix of a Hessian given as its upper
+        !! triangle by rows: every off-diagonal entry mirrored, exactly
+        !! symmetric, rows ascending.
+        type(csr_t), intent(in) :: upper
+        type(csr_t), intent(out) :: full
+        integer, allocatable :: cnt(:), fill(:)
+        integer :: n, i, p, j, q
+
+        n = upper%nrow
+        allocate (cnt(n), fill(n))
+        cnt = 0
+        do i = 1, n
+            do p = upper%row_ptr(i), upper%row_ptr(i + 1) - 1
+                j = upper%col(p)
+                cnt(i) = cnt(i) + 1
+                if (j /= i) cnt(j) = cnt(j) + 1
+            end do
+        end do
+        full%nrow = n
+        full%ncol = n
+        allocate (full%row_ptr(n + 1))
+        full%row_ptr(1) = 1
+        do i = 1, n
+            full%row_ptr(i + 1) = full%row_ptr(i) + cnt(i)
+        end do
+        allocate (full%col(full%row_ptr(n + 1) - 1), full%val(full%row_ptr(n + 1) - 1))
+        fill = full%row_ptr(1:n)
+        ! rows ascending: row j receives the mirrored entries of the rows i < j
+        ! (in the order of i) before its own, which have columns >= j
+        do i = 1, n
+            do p = upper%row_ptr(i), upper%row_ptr(i + 1) - 1
+                j = upper%col(p)
+                q = fill(i)
+                full%col(q) = j
+                full%val(q) = upper%val(p)
+                fill(i) = q + 1
+                if (j /= i) then
+                    q = fill(j)
+                    full%col(q) = i
+                    full%val(q) = upper%val(p)
+                    fill(j) = q + 1
+                end if
+            end do
+        end do
+    end subroutine flux_map3d_expand_symmetric
+
+    pure subroutine upper_matvec(a, x, y)
+        !! y = A x for the symmetric A given by its upper triangle by rows.
+        type(csr_t), intent(in) :: a
+        real(dp), intent(in) :: x(:)
+        real(dp), intent(out) :: y(:)
+        integer :: i, p, j
+
+        y = 0
+        do i = 1, a%nrow
+            do p = a%row_ptr(i), a%row_ptr(i + 1) - 1
+                j = a%col(p)
+                y(i) = y(i) + a%val(p)*x(j)
+                if (j /= i) y(j) = y(j) + a%val(p)*x(i)
+            end do
+        end do
+    end subroutine upper_matvec
 
     pure subroutine diagonal(a, d)
         type(csr_t), intent(in) :: a
