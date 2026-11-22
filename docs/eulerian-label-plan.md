@@ -547,6 +547,36 @@ at 12 cells: 8.3e-1, 2.8e-2, 2.6e-4, 1.5e-7, 3.1e-8. The gate takes 2 min
   as an input (I_p instead of G'), and a coil-only Γ_c (filament coils as
   in `gs_spline_free`).
 
+E6b result (`test_eulerian_clebsch_free_boundary_3d`, the design below;
+sheared family eps 0.6, S 2.4, delta 0.2, B_s the oracle field, Gamma_c the
+oracle surface chi = 1.5, p = (delta - psi)/lambda^2; 4 cells, 9 planes,
+M = 6 per plane, 3456 unknowns; start: Gamma_p radius by 1 % and its
+m = 1 modes, the axis by 2e-3 helically, the labels by 1 %):
+
+| | exact state on the mesh | start | Newton |
+|---|---|---|---|
+| L2 error of B in the plasma | 2.09e-2 (g fitted) | 3.31e-2 | 1.67e-2 |
+| max radial error of Gamma_p | 5.87e-3 (truncation at M = 6) | 1.15e-2 | 5.65e-3 |
+| axis | 0 | 2.0e-3 | 4.2e-3 |
+| \|grad Phi\| relative to \|B_s\| (exact 0) | 0 | 0 | 9.2e-3 |
+
+Stage 1 (Gamma_p frozen) 6 steps, stage 2 (free) 3 steps: \|r\| 3.1e-2,
+2.1e-3, 1.7e-5, 8.2e-9. The Newton matrix agrees with differences of the
+residual to 1e-8 or better in every block (argument `jacobian`, 2 cells).
+Slow (4.5 min on 24 threads): the 2 nt + nt(2M + 1) difference columns each
+evaluate the whole 3D residual.
+
+- The Fourier series about the plane's axis converges slowly for these
+  shaped sections (truncation 4e-2 at M = 3, 6e-3 at M = 6), and modes the
+  boundary cells cannot carry (M above about a third of the 4n boundary
+  cells) make the Newton matrix nearly singular (2 cells, M = 6: stage 2
+  stalls). A refinement ladder needs M with n, or a boundary parametrised
+  by the mesh itself.
+- To do: analytic shape-derivative columns; the poloidal circulation of
+  Phi (plasma current) and filament coils as B_s; the per-mode exterior map
+  on Gamma_c instead of the conducting wall; the solver moved from the test
+  into a module and an application.
+
 E6b (3D, design). The plasma is E4 on per-plane O-grids whose wall is
 Γ_p(θ, φ) and whose core follows the axis curve. The shell field is split,
 B = B_s + ∇Φ: B_s a given divergence-free source field (the coil field by
@@ -585,8 +615,9 @@ reaches order p at p = 2.
 6. Islands and rational surfaces, E5. Open whether Newton from nested
    initial labels finds the island topology, or whether the topology has to
    be seeded.
-7. Free boundary, E6: E6a (axisymmetric) done; E6b (3D, scalar-potential
-   shell with the coil split) next. Then the solver: Newton–Krylov with AMS
+7. Free boundary, E6: E6a (axisymmetric) and E6b (3D, scalar-potential
+   shell with a conducting wall, exact oracle case) done; next the plasma
+   current and filament coils, the exterior map, analytic shape columns. Then the solver: Newton–Krylov with AMS
    for the V1 part and AMG for χ and g.
 
 ## 7. Open
