@@ -25,6 +25,97 @@ only with the run that isolates it; gates include a realistic B_φ/B_pol, a
 low-shear case and degree ≥ 3; null directions are removed by constraints
 from the first version.
 
+## Way forward after the audit (2026-11-22)
+
+The flux map u: space → flux disc and the Lagrangian map X: flux disc →
+space discretise one variational principle (the energy with the frozen flux
+form) in opposite directions; exact solutions are inverse to each other up
+to the gauge θ* → θ* + k(s). They are therefore one ideal model with two
+discretisations that check each other, not two development lines. Order of
+work, each step with its gate; a step starts when the one before it has
+its result.
+
+**P0. Finish F2** ([flux-map.md](flux-map.md), section 5; in progress).
+F2a: the F1 Solov'ev case through the 3D path reproduces F1. F2b: the exact
+sheared Landreman family of E4 (ε 0.6) from a start without axis
+information; pass: B against the exact field at order p on two meshes for
+degrees 2 and 3, Newton to round-off. F2c: QA driver in the layout of
+`benchmarks/label-qa/compare.py`. Decision: if F2b misses order p, the
+reproducer is minimised and nothing below is built on the flux map until
+it is understood.
+
+**P1. Head-to-head, flux map against the Lagrangian map**, VMEC++ as the
+outside reference, on identical cases and inputs:
+
+| Case | Reference | Why |
+|---|---|---|
+| H1 sheared Landreman family (ε 0.6) | exact field | absolute error |
+| H2 Landreman–Paul QA, prescribed ι (`benchmarks/label-qa`) | VMEC++ at ns 101 | low shear, B_φ/B_pol ≈ 14 |
+| H3 one strongly shaped deck (QI nfp 2 of nested-equilibrium-input.md, or the CTH-like deck) | VMEC++ | where the map lane folds or stalls |
+
+Measured for each code at degrees 3 and 4 and two resolutions: unknowns,
+B error (L2 against exact, or |B| on the reference surfaces), surface
+distance, axis, energy, Newton steps, wall time at 1 and 8 threads, peak
+memory, and the failure mode where one fails. One table in
+`benchmarks/`, no claim beyond it.
+
+**P2. Inverse check (gate V1).** With X_h from the Lagrangian map and u_h
+from the flux map on the same case: s(u_h(X_h(q))) − s(q), which is free of
+the gauge, and the angle part after removing its mean per surface. First
+on the axisymmetric Solov'ev case, then on H1. Pass: both at the order of
+the coarser discretisation. This is the independent oracle of the ideal
+lane (AGENTS.md, verification first).
+
+**P3. Decision on the ideal core**, recorded here with the tables of P1
+and P2: the map with the lower time at matched error on H1–H3 that does
+not fail on H3 becomes the core; the other is kept as cross-check with
+parity fixes only. Until then neither is "reference only".
+
+**P4. Region coupling where the answer is known (gates R1).** Axisymmetric,
+ideal core map inside a good surface s = s_i, A-based model outside
+([flux-map.md](flux-map.md), 5a); in axisymmetry the outside is ψ = R A_φ
+with f prescribed, so the exact answer is Grad–Shafranov.
+- R1a: Solov'ev split at an interior flux surface; interface position
+  unknown; pass: the one-region F1 errors, interface at the exact surface.
+- R1b: the exact double-null Solov'ev of the Grad–Shafranov lane, core map
+  inside s_i, separatrix and X-points in the outer region; pass: the
+  errors of the one-region Grad–Shafranov solve, X-points at its accuracy.
+- R1c: dependence on s_i (0.8, 0.9, 0.95): the solution must not depend on
+  it beyond the discretisation error.
+Interface conditions to derive from the variation of the shared interface
+before coding (B·n = 0 from both sides, balance of p + B²/2, continuity of
+the fluxes; whether a tangential jump of B, a sheet current, is admitted
+is a modelling choice to state). Then the same in 3D with NN1 (vacuum)
+outside, then NN2.
+
+**P5. Shared numerics, once for all lanes.**
+- S1 gauge removal by constraints: one module for moment constraints
+  orthogonal to a continuous symmetry (k(s) of the flux map, the slide of
+  the Lagrangian map, the closed-line gauge of Φ in NN2). Gate: F1 on a
+  mesh without up-down symmetry and without symmetry rows.
+- S2 stiff parameters: one continuation driver and one step acceptance
+  that tolerates a curved stiff constraint (guide field, anisotropy
+  ratio). Gates: F1 from a cold start at B_φ/B_pol = 150 without
+  hand-set stages; the NN2 ratio 1e6 case from the seed.
+- S3 the Hessian of the flux map against the ideal δW: lowest eigenvalues
+  on one case against the Hessian of the Lagrangian map.
+
+**P6. After that**, in this order unless P3 changes it: F3 guiding-curve
+mesh (figure-eight and other axes); free boundary on the core chosen in
+P3 (the exterior operator and shape derivatives exist); regions in 3D
+(island interiors as their own maps inside good surfaces, the separatrix
+layer in A); NN2 on the shared mesh.
+
+**Dropped:** further work on the (χ, g) solvers with axis unknowns (the
+uncommitted gauge work of branch `label/qa-recipe` stays unlanded), the
+frozen-map relabelling (B1–B6, R1), meshes that follow the magnetic axis,
+gate C as formulated (its question is answered by 5a of flux-map.md and
+the audit).
+
+**Open items carried along:** B at order 1.8–1.9 instead of 2 in F1; a
+stable projection against guide-field locking in 3D; prior-work search on
+the direct map before any publication.
+
 ## Decisions
 
 | Component | Decision | Reason |
@@ -222,6 +313,8 @@ reference. Order of work ([flux-map.md](flux-map.md), section 5):
 Effort split (equilibrium development): ALE and common FE infrastructure
 35 %, ideal Eulerian lane and VMEC parity 35 %, NN2 and island benchmarks
 20 %, stability and reconstruction interfaces 10 %.
+Until P3 the ideal share goes to P0–P2, and the infrastructure share to
+P5.
 
 Milestone: a robust Eulerian nested equilibrium solver (the flux map) that
 reproduces VMEC fixed- and free-boundary results without the slide gauges of
