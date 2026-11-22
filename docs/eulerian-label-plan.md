@@ -360,6 +360,56 @@ A smooth carrier B_reg of the guide field is a diagnostic in axisymmetry
 only: in 3D a divergence-free field tangent to χ is again of Clebsch form and
 carries the same singularity.
 
+E2b result (`test_eulerian_clebsch_doublet_aligned`, FortFEM `layout_doublet`
+on the traced exact separatrix, χ in continuous V0, g in V0 cut along the
+separatrix, degree 2, graded layers of power 4, relative L2 error of B_φ;
+band |χ − 1| < 0.2 outside the X disc of radius 0.04; layer: relative RMS of
+R B_φ/f0 − 1 in 0 < |χ − 1| < 1/(2n) outside the disc):
+
+| cells per block side | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|
+| total | 6.06e-2 | 3.06e-2 | 6.84e-3 | 1.91e-3 |
+| lobes (χ < 0.3) | 8.85e-3 | 3.32e-3 | 8.16e-4 | 2.02e-4 |
+| outside (1.7 < χ < 1.95) | 1.76e-2 | 1.21e-2 | 2.32e-3 | 4.86e-4 |
+| band | 3.63e-2 | 1.71e-2 | 3.99e-3 | 1.28e-3 |
+| X disc | 2.65e-2 | 1.05e-2 | 3.52e-3 | 1.07e-3 |
+| layer | 9.02e-2 | 4.89e-2 | 1.66e-2 | 8.53e-3 |
+| mesh separatrix, max \|χ − 1\| | 8.0e-2 | 1.2e-2 | 1.3e-3 | 8.3e-5 |
+
+Projected label; the label constrained to 1 on the separatrix gives the same
+numbers to three digits. Rates 16 → 32: total 1.84, lobes 2.02, outside 2.25,
+band 1.64, X disc 1.71, layer 0.96. Against E2a (total 1.11e-1 at 16 cells,
+order 1/2) the aligned broken space restores order p, at X included, and the
+falling layer error excludes a current sheet; the singular enrichment is not
+needed. The registered gate runs 4, 8, 16 in 42 s and checks the 8 → 16 rates.
+
+- Grading. FortFEM's power grading (i/n)^β along a whole block chain keeps
+  cells of size about β/n away from the separatrix, so the smooth regions
+  lose order before the singular ones gain it (β = 8: lobes at rate 0.8 from
+  4 to 8 cells; β = 4: outside at 0.4 from 8 to 16). A graded layer fixes it:
+  a fraction θ = 1/2 of the chain's cells at τ (i/m)^β, the rest uniform, with
+  τ = θ/(β(1 − θ) + θ) so the cell size is continuous. β = 4 suffices at
+  p = 2 (β = 6 is similar, β = 8 is no better at 32 cells).
+- Conditioning. The graded cells spread the diagonal of the normal equations
+  over many decades. A ridge relative to the largest entry swamps the rows
+  of the smallest cells, and the error then grows under refinement (β = 8,
+  32 cells: 33 % in the lobes). Symmetric Jacobi scaling with the ridge
+  relative to the scaled diagonal, plus iterative refinement against the
+  unscaled matrix, removes it: at β = 8, 32 cells the factor leaves a relative
+  residual of 2e-2 (condition about 1e14), two corrections 1e-5.
+- Profiles at X. Graded cells at X reach |χ − 1| < 1e-10. dΦ/dχ follows
+  A log|χ − 1| + B there (1.12e-2 per two decades in each lobe from 1e-2 to
+  1e-8), so the reference profile is extrapolated along it below the
+  tabulated 1e-10 instead of clamped.
+- The exact label χ on the mesh, whose separatrix is the degree-p
+  isoparametric image of the traced one (misplacement at order p + 1, 2.7 to
+  4.0 above), puts points of the band on the wrong side of the
+  log-singular profiles: band rate 1.2, against 2.1 for the discrete labels
+  that the mesh separatrix carries. In Newton (E2) χ_h is the unknown, so the
+  discrete case is the relevant one.
+- The one-sided traces of B_φ are no sheet measure: each Clebsch term is
+  log-singular on the separatrix and only their sum is finite.
+
 E4a (fixed χ_h = Π0 ψ/δ per plane, per-plane O-grid on the exact axis fitted to
 the exact boundary, winding angle in the Hessian frame of each plane,
 relative L2 error of B against the exact field, degree 2):
@@ -396,8 +446,9 @@ FortFEM supplies the separatrix-aligned layouts for E2b and E5:
 `layout_doublet` (18 blocks, X of valence 8) and `layout_island_chain` (any
 m ≥ 2), V0 cut across `LAYOUT_SEPARATRIX`, one-sided traces and grading
 towards the separatrix and X. For a log singularity in g, power grading with
-exponent above 2(p + 1) is needed for order p + 1 in L2; geometric grading
-with a fixed ratio stalls.
+exponent above 2(p + 1) is needed for order p + 1 in L2 of g; geometric
+grading with a fixed ratio stalls. For B (E2b), power 4 in a graded layer
+reaches order p at p = 2.
 
 ## 6. Order of work
 
@@ -407,8 +458,9 @@ with a fixed ratio stalls.
    second derivatives in (χ, g, profile coefficients), with identities.
 3. E0, E1 in axisymmetry (done, `test_eulerian_clebsch_fit`,
    `test_eulerian_clebsch_newton`).
-4. O-line handling for several axes: E2a done, E2b on FortFEM's doublet
-   layout (power grading ≥ 8 at p = 2, or p = 3), then E2 with Newton.
+4. O-line handling for several axes: E2a and E2b done (graded layers of
+   power 4 on FortFEM's doublet layout), then E2 with Newton. The graded
+   layer belongs in FortFEM's `spline_grade_knots` once E2 needs it too.
 5. 3D: E3, E3b and E4a done; E4 with Newton on the sheared family after the
    core is re-centred on the axis, then the registered integer case against
    VMEC++, DESC and GVEC.
