@@ -71,6 +71,18 @@ Each step on cases that run in seconds, against analytic solutions first.
    core and wall converges at order p but with 1.6–2× the B error of the
    blend on this case, so the blend is the default and Winslow is optional
    until a case needs it (large distortion, A2).
+   3D (`milca_label_ale_3d`, gate `label_ale_3d_gate_a1`, 21 s): the
+   sheared Landreman family of E4 (ε 0.6, 13 planes) from cores on an axis
+   guess offset helically by 5 % of the minor radius, geometric labels
+   (|x − X|/ρ_wall)², frames from χ_h and exact X columns (shape
+   derivatives of `clebsch_3d_shape_system` along the core blend). B error
+   4.80e-2, 1.159e-2 on 2, 4 cells against the fixed-label fit on the
+   exact-axis mesh 4.98e-2, 1.161e-2 (rate 2.05), axis error 7.9e-3,
+   2.3e-3, 2–4 passes, quadratic in the last; E4 (exact frames, finite
+   difference X columns) takes 133 s from an offset of 2e-3. At 10 % the
+   4-cell solve reaches the same B but not the pass tolerance in 4 passes,
+   and 2 cells converge to a wrong axis. The 3D systems take field periods
+   (`clebsch_nfp`: planes over one period).
 2. **ALE label solver, several axes (A2).** Doublet and two-axis
    configurations: one region per lobe and one outer region, the separatrix a
    region boundary of the mesh, each O-point a physical unknown followed by
@@ -137,6 +149,20 @@ Each step on cases that run in seconds, against analytic solutions first.
    realistic pressure, stellarator geometry. Against VMEC2000, VMEC++, GVEC
    and DESC at matched physical error ([exact benchmark](../benchmarks/free-boundary-exact/README.md)).
    Correctness and robust convergence first, speed after.
+   *State:* reference landed ([label-qa](../benchmarks/label-qa/README.md):
+   Landreman–Paul QA, p = 0, ι prescribed from the current-free state,
+   VMEC++ 9 s, VMEC2000 53 s). The label lane does not converge on it
+   (`test_label_ale_qa`, opt-in driver: deck import, per-plane O-grids over
+   one field period, shaping continuation from the axisymmetric ellipse).
+   Two causes, both measured: (a) over the full torus the near-shearless ι
+   (0.4158 to 0.4231) leaves near-null label modes m ι ≈ n that field-period
+   symmetry forbids (n = 5, m = 12; n = 2, m = 5): with an added shear of
+   0.3 the axisymmetric step converges, without it not; one period removes
+   them, as in VMEC, which also never sees islands; (b) the guide field:
+   B_φ/B_pol ≈ 14 on QA, the obstruction of the E2 diagnosis above (energy
+   runs from 0.24 to 0.38 against 0.2818 of VMEC). The Jacobian is exact
+   (finite differences to 1e-8). Until (b) is resolved, VMEC parity goes
+   through the A representation (gate C), not the labels.
 5. **NN2 on the shared ALE mesh**, with Winslow alignment against
    perpendicular pollution in anisotropic transport; existing 3D NN2 tests,
    then island formation and stochastic regions.
