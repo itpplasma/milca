@@ -11,7 +11,9 @@ program test_flux_map_force
     !! 3. J and F of a discrete 3D state (Landreman sections, 13 planes, the
     !!    polar start: any state serves) against the curl of B_h of
     !!    flux_map3d_point by central differences in the block parameters and
-    !!    t, at points of every block, next to the wall included;
+    !!    t, at points of every block, next to the wall included. The same
+    !!    state checks the assembled energy derivatives by differences
+    !!    in the interior coefficients and wall angles;
     !! 4. the same measure through the VMEC route (vmec_state_jet,
     !!    fm3_vmec_force) on an exact state: the vacuum field B0 R0/R e_phi
     !!    in a torus of circular section, whose flux coordinates are closed
@@ -22,9 +24,10 @@ program test_flux_map_force
     !!    fall with the radial grid at the order of the cubic splines.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_spline_eval, only: spline_point_matrix
+    use fortsparse_csr, only: csr_t
     use milca_nested_oracles, only: NESTED_SHEARED
     use milca_eulerian_clebsch, only: clebsch_nfp
-    use milca_flux_map_3d, only: flux_map3d_point
+    use milca_flux_map_3d, only: flux_map3d_point, flux_map3d_system
     use milca_flux_map_leaves, only: flux_map_force_3d
     use milca_flux_map_force, only: flux_map_jet_to_cylindrical, flux_map3d_force_point
     use flux_map_sections
@@ -303,7 +306,39 @@ contains
                    worst_j/scale_j)
         call check(worst_f < 1e-6_dp*scale_j, 'F = J X B - grad p against the same', &
                    worst_f/scale_j)
+        call discrete_energy_derivatives()
     end subroutine discrete_state
+
+    subroutine discrete_energy_derivatives()
+        real(dp), parameter :: h = 1e-5_dp
+        type(csr_t) :: hessian
+        real(dp), allocatable :: gradient(:), plus(:), minus(:), direction(:), product(:)
+        real(dp) :: energy, energy_plus, energy_minus, derivative, relative_error
+        integer :: i, j, entry, n
+
+        n = size(c%fm%z)
+        direction = [(sin(real(i, dp)), i=1, n)]
+        direction(c%fm%fixed) = 0
+        direction = direction/norm2(direction)
+        call flux_map3d_system(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z, energy, gradient, hessian)
+        call flux_map3d_system(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z + h*direction, energy_plus, plus)
+        call flux_map3d_system(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z - h*direction, energy_minus, minus)
+        derivative = (energy_plus - energy_minus)/(2*h)
+        relative_error = abs(dot_product(gradient, direction) - derivative)/max(abs(derivative), 1e-5_dp)
+        call check(relative_error < 1e-6_dp, 'energy gradient against central differences', relative_error)
+
+        allocate (product(n), source=0.0_dp)
+        do i = 1, n
+            do entry = hessian%row_ptr(i), hessian%row_ptr(i + 1) - 1
+                j = hessian%col(entry)
+                product(i) = product(i) + hessian%val(entry)*direction(j)
+                if (i /= j) product(j) = product(j) + hessian%val(entry)*direction(i)
+            end do
+        end do
+        plus = (plus - minus)/(2*h)
+        relative_error = norm2(product - plus)/norm2(plus)
+        call check(relative_error < 1e-7_dp, 'assembled Hessian action against central differences', relative_error)
+    end subroutine discrete_energy_derivatives
 
     function wall_functions(blk, xi) result(d0)
         integer, intent(in) :: blk
