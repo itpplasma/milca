@@ -34,6 +34,9 @@ program gen_flux_map
     type(expr_t) :: xp, yp, v8(8), rot8(8), g8(8), h8(36), c3(3), gs3(3), b3(3), dens3, turn8
     character(4), parameter :: vn8(8) = ['x   ', 'y   ', 'x_r ', 'x_p ', 'x_z ', 'y_r ', 'y_p ', 'y_z ']
     character(16) :: gn8(8), hn8(36)
+    ! force balance
+    type(expr_t) :: xf, yf, x2(3, 3), y2(3, 3), xc(3), yc(3), sc(3), bf(3), jf(3), ff(3), mf(3), &
+        ppr, divb, b2
 
     r = sym('r'); x = sym('x'); y = sym('y')
     xr = sym('x_r'); xz = sym('x_z'); yr = sym('y_r'); yz = sym('y_z')
@@ -114,9 +117,50 @@ program gen_flux_map
         ['r    ', 'x    ', 'y    ', 'x_r  ', 'x_p  ', 'x_z  ', 'y_r  ', 'y_p  ', 'y_z  ', 'tau  ', &
         'taup ', 'taupp', 'gp   ', 'gpp  ', 'gppp ', 'pres ', 'pp   ', 'ppp  '], &
         ['w               ', gn8, hn8], [dens3, g8, h8])
+    ! Force balance of the 3D field, independent of the energy: from the
+    ! 2-jet of u = (x, y) in the cylindrical coordinates (R, phi, Z)
+    ! (coordinate derivatives x_r, x_f = dx/dphi, x_z, x_rr, x_rf, ...),
+    !   B = -[tau(s) grad x X grad y + psi'(s) grad phi X grad s],
+    !   J = curl B,  F = J X B - p'(s) grad s,  M = grad(|B|^2/2),
+    ! all in components (R, phi, Z), and jac = grad phi . (grad x X grad y).
+    ! Proved: div B = 0 and F . B = 0.
+    xf = sym('x_f'); yf = sym('y_f'); ppr = sym('pp')
+    xc = [xr, xf, xz]
+    yc = [yr, yf, yz]
+    x2(1, :) = [sym('x_rr'), sym('x_rf'), sym('x_rz')]
+    x2(2, :) = [x2(1, 2), sym('x_ff'), sym('x_fz')]
+    x2(3, :) = [x2(1, 3), x2(2, 3), sym('x_zz')]
+    y2(1, :) = [sym('y_rr'), sym('y_rf'), sym('y_rz')]
+    y2(2, :) = [y2(1, 2), sym('y_ff'), sym('y_fz')]
+    y2(3, :) = [y2(1, 3), y2(2, 3), sym('y_zz')]
+    do i = 1, 3
+        sc(i) = 2*(x*xc(i) + y*yc(i))
+    end do
+    xp = xf/r
+    yp = yf/r
+    c3 = [xp*yz - xz*yp, xz*yr - xr*yz, xr*yp - xp*yr]
+    gs3 = [sc(1), sc(2)/r, sc(3)]
+    bf = [0*x - (tau*c3(1) + gp*gs3(3)/r), 0*x - tau*c3(2), 0*x - (tau*c3(3) - gp*gs3(1)/r)]
+    divb = total(r*bf(1), 1)/r + total(bf(2), 2)/r + total(bf(3), 3)
+    proof = engine%zero_test(divb)
+    if (proof%verdict /= VERDICT_TRUE) error stop 'div B = 0 unproved'
+    jf = [total(bf(3), 2)/r - total(bf(2), 3), total(bf(1), 3) - total(bf(3), 1), &
+          (total(r*bf(2), 1) - total(bf(1), 2))/r]
+    ff = [jf(2)*bf(3) - jf(3)*bf(2) - ppr*gs3(1), jf(3)*bf(1) - jf(1)*bf(3) - ppr*gs3(2), &
+          jf(1)*bf(2) - jf(2)*bf(1) - ppr*gs3(3)]
+    proof = engine%zero_test(ff(1)*bf(1) + ff(2)*bf(2) + ff(3)*bf(3))
+    if (proof%verdict /= VERDICT_TRUE) error stop 'F . B = 0 unproved'
+    b2 = (bf(1)**2 + bf(2)**2 + bf(3)**2)/2
+    mf = [total(b2, 1), total(b2, 2)/r, total(b2, 3)]
+    call w%emit('flux_map_force_3d', &
+        ['r    ', 'x    ', 'y    ', 'x_r  ', 'x_f  ', 'x_z  ', 'x_rr ', 'x_rf ', 'x_rz ', 'x_ff ', &
+        'x_fz ', 'x_zz ', 'y_r  ', 'y_f  ', 'y_z  ', 'y_rr ', 'y_rf ', 'y_rz ', 'y_ff ', 'y_fz ', &
+        'y_zz ', 'tau  ', 'taup ', 'gp   ', 'gpp  ', 'pp   '], &
+        ['b_r ', 'b_f ', 'b_z ', 'j_r ', 'j_f ', 'j_z ', 'f_r ', 'f_f ', 'f_z ', 'm_r ', 'm_f ', &
+        'm_z ', 'jac '], [bf, jf, ff, mf, c3(2)/r])
     call w%line('end module milca_flux_map_leaves')
     call w%close()
-    print '(a)', '[V] FortSym tangency, rotation invariance of the kernels (axisymmetric and 3D) and Hessian symmetry proved; flux-map leaves generated'
+    print '(a)', '[V] FortSym tangency, rotation invariance of the kernels (axisymmetric and 3D), Hessian symmetry, div B = 0 and F . B = 0 of the force-balance leaf proved; flux-map leaves generated'
 
 contains
 
@@ -165,6 +209,22 @@ contains
             d = d + 2*v(i)*(diff(e, gp)*gpp + diff(e, gpp)*gppp + diff(e, pres)*pp + diff(e, pp)*ppp)
         end if
     end function derivative
+
+    function total(e, c) result(d)
+        !! Total derivative of e along the coordinate c (1: R, 2: phi, 3: Z)
+        !! for e a function of r, the 1-jet of (x, y) and the profile values
+        !! tau, gp at s = x^2 + y^2.
+        type(expr_t), intent(in) :: e
+        integer, intent(in) :: c
+        type(expr_t) :: d
+        integer :: a
+
+        d = diff(e, x)*xc(c) + diff(e, y)*yc(c) + (diff(e, tau)*taup + diff(e, gp)*gpp)*sc(c)
+        do a = 1, 3
+            d = d + diff(e, xc(a))*x2(a, c) + diff(e, yc(a))*y2(a, c)
+        end do
+        if (c == 1) d = d + diff(e, r)
+    end function total
 
     function derivative8(e, i) result(d)
         !! d e/d v8_i with every profile a function of s = x^2 + y^2.

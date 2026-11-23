@@ -20,7 +20,9 @@ program test_flux_map_qa
     !! With MILCA_FM3_VMEC=<wout file> every stage also evaluates the VMEC
     !! state of that file on its mesh (flux_map_vmec, both orientations of
     !! theta*): W and the scaled gradient of the flux map there, the gradient
-    !! by bands of s, and the state Newton reaches from it.
+    !! by bands of s, and the state Newton reaches from it; before the stages
+    !! the force balance J X B - grad p of the VMEC state itself
+    !! (milca_flux_map_force; with the stages argument "vmec" only this).
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_equilibrium_import, only: imported_equilibrium_t, IMPORT_OK, profile_value
     use milca_import_vmec, only: import_vmec
@@ -28,7 +30,9 @@ program test_flux_map_qa
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
     use fortsparse_csr, only: csr_t
     use flux_map_sections
-    use flux_map_vmec, only: fm3_from_vmec, fm3_from_vmec_failures
+    use flux_map_vmec, only: fm3_from_vmec, fm3_from_vmec_failures, fm3_vmec_force
+    use milca_flux_map_force, only: flux_map_force_t, flux_map3d_force, flux_map_force_print, &
+        flux_map_force_norm, FORCE_F
     use milca_vmec_state, only: vmec_state_t, vmec_state_read
     implicit none
     real(dp), parameter :: pi = acos(-1.0_dp)
@@ -52,6 +56,10 @@ program test_flux_map_qa
     character(512) :: vpath, vreason
     integer :: vlen
     real(dp) :: pscale = 1 ! diagnostic: MILCA_FM3_PSCALE multiplies the pressure
+    real(dp) :: grading = 0 ! MILCA_FM3_GRADING: curvature grading of the section meshes
+    type(flux_map_force_t) :: force
+    real(dp), allocatable :: winding(:), least_step(:)
+    real(dp) :: jump
 
     if (command_argument_count() >= 1) call get_command_argument(1, deck)
     if (command_argument_count() >= 2) call get_command_argument(2, outdir)
@@ -61,9 +69,11 @@ program test_flux_map_qa
         read (arg, *) kappa
     end if
     verbose = command_argument_count() >= 5
-    call parse_stages()
+    if (trim(stages) /= 'vmec') call parse_stages()
     call get_environment_variable('MILCA_FM3_PSCALE', arg, vlen)
     if (vlen > 0) read (arg, *) pscale
+    call get_environment_variable('MILCA_FM3_GRADING', arg, vlen)
+    if (vlen > 0) read (arg, *) grading
     call get_environment_variable('MILCA_FM3_VMEC', vpath, vlen)
     if (vlen > 0) then
         call vmec_state_read(trim(vpath), vstate, st, vreason)
@@ -92,6 +102,8 @@ program test_flux_map_qa
         error stop 'pressure: power series or Hermite spline required'
     end select
     print '(a,i0,a,f10.6,a,7f10.6)', 'NFP ', eq%nfp, '  PHIEDGE', phiedge, '  iota', iota_c
+    if (vlen > 0) call vmec_force()
+    if (trim(stages) == 'vmec') stop
     newton_total = 0
     do istage = 1, nstages
         call wall_time(ts)
@@ -107,7 +119,8 @@ program test_flux_map_qa
                 do k = 1, nt
                     call plane_curve(2*pi*(k - 1)/(nt*eq%nfp), samples(:, :, k))
                 end do
-                call fm3_build(c, samples, cells, deg, 4, st, preserve_area=keep_area())
+                call fm3_build(c, samples, cells, deg, 4, st, preserve_area=keep_area(), &
+                               grading=grading)
                 if (st == 0 .and. c%map_residual < 1e-9_dp) exit
                 if (st /= 0 .and. st /= 13) exit
                 if (nsamples >= 2048) exit
@@ -146,6 +159,18 @@ program test_flux_map_qa
                 '  worst Jacobian ratio', minval(quality), '  W', energy, '  flux defect', &
                 maxval(abs(abs(flux) - abs(phiedge)))/abs(phiedge), '  ', t1 - ts, ' s  negative eigenvalues ', &
                 c%fm%negative_eigenvalues
+            call flux_map3d_force(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z, 10, force, st)
+            if (st /= 0) error stop 'force balance'
+            call flux_map_force_print(force, 'CEMV')
+            allocate (winding(nt), least_step(nt))
+            call fm3_wall_winding(c, profiles, winding, least_step, st)
+            if (st /= 0) error stop 'wall winding'
+            call fm3_interface_jump(c, profiles, jump, st)
+            if (st /= 0) error stop 'interface jump'
+            print '(a,2f10.6,a,es10.2,a,es10.2)', '  winding of the wall angle per plane, min max', &
+                minval(winding), maxval(winding), '  least step of the wall angle / mean step', &
+                minval(least_step), '  jump of B^2/2 at the block interfaces (relative rms)', jump
+            deallocate (winding, least_step)
             if (vlen > 0) call vmec_check(energy)
         end associate
         previous = c
@@ -332,6 +357,26 @@ contains
         print '(a,6es10.2)', '   plane mean', mean/max(cnt, 1)
     end subroutine write_currents
 
+    subroutine vmec_force()
+        !! Force balance of the VMEC state itself (no mesh; the same measure
+        !! as for the flux-map state), in the orientation of theta* with the
+        !! smaller residual.
+        type(flux_map_force_t) :: fv(2)
+        integer :: o, bands, length
+        character(16) :: v
+
+        ! diagnostic: MILCA_FM3_BANDS = number of bands of s (10)
+        bands = 10
+        call get_environment_variable('MILCA_FM3_BANDS', v, length)
+        if (length > 0) read (v, *) bands
+        do o = 1, 2
+            call fm3_vmec_force(vstate, profiles, merge(1.0_dp, -1.0_dp, o == 1), bands, &
+                                max(200, 4*bands), fv(o))
+        end do
+        o = merge(1, 2, flux_map_force_norm(fv(1), FORCE_F, 0) < flux_map_force_norm(fv(2), FORCE_F, 0))
+        call flux_map_force_print(fv(o), 'VMEC state')
+    end subroutine vmec_force
+
     subroutine vmec_check(w_ours)
         !! The VMEC state on the mesh of c: W and gradient of the flux map.
         real(dp), intent(in) :: w_ours
@@ -340,6 +385,7 @@ contains
         real(dp), allocatable :: g(:), d(:), sc(:)
         real(dp) :: wv, orient, edges(6), band(5), sv
         integer :: o, i, kk, n0, nt, b, stv
+
 
         edges = [0.0_dp, 0.05_dp, 0.25_dp, 0.5_dp, 0.8_dp, huge(1.0_dp)]
         do o = 1, 2

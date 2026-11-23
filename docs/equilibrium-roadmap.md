@@ -83,21 +83,37 @@ negative eigenvalue); finding 2 was an error of the flux map, not of VMEC
 (DESC agrees with VMEC's limit), and the QA axis converges to that limit at
 degree 3, the QH axis once 29 planes are used; the energy error of finding
 3 was the area of the wall fit and is removed. W7-X standard and li383 mesh
-and converge. Open from these: grading of the meshes towards tips, QH
-against a third code. Decided 2026-11-22: P0b is dropped; the F2b gate in
+and converge. Open from these: QH against a third code (the grading of the
+meshes towards tips is measured under P0a). Decided 2026-11-22: P0b is dropped; the F2b gate in
 stationary mode (level 1 from the polar start, no axis check) is accepted.
 
-P0a, owed before the flux map is compared (in this order):
-- QA floor: plane scan at fixed section (13, 17, 21, 25), wall volume
-  against VMEC, then section meshes by Winslow.
+P0a, owed before the flux map is compared: done 2026-11-23, numbers in
+[flux-map.md](flux-map.md), "Force-balance residual" and "Mesh grading
+towards tips".
+- QA floor: done. The plane scan is recorded, and the harmonic section
+  meshes replaced the Winslow meshes that were planned here.
 - F2b: done; the gate runs in stationary mode (accepted 2026-11-22).
-- Convergence on three mesh levels at degrees 2, 3, 4 of (i) B against
-  the exact field and (ii) the residual of the unprojected force balance
-  J×B − ∇p, evaluated independently of the energy that is minimised.
-- At convergence: the sign of ∇ζ·(∇x×∇y) at all quadrature points and
-  the winding of the wall angle, reported per run. Not a step-acceptance
-  rule: with a projected energy a pointwise guard stalled the prototype.
-- The order 1.8–1.9 of F1 (twice the projected exact label on 8 cells).
+- Convergence on three mesh levels at degrees 2, 3, 4: done on the
+  Solov'ev case, B at order p (1.98, 2.93, 4.14) and the unprojected force
+  balance J×B − ∇p, J = ∇×B_h from the second derivatives of the map
+  (`milca_flux_map_force`), at order p − 1 (0.98, 2.03, 2.76). On the
+  sheared Landreman family both stop beyond 4 cells at every degree (B
+  2.0e-3 to 2.5e-3, residual 0.07 to 0.10 of |∇p|); planes or the saddle,
+  not isolated.
+- The same residual on the standard decks and for the VMEC++ states: the
+  degree-2 states have 0.5 to 0.8 of |∇(B²/2)| where VMEC++ has 2e-3 to
+  3.5e-2 (outside s = 0.1). It grows with the guide field at fixed error
+  of B (isolated on Solov'ev), and on QA the layer s > 0.9 does not
+  converge up to degree 3, 8 cells, 21 planes. Open, and it decides the
+  standing benchmark below.
+- Sign of ∇ζ·(∇x×∇y) at all quadrature points and winding of the wall
+  angle: reported per run and one sign, winding one in every converged
+  run; the gates check them.
+- The order 1.8–1.9 of F1: pre-asymptotic. 1.97, 1.98 on 16, 32 cells;
+  the factor against the projected exact label levels off at 2.3 to 2.4.
+- Mesh grading towards tips (FortFEM `harmonic_disc_build`, `grading`):
+  the W7-X wall distance at 4 cells falls 3.4 to 4.3 times, the axis gets
+  3 to 4 times worse on 13 planes and is no better on 29. Off by default.
 
 P0b, projection against guide-field locking: dropped (2026-11-22). The QA
 axis converges to the VMEC/DESC limit with harmonic meshes at degree 3 and

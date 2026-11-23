@@ -14,7 +14,9 @@ module flux_map_sections
         harmonic_disc_inverse, harmonic_disc_pull_back, harmonic_disc_wall_error, &
         spline_jacobian_certificate
     use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build, &
-        spline_point_matrix, spline_locate, spline_boundary_nodes, spline_geometry_at
+        spline_point_matrix, spline_locate, spline_boundary_nodes, spline_geometry_at, &
+        spline_side_quadrature_t, spline_interface_quadrature
+    use fortfem_spline_layout, only: LAYOUT_INTERIOR
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_build, &
         spline_derham_boundary_dofs, spline_derham_project, spline_derham_t_basis
     use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp
@@ -48,7 +50,7 @@ module flux_map_sections
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
     public :: fm3_build, fm3_start, fm3_start_polar, fm3_gauge_symmetric, fm3_axis, fm3_mesh_quality, &
               fm3_locate, fm3_state, fm3_flux, fm3_prolong, fm3_preimage, &
-              fm3_dump_hessian
+              fm3_dump_hessian, fm3_wall_winding, fm3_interface_jump
 
     ! state of the projection callback of fm3_prolong
     type(fm3_case_t), pointer :: old => null()
@@ -57,12 +59,14 @@ module flux_map_sections
 
 contains
 
-    subroutine fm3_build(c, samples, cells, degree, extra_points, status, preserve_area)
+    subroutine fm3_build(c, samples, cells, degree, extra_points, status, preserve_area, grading)
         !! Meshes of all planes from the wall curves samples(2, m, nt):
         !! counter-clockwise, equally spaced in a smooth periodic parameter,
         !! the first sample (mapped to the disc angle 0) a smooth function of
         !! the plane. preserve_area (default true): the mesh wall encloses the
-        !! area of the wall curve. Status 10 + s: status s of the harmonic map
+        !! area of the wall curve. grading (default 0): strength of the
+        !! curvature weight of the boundary correspondence of the harmonic
+        !! maps (more wall cells at tips). Status 10 + s: status s of the harmonic map
         !! of a plane (3: the samples do not resolve the curve), 20: a mesh is
         !! not certified valid.
         type(fm3_case_t), intent(out) :: c
@@ -70,6 +74,7 @@ contains
         integer, intent(in) :: cells, degree, extra_points
         integer, intent(out) :: status
         logical, intent(in), optional :: preserve_area
+        real(dp), intent(in), optional :: grading
         type(block_layout_t) :: layout
         type(spline_space_options_t) :: options
         type(harmonic_disc_t) :: map
@@ -100,7 +105,7 @@ contains
         allocate (c%base(2, size(c%disc, 2), c%nt))
         c%map_residual = 0
         do k = c%nt, 1, -1
-            call harmonic_disc_build(map, samples(:, :, k), status)
+            call harmonic_disc_build(map, samples(:, :, k), status, grading)
             if (status /= 0) then
                 status = 10 + status
                 return
@@ -522,6 +527,114 @@ contains
         associate (unused => t)
         end associate
     end subroutine old_value
+
+    subroutine fm3_wall_winding(c, profiles, winding, least_step, status)
+        !! Per plane the winding number of u_h along the wall (the wall angle
+        !! Theta_h followed once around, counter-clockwise, over 2 pi) and
+        !! the smallest increment of the angle between neighbouring wall
+        !! points (4 per cell side) over the mean increment: positive when
+        !! the wall angle is monotone.
+        type(fm3_case_t), intent(in) :: c
+        procedure(flux_map_profiles) :: profiles
+        real(dp), intent(out) :: winding(:), least_step(:)
+        integer, intent(out) :: status
+        integer, allocatable :: wblock(:), rowptr(:), colidx(:), d0(:)
+        real(dp), allocatable :: wxi(:, :), ws(:, :), val(:), gn(:, :), angle(:), nv(:)
+        real(dp) :: rz(2), u(8), b(3), d
+        integer :: k, i, n, comp
+
+        call spline_boundary_nodes(c%space, LAYOUT_WALL, 2, wblock, wxi, ws, status)
+        if (status /= 0) return
+        n = size(wblock)
+        allocate (angle(n))
+        do k = 1, c%nt
+            do i = 1, n
+                do comp = 0, 2
+                    call spline_point_matrix(c%space, wblock(i:i), wxi(:, i:i), comp, rowptr, &
+                                             colidx, val, status)
+                    if (status /= 0) return
+                    if (comp == 0) then
+                        if (allocated(gn)) deallocate (gn)
+                        allocate (gn(2, size(colidx)))
+                        gn = 0
+                        nv = val
+                        d0 = colidx
+                    else
+                        gn(comp, :) = val
+                    end if
+                end do
+                call flux_map3d_point(c%fm, c%base, d0, nv, gn, (k - 1)/real(c%nt, dp), &
+                                      profiles, rz, u, b)
+                angle(i) = atan2(u(2), u(1))
+            end do
+            winding(k) = 0
+            least_step(k) = huge(1.0_dp)
+            do i = 1, n
+                d = angle(mod(i, n) + 1) - angle(i)
+                d = d - two_pi*nint(d/two_pi)
+                winding(k) = winding(k) + d
+                least_step(k) = min(least_step(k), d*n/two_pi)
+            end do
+            winding(k) = winding(k)/two_pi
+        end do
+    end subroutine fm3_wall_winding
+
+    subroutine fm3_interface_jump(c, profiles, jump, status)
+        !! The part of the force balance that the volume measure of
+        !! milca_flux_map_force does not see: across the C0 block interfaces
+        !! of the section B.n is continuous and the tangential field may
+        !! jump, a sheet current with the surface force [B^2/2] n. jump =
+        !! rms of [B^2/2] over rms of B^2/2 on the interfaces (Gauss points of
+        !! every cell side, weights of plane 1, all planes).
+        type(fm3_case_t), intent(in) :: c
+        procedure(flux_map_profiles) :: profiles
+        real(dp), intent(out) :: jump
+        integer, intent(out) :: status
+        type(spline_side_quadrature_t) :: sq
+        real(dp) :: b(3, 2), acc(2)
+        integer :: q, k
+
+        call spline_interface_quadrature(c%space, LAYOUT_INTERIOR, c%degree + 2, sq, status)
+        if (status /= 0) return
+        acc = 0
+        do q = 1, sq%point_count
+            do k = 1, c%nt
+                call side_field(sq%block(q), sq%xi(:, q), b(:, 1))
+                call side_field(sq%neighbour_block(q), sq%neighbour_xi(:, q), b(:, 2))
+                if (status /= 0) return
+                acc = acc + sq%weight(q)*[(sum(b(:, 1)**2) - sum(b(:, 2)**2))**2, &
+                                          (sum(b(:, 1)**2) + sum(b(:, 2)**2))**2]/4
+            end do
+        end do
+        jump = sqrt(acc(1)/acc(2))
+
+    contains
+
+        subroutine side_field(block, xi, bb)
+            integer, intent(in) :: block
+            real(dp), intent(in) :: xi(2)
+            real(dp), intent(out) :: bb(3)
+            integer, allocatable :: rowptr(:), colidx(:), d0(:)
+            real(dp), allocatable :: val(:), nv(:), gn(:, :)
+            real(dp) :: rz(2), u(8)
+            integer :: comp
+
+            do comp = 0, 2
+                call spline_point_matrix(c%space, [block], reshape(xi, [2, 1]), comp, rowptr, &
+                                         colidx, val, status)
+                if (status /= 0) return
+                if (comp == 0) then
+                    d0 = colidx
+                    nv = val
+                    allocate (gn(2, size(d0)))
+                else
+                    gn(comp, :) = val
+                end if
+            end do
+            call flux_map3d_point(c%fm, c%base, d0, nv, gn, (k - 1)/real(c%nt, dp), profiles, rz, &
+                                  u, bb)
+        end subroutine side_field
+    end subroutine fm3_interface_jump
 
     subroutine fm3_flux(c, profiles, flux, bmin, bmax)
         !! Toroidal flux through every plane and the range of B_phi over the
