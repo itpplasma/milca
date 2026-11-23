@@ -14,6 +14,9 @@ program nested_equilibrium
         ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction, ideal_map_freeze, &
         ideal_map_sensitivity
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
+    use milca_map_3d_force, only: map_3d_force, map_3d_force_field
+    use milca_flux_map_force, only: flux_map_force_t, flux_map_force_norm, flux_map_force_print, &
+        FORCE_F
     use milca_equilibrium_state, only: EQ_VALUES, EQ_BR, EQ_BZ, EQ_BPHI, EQ_P
     use milca_grad_shafranov, only: gs_state_t
     use milca_curved_triangle, only: triangle_locate
@@ -95,6 +98,7 @@ program nested_equilibrium
     type(toroidal_seed_t) :: seed
     type(toroidal_profile_t) :: profile
     type(ideal_map_solve_report_t) :: report
+    integer :: newton_total = 0 ! Newton steps of all fixed-boundary solves
     character(256) :: message
     ! Free boundary: coil groups of mgrid_file scaled by extcur, mgrid
     ! interpolation degree in (R, Z), and the clearance of the coupling
@@ -341,6 +345,7 @@ program nested_equilibrium
         'final solve: Cholesky failures refactored by pivoted LU')
     call result%write('analyses', real(report%analyses, dp), '1', 'final solve: symbolic analyses')
     call result%close()
+    if (.not. free_boundary) call benchmark_export()
 
     block
         integer :: venv
@@ -365,6 +370,130 @@ contains
         stop
     end subroutine
 
+    subroutine benchmark_export()
+        ! Diagnostic for cross-code benchmarks (benchmarks/cemv-vs-vmec): with
+        ! MILCA_NESTED_EXPORT=DIR the sizes, the force balance J X B - grad p
+        ! on the measure of the flux map (milca_map_3d_force) are printed and
+        ! axis.txt, surface_s0.25.txt, surface_s0.50.txt, summary.json are
+        ! written to DIR in the layout of benchmarks/label-qa/compare.py (64
+        ! cylindrical planes of one period, 128 reference angles).
+        integer, parameter :: nout = 64, nray = 128
+        character(512) :: dir
+        type(flux_map_force_t) :: force(2)
+        real(dp) :: centre(2), y(2), xi(2), point(3), values(EQ_VALUES), level
+        real(dp) :: rays(2, nray)
+        integer :: cells(nray)
+        integer :: length, o, u, j, q, l, e, local, cell
+        call get_environment_variable('MILCA_NESTED_EXPORT', dir, length)
+        if (length == 0) return
+        print '(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,f5.1,a,i0,a,i0)', 'benchmark: degree ', degree, &
+            '  boundary_nodes ', boundary_nodes, '  map_ntor ', ntor_level, '  cells ', &
+            map%cells, '  coefficients ', map%ndof, '  unknowns ', count(.not. map%fixed), &
+            '  sigma', map%sigma, '  Newton (first ladder) ', newton_total, &
+            '  Newton (final solve) ', report%iterations
+        do o = 1, 2
+            call map_3d_force(map, seed, cemv_profiles, merge(1.0_dp, -1.0_dp, o == 1), 10, &
+                force(o), local)
+            if (local /= 0) then
+                print '(a)', 'benchmark: force balance not available for this chart'
+                return
+            end if
+        end do
+        o = merge(1, 2, flux_map_force_norm(force(1), FORCE_F, 0) &
+            < flux_map_force_norm(force(2), FORCE_F, 0))
+        call flux_map_force_print(force(o), 'Lagrangian map')
+        ! check of the measure: its B against the frozen-in field of the map
+        block
+            real(dp) :: b(3), jc(3), f(3), worst, sgn
+            integer :: k
+            worst = 0
+            do e = 1, map%cells, max(1, map%cells/50)
+                do k = 0, 2
+                    call map_3d_sample(map, seed, e, [0.3_dp, 0.2_dp], 2*pi*k/(nfp*3.7_dp), &
+                        point, values, local)
+                    call map_3d_force_field(map, seed, cemv_profiles, &
+                        merge(1.0_dp, -1.0_dp, o == 1), e, [0.3_dp, 0.2_dp], &
+                        2*pi*k/(nfp*3.7_dp), b, jc, f, local)
+                    sgn = sign(1.0_dp, b(2)*values(EQ_BPHI))
+                    worst = max(worst, norm2(sgn*b - values([EQ_BR, EQ_BPHI, EQ_BZ])) &
+                        /norm2(b))
+                end do
+            end do
+            print '(a,es10.2)', 'benchmark: largest |B(flux-map form) - B(frozen-in)|/|B| ', worst
+        end block
+        call execute_command_line('mkdir -p '//trim(dir))
+        centre = seed%centre
+        open (newunit=u, file=trim(dir)//'/axis.txt', status='replace')
+        write (u, '(a)') '# phi R Z'
+        call locate(centre, cell, xi)
+        if (cell == 0) error stop 'benchmark export: axis'
+        do j = 0, nout - 1
+            call map_3d_sample(map, seed, cell, xi, 2*pi*j/(nfp*nout), point, values, local)
+            write (u, '(3es24.16)') point(3), point(1), point(2)
+        end do
+        close (u)
+        do l = 1, 2
+            level = 0.25_dp*l
+            open (newunit=u, file=trim(dir)//merge('/surface_s0.25.txt', '/surface_s0.50.txt', &
+                l == 1), status='replace')
+            write (u, '(a)') '# phi angle R Z |B|'
+            do q = 1, nray
+                y = centre + sqrt(level)*seed%axes*[cos(2*pi*(q - 1)/nray), sin(2*pi*(q - 1)/nray)]
+                call locate(y, cells(q), rays(:, q))
+                if (cells(q) == 0) error stop 'benchmark export: surface point'
+            end do
+            do j = 0, nout - 1
+                do q = 1, nray
+                    call map_3d_sample(map, seed, cells(q), rays(:, q), 2*pi*j/(nfp*nout), &
+                        point, values, local)
+                    if (local /= 0) cycle
+                    write (u, '(5es24.16)') point(3), 2*pi*(q - 1)/nray, point(1), point(2), &
+                        norm2(values([EQ_BR, EQ_BZ, EQ_BPHI]))
+                end do
+            end do
+            close (u)
+        end do
+        open (newunit=u, file=trim(dir)//'/summary.json', status='replace')
+        write (u, '(a,es24.16,a,i0,a,i0,a)') '{"energy_T2m3": ', magnetic, &
+            ', "unknowns": ', count(.not. map%fixed), ', "newton_steps": ', &
+            max(newton_total, report%iterations), '}'
+        close (u)
+        e = 0
+    end subroutine
+
+    subroutine locate(y, cell, xi)
+        ! cell and local coordinates of a reference point (0: not found)
+        real(dp), intent(in) :: y(2)
+        integer, intent(out) :: cell
+        real(dp), intent(out) :: xi(2)
+        integer :: e, local
+        cell = 0
+        do e = 1, map%cells
+            call triangle_locate(map%reference(:, map%conn(:, e)), y, xi, local)
+            if (local /= 0) cycle
+            if (minval([xi, 1 - sum(xi)]) < -1e-10_dp) cycle
+            cell = e
+            return
+        end do
+    end subroutine
+
+    subroutine cemv_profiles(s, tau, gp, p)
+        ! the profiles in the convention of the flux map: tau = Phi'/pi,
+        ! psi' = iota Phi'/(2 pi) and mu0 p with their s derivatives
+        ! (central differences; the measure uses tau, tau', psi', psi'', p')
+        real(dp), intent(in) :: s
+        real(dp), intent(out) :: tau(3), gp(3), p(3)
+        real(dp), parameter :: h = 1e-4_dp
+        real(dp) :: io(3), pr(3), integral
+        integer :: k
+        do k = 1, 3
+            call profile%evaluate(s + (k - 2)*h, io(k), pr(k), integral)
+        end do
+        tau = [phiedge/pi, 0.0_dp, 0.0_dp]
+        gp = phiedge/(2*pi)*[io(2), (io(3) - io(1))/(2*h), (io(3) - 2*io(2) + io(1))/h**2]
+        p = [pr(2), (pr(3) - pr(1))/(2*h), (pr(3) - 2*pr(2) + pr(1))/h**2]
+    end subroutine
+
     subroutine mesh_ladder()
         ! Resolution ladder (docs/equilibrium-harness.md): each level starts from
         ! its own seed plus the correction of the solved coarser level and stops
@@ -387,6 +516,7 @@ contains
             end if
             call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
                 reference_gradient=reference)
+            newton_total = newton_total + report%iterations
             coarse = map; coarse_seed = seed_x
         end do
     end subroutine
