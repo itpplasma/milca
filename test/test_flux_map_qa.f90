@@ -41,6 +41,9 @@ program test_flux_map_qa
     integer :: stage_spec(3, max_stages), nstages, istage, k, st, u, newton_total, j
     real(dp) :: phiedge, kappa = 1, t0, t1, ts, energy, phi, axis(2), x0(2), sym
     real(dp), allocatable :: iota_c(:), pres_c(:), samples(:, :, :), quality(:), flux(:)
+    real(dp), allocatable :: axes(:, :), rings(:, :, :, :), bring(:, :, :, :)
+    logical, allocatable :: fring(:, :, :)
+    integer, allocatable :: axis_status(:)
     logical :: pres_hermite = .false.
     real(dp) :: bmin, bmax
     logical :: verbose
@@ -150,17 +153,28 @@ program test_flux_map_qa
     call wall_time(t1)
 
     call execute_command_line('mkdir -p '//trim(outdir))
+    ! axis and the surfaces s = 0.25, 0.5 of every output plane (independent
+    ! planes in parallel), then written in plane order
+    allocate (axes(2, 0:nout - 1), rings(2, nray, 2, 0:nout - 1), bring(3, nray, 2, 0:nout - 1), &
+              fring(nray, 2, 0:nout - 1), axis_status(0:nout - 1))
+    !$omp parallel do schedule(dynamic) private(x0, st)
+    do j = 0, nout - 1
+        call fm3_axis(c, j/real(nout, dp), profiles, axes(:, j), axis_status(j), x0)
+        if (axis_status(j) /= 0) cycle
+        call ring(0.25_dp, j/real(nout, dp), x0, rings(:, :, 1, j), bring(:, :, 1, j), fring(:, 1, j))
+        call ring(0.50_dp, j/real(nout, dp), x0, rings(:, :, 2, j), bring(:, :, 2, j), fring(:, 2, j))
+    end do
+    !$omp end parallel do
+    if (any(axis_status /= 0)) error stop 'axis'
+    skipped = count(.not. fring)
     open (newunit=u, file=trim(outdir)//'/axis.txt', status='replace')
     write (u, '(a)') '# phi R Z'
     do j = 0, nout - 1
-        phi = 2*pi*j/(nout*eq%nfp)
-        call fm3_axis(c, j/real(nout, dp), profiles, axis, st, x0)
-        if (st /= 0) error stop 'axis'
-        write (u, '(3es24.16)') phi, axis
-        call surface(0.25_dp, '0.25', phi, j/real(nout, dp), x0, j == 0)
-        call surface(0.50_dp, '0.50', phi, j/real(nout, dp), x0, j == 0)
+        write (u, '(3es24.16)') 2*pi*j/(nout*eq%nfp), axes(:, j)
     end do
     close (u)
+    call write_surface('0.25', 1)
+    call write_surface('0.50', 2)
     call write_currents()
     open (newunit=u, file=trim(outdir)//'/summary.json', status='replace')
     write (u, '(a,es24.16,a,a,a,i0,a,f10.3,a)') '{"energy_T2m3": ', energy, ', "stages": "', &
@@ -203,48 +217,54 @@ contains
         real(dp), intent(in) :: level, t, x0(2)
         real(dp), intent(out) :: rz(2, nray), b(3, nray)
         logical, intent(out) :: found(nray)
-        real(dp) :: e(2), x(2)
+        real(dp) :: e(2), x(2), xprev(2)
         integer :: q, it, stl, nc
+        logical :: have
 
+        have = .false.
         do q = 1, nray
             e = [cos(2*pi*(q - 1)/nray), sin(2*pi*(q - 1)/nray)]
-            ! continuation in the radius of the disc from the axis; a ray
-            ! that fails is retried with finer steps, then skipped
-            do nc = 16, 256, 240
-                x = x0
-                do it = 1, nc
-                    call fm3_preimage(c, t, profiles, sqrt(level)*it/nc*e, x, rz(:, q), b(:, q), stl)
-                    if (stl /= 0) exit
+            ! from the previous ray's point (one Newton solve); on failure
+            ! continuation in the radius of the disc from the axis, then
+            ! finer, then the ray is skipped
+            stl = 1
+            if (have) then
+                x = xprev
+                call fm3_preimage(c, t, profiles, sqrt(level)*e, x, rz(:, q), b(:, q), stl)
+            end if
+            if (stl /= 0) then
+                do nc = 16, 256, 240
+                    x = x0
+                    do it = 1, nc
+                        call fm3_preimage(c, t, profiles, sqrt(level)*it/nc*e, x, rz(:, q), &
+                                          b(:, q), stl)
+                        if (stl /= 0) exit
+                    end do
+                    if (stl == 0) exit
                 end do
-                if (stl == 0) exit
-            end do
+            end if
             found(q) = stl == 0
+            have = found(q)
+            if (have) xprev = x
         end do
     end subroutine ring
 
-    subroutine surface(level, tag, phi, t, x0, first)
-        !! The surface s_h = level on the plane t with |B|, appended to its file.
-        real(dp), intent(in) :: level, phi, t, x0(2)
+    subroutine write_surface(tag, l)
+        !! surface_s<tag>.txt from the rings of level index l, with |B|.
         character(*), intent(in) :: tag
-        logical, intent(in) :: first
-        real(dp) :: rz(2, nray), b(3, nray)
-        logical :: found(nray)
-        integer :: v, q
+        integer, intent(in) :: l
+        integer :: v, q, jj
 
-        if (first) then
-            open (newunit=v, file=trim(outdir)//'/surface_s'//tag//'.txt', status='replace')
-            write (v, '(a)') '# phi angle R Z |B|'
-        else
-            open (newunit=v, file=trim(outdir)//'/surface_s'//tag//'.txt', position='append', &
-                  status='old')
-        end if
-        call ring(level, t, x0, rz, b, found)
-        skipped = skipped + count(.not. found)
-        do q = 1, nray
-            if (found(q)) write (v, '(5es24.16)') phi, 2*pi*(q - 1)/nray, rz(:, q), norm2(b(:, q))
+        open (newunit=v, file=trim(outdir)//'/surface_s'//tag//'.txt', status='replace')
+        write (v, '(a)') '# phi angle R Z |B|'
+        do jj = 0, nout - 1
+            do q = 1, nray
+                if (fring(q, l, jj)) write (v, '(5es24.16)') 2*pi*jj/(nout*eq%nfp), &
+                    2*pi*(q - 1)/nray, rings(:, q, l, jj), norm2(bring(:, q, l, jj))
+            end do
         end do
         close (v)
-    end subroutine surface
+    end subroutine write_surface
 
     subroutine enclosed_current(level, t, x0, circulation, reference, ok)
         !! circulation = the loop integral of B along the surface s_h = level
@@ -256,7 +276,7 @@ contains
         real(dp), intent(out) :: circulation, reference
         logical, intent(out) :: ok
         real(dp) :: rz(2, nray), b(3, nray), d(2), bt
-        complex(dp) :: cf(2)
+        complex(dp) :: cf(2, -(nray/2 - 1):nray/2 - 1)
         logical :: found(nray)
         integer :: q, m, j
 
@@ -265,14 +285,16 @@ contains
         call ring(level, t, x0, rz, b, found)
         ok = all(found)
         if (.not. ok) return
+        cf = 0
+        do m = -(nray/2 - 1), nray/2 - 1
+            do j = 1, nray
+                cf(:, m) = cf(:, m) + rz(:, j)*exp(cmplx(0.0_dp, -2*pi*m*(j - 1)/real(nray, dp), dp))
+            end do
+        end do
         do q = 1, nray
             d = 0
             do m = -(nray/2 - 1), nray/2 - 1
-                cf = 0
-                do j = 1, nray
-                    cf = cf + rz(:, j)*exp(cmplx(0.0_dp, -2*pi*m*(j - 1)/real(nray, dp), dp))
-                end do
-                d = d + real(cmplx(0.0_dp, real(m, dp), dp)*cf/nray* &
+                d = d + real(cmplx(0.0_dp, real(m, dp), dp)*cf(:, m)/nray* &
                              exp(cmplx(0.0_dp, 2*pi*m*(q - 1)/real(nray, dp), dp)), dp)
             end do
             bt = b(1, q)*d(1) + b(3, q)*d(2)
