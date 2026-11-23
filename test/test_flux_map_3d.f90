@@ -9,9 +9,12 @@ program test_flux_map_3d
     !! agrees with the F1 numbers within 2 %.
     !!
     !! landreman (F2b): the exact sheared Landreman family of gates E4 and
-    !! A1-3D (eps 0.6, 13 planes over the torus). The wall curves are the
-    !! only geometric input; the first level starts from the normalised polar
-    !! map of each section, the next from the previous level (stationary).
+    !! A1-3D (eps 0.6, 13 planes over the torus, shifted in phi so that no
+    !! plane is a symmetry plane). The wall curves are the only geometric
+    !! input; the first level starts from the normalised polar map of each
+    !! section, the next from the previous level (stationary). The gauge is
+    !! the moment constraint of milca_flux_map_3d; no symmetry row is used
+    !! in either case.
     !! Passed when Newton converges, B against the exact field is
     !! within 20 % of the fixed-label fit of E4a on the exact-axis mesh
     !! (4.98e-2, 1.161e-2 at 2, 4 cells) and converges at order p; the axis
@@ -57,6 +60,10 @@ program test_flux_map_3d
     logical :: verbose = .false.
     character(16) :: which = 'solovev', arg
     real(dp) :: err(3), axis_err(3), force_err(3)
+    ! landreman: the planes lie at phi = 2 pi (k - 1 + plane_shift)/planes, so
+    ! that none of them is a symmetry plane of the family
+    ! (MILCA_FM3_PLANE_SHIFT overrides it; 0: plane 1 up-down symmetric)
+    real(dp) :: plane_shift = 0.37_dp
     ! F1 (pointwise B_phi, R B_phi = 3) and the fixed-label fit of E4a
     real(dp), parameter :: f1_b(3) = [2.42e-2_dp, 7.11e-3_dp, 1.93e-3_dp], &
                            e4a_fit(2) = [4.98e-2_dp, 1.161e-2_dp]
@@ -124,6 +131,8 @@ program test_flux_map_3d
         section_oracle%saxis = 2.4_dp
         section_oracle%delta = 0.2_dp
         call section_fit_profiles()
+        call get_environment_variable('MILCA_FM3_PLANE_SHIFT', arg, level)
+        if (level > 0) read (arg, *) plane_shift
         call get_environment_variable('MILCA_FM3_START_PLANES', arg, level)
         if (level > 0) read (arg, *) start_planes
         if (start_planes > 0) then
@@ -201,6 +210,14 @@ contains
         p = pressure_scale()*p
     end subroutine landreman_fm
 
+    subroutine landreman_b(x, b)
+        !! The exact field at the toroidal angle of the shifted planes.
+        real(dp), intent(in) :: x(3)
+        real(dp), intent(out) :: b(3)
+
+        call section_exact_b([x(1), x(2) + 2*pi*plane_shift/nt, x(3)], b)
+    end subroutine landreman_b
+
     real(dp) function pressure_scale()
         !! diagnostic: MILCA_FM3_PSCALE multiplies the pressure (the state is
         !! then no longer the exact one)
@@ -233,8 +250,6 @@ contains
         call fm3_build(c, samples, n, degree, 4, st)
         if (st /= 0) error stop 'meshes'
         call fm3_start(c)
-        call fm3_gauge_symmetric(c, st)
-        if (st /= 0) error stop 'gauge rows'
         c%fm%verbose = verbose
         call flux_map3d_solve(c%fm, c%derham, c%quad, solovev_fm, c%base, 1e-9_dp, 60, st)
         call check(st == 0, 'Newton converges')
@@ -308,7 +323,7 @@ contains
 
         allocate (a(2, np))
         do k = 1, np
-            plane_phi = 2*pi*(k - 1)/np
+            plane_phi = 2*pi*(k - 1 + plane_shift)/np
             a(:, k) = section_axis(plane_phi)
             do i = 1, nsamples
                 tk = 2*pi*(i - 1)/nsamples
@@ -322,15 +337,11 @@ contains
         c%fm%toroidal_points = tpoints
         call fm3_mesh_quality(c, quality)
         call fm3_start_polar(c)
-        ! the gauge rows need plane 1 up-down symmetric
+        ! no plane is a symmetry plane (plane_shift), and no symmetry is used
         sym = maxval(abs(samples(2, 2:nsamples/2, 1) + samples(2, nsamples:nsamples/2 + 2:-1, 1)))
-        if (sym < 1e-8_dp*minor .and. abs(a(2, 1)) < 1e-10_dp) then
-            call fm3_gauge_symmetric(c, st)
-            if (st /= 0) error stop 'gauge rows'
-        end if
-        print '(a,i0,a,es9.2,a,f6.3,a,f7.3,a,i0)', '  planes ', np, '  plane 1 asymmetry', sym, &
+        print '(a,i0,a,es9.2,a,f6.3,a,f7.3,a,l1)', '  planes ', np, '  plane 1 asymmetry', sym, &
             '  worst Jacobian ratio', minval(quality), '  mesh centre off the axis / minor radius', &
-            maxval(norm2(c%centre - a, 1))/minor, '  gauge rows ', size(c%fm%gauge_target)
+            maxval(norm2(c%centre - a, 1))/minor, '  gauge constraint ', c%fm%gauge_constraint
         c%fm%verbose = verbose
     end subroutine landreman_case
 
@@ -367,7 +378,7 @@ contains
             call check(c%fm%negative_eigenvalues == 6, &
                        'Hessian of the 4-cell, 13-plane state has 6 negative eigenvalues')
         call flux_map3d_system(c%fm, c%derham, c%quad, landreman_fm, c%base, c%fm%z, w, &
-                               exact_field=section_exact_b, field_error=ferr)
+                               exact_field=landreman_b, field_error=ferr)
         e = sqrt(ferr(1)/ferr(2))
         call report_force(c, landreman_fm)
         allocate (flux(nt))

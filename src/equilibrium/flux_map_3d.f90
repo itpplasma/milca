@@ -21,17 +21,17 @@ module milca_flux_map_3d
     !! = y_ik (interior; unused and fixed for wall functions). Kernel:
     !! generated leaf flux_map_energy_3d. B enters pointwise: every per-cell
     !! projection tried in 3D was unstable (docs/flux-map.md).
-    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
+    use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_spline_eval, only: spline_quadrature_t
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_t_basis
     use fortsparse_csr, only: csr_t
     use fortsparse_csc, only: csc_t, csc_from_triplet
     use fortsparse_status, only: fortsparse_status_t
     use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp, clebsch_exact_field
-    use milca_eulerian_vacuum, only: eu_constrained_t, eu_constrained_refactor, &
-        eu_constrained_apply, eu_constrained_free, eu_constrained_inertia
-    use milca_flux_map, only: flux_map_profiles
-    use milca_flux_map_leaves, only: flux_map_energy_3d
+    use fortfem_constrained_newton, only: newton_constraints_t, newton_report_t, &
+        newton_constraints_init
+    use milca_flux_map, only: flux_map_profiles, flux_map_newton, flux_map_gauge_row
+    use milca_flux_map_leaves, only: flux_map_energy_3d, flux_map_gauge_moment
     implicit none
     private
 
@@ -42,35 +42,35 @@ module milca_flux_map_3d
         real(dp), allocatable :: z(:)
         !! toroidal quadrature points (trapezoid) per plane
         integer :: toroidal_points = 2
-        !! Gauge theta* -> theta* + k(s) by a penalty on linear rows, exact for
-        !! stellarator-symmetric states with rows y_h = 0 on Z = 0 of the
-        !! plane phi = 0. Without rows the solver's shift holds the gauge; the
-        !! general case needs constraints orthogonal to the gauge.
-        integer, allocatable :: gauge_ptr(:), gauge_col(:)
-        real(dp), allocatable :: gauge_val(:), gauge_target(:)
-        real(dp) :: gauge_weight = 0
+        !! Gauge, as in flux_map_t: the rigid rotation of the disc is the one
+        !! exact symmetry of the discrete energy and is removed by one moment
+        !! constraint that follows the state. Every Newton step keeps the
+        !! mean wall angle of plane 1, weighted by the moment of the rotation
+        !! generator with each wall function of that plane (the row touches
+        !! one plane, so the factorisation stays sparse). .false.: no
+        !! constraint.
+        logical :: gauge_constraint = .true.
+        type(newton_constraints_t) :: gauge
         !! Solver: .false. minimises W (steps accepted on energy decrease);
         !! .true. seeks the stationary point next to the start by Newton
         !! with a line search on the scaled gradient norm, whatever the
         !! signature of the Hessian (an equilibrium need not be a minimum).
         logical :: stationary = .false.
+        !! minimisation with relaxed steps, as in flux_map_t
+        logical :: relaxed_steps = .false.
         integer :: steps = 0
         real(dp) :: energy = 0, gradient_norm = 0
         logical :: converged = .false., verbose = .false.
-        !! Newton steps by the symmetric LDL^T factorisation of the upper
-        !! triangle of the Hessian (FortSparse); .false.: LU of the mirrored
-        !! full matrix (same triangle assembly), which gives no inertia.
-        logical :: symmetric_solver = .true.
-        !! Inertia of the free block of the Hessian (gauge penalty included)
-        !! at the converged state: numbers of negative and zero eigenvalues
-        !! (-1: not computed, i.e. not converged or LU), and whether every
-        !! pivot was clear of its rounding threshold.
+        !! Inertia of the Hessian on the tangent space of the gauge
+        !! constraints at the converged state: numbers of negative and zero
+        !! eigenvalues (-1: not converged), and whether every pivot was clear
+        !! of its rounding threshold.
         integer :: negative_eigenvalues = -1, zero_eigenvalues = -1
         logical :: inertia_reliable = .false.
     end type flux_map3d_t
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
-    public :: flux_map3d_init, flux_map3d_gauge_row, flux_map3d_system, flux_map3d_solve, &
+    public :: flux_map3d_init, flux_map3d_gauge, flux_map3d_system, flux_map3d_solve, &
               flux_map3d_point, flux_map3d_expand_symmetric
 
 contains
@@ -87,20 +87,29 @@ contains
         fm%is_wall(wall) = .true.
         fm%fixed = [(n0*nt + (k - 1)*n0 + wall, k=1, nt)]
         allocate (fm%z(2*n0*nt), source=0.0_dp)
-        allocate (fm%gauge_ptr(1), source=1)
-        allocate (fm%gauge_col(0), fm%gauge_val(0), fm%gauge_target(0))
+        call newton_constraints_init(fm%gauge)
     end subroutine flux_map3d_init
 
-    subroutine flux_map3d_gauge_row(fm, cols, vals, target)
-        type(flux_map3d_t), intent(inout) :: fm
-        integer, intent(in) :: cols(:)
-        real(dp), intent(in) :: vals(:), target
+    subroutine flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, z, gauge)
+        !! The gauge constraint at the state z, as flux_map_gauge, from the
+        !! wall functions of plane 1.
+        type(flux_map3d_t), intent(in) :: fm
+        type(spline_derham_t), intent(in) :: derham
+        type(spline_quadrature_t), intent(in) :: quad
+        procedure(flux_map_profiles) :: profiles
+        real(dp), intent(in) :: plane_nodes(:, :, :), z(:)
+        type(newton_constraints_t), intent(inout) :: gauge
+        real(dp) :: moment(2*fm%n0*fm%nt), energy
+        integer :: i
 
-        fm%gauge_col = [fm%gauge_col, cols]
-        fm%gauge_val = [fm%gauge_val, vals]
-        fm%gauge_target = [fm%gauge_target, target]
-        fm%gauge_ptr = [fm%gauge_ptr, size(fm%gauge_col) + 1]
-    end subroutine flux_map3d_gauge_row
+        if (.not. fm%gauge_constraint) then
+            call newton_constraints_init(gauge)
+            return
+        end if
+        call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, z, energy, &
+                               gauge_moment=moment)
+        call flux_map_gauge_row(moment, pack([(i, i=1, fm%n0)], fm%is_wall), z, gauge)
+    end subroutine flux_map3d_gauge
 
     pure subroutine locals(is_w, ix, iy, nv, gx, vel, rr, ax, ay, bx, by, u, sx, sig, th, &
                            gsig, gth, lam, mw)
@@ -177,7 +186,7 @@ contains
     end subroutine locals
 
     subroutine flux_map3d_system(fm, derham, quad, profiles, plane_nodes, z, energy, gradient, &
-                                 hessian, exact_field, field_error)
+                                 hessian, exact_field, field_error, gauge_moment)
         !! Energy at z; with gradient and hessian also the derivatives. The
         !! Hessian is symmetric and only its UPPER triangle (columns >= row,
         !! diagonal included) is assembled, by rows (CSR): symmetric by
@@ -187,7 +196,10 @@ contains
         !! geometry the gradients of clebsch_node_gradients refer to (plane 1
         !! of the callers here); plane_nodes(2, n0, nt) are the (R, Z) node
         !! coordinates of every plane. field_error: sum of w |B - B_exact|^2
-        !! and of w |B_exact|^2 over the quadrature.
+        !! and of w |B_exact|^2 over the quadrature. gauge_moment: per wall
+        !! function b of plane 1 the moment int (-y, x) . du/dTheta_b1 dV of
+        !! the rotation generator at z, zero in the other slots
+        !! (flux_map3d_gauge).
         type(flux_map3d_t), intent(in) :: fm
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
@@ -197,19 +209,19 @@ contains
         real(dp), allocatable, intent(out), optional :: gradient(:)
         type(csr_t), intent(out), optional :: hessian
         procedure(clebsch_exact_field), optional :: exact_field
-        real(dp), intent(out), optional :: field_error(2)
+        real(dp), intent(out), optional :: field_error(2), gauge_moment(:)
         real(dp), allocatable :: v0(:, :, :), gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :), &
                                  tb(:, :, :), gloc(:), hloc(:, :), vals(:), zx(:, :), zy(:, :), &
                                  ax(:), ay(:), bx(:), by(:), lam(:), mw(:, :), gsec(:, :), &
-                                 hs(:, :), lm(:), ltab(:, :, :)
+                                 hs(:, :), lm(:), ltab(:, :, :), mloc(:), turn(:)
         integer, allocatable :: d0(:), ix(:), iy(:), idx(:), rows(:), cols(:)
         logical, allocatable :: is_w(:)
         real(dp) :: lt(fm%nt, 2), ht(fm%nt, 2), sk(2, fm%nt), gk(2, 2, fm%nt), sm(2), f(2, 2), &
                     ft(2, 2), detf, vel(2), t, wq, wt, u(8), sig, th, gsig(3), gth(3), s, &
                     tau(3), gp(3), pr(3), w, wg(8), wh(36), h8(8, 8), ref, shift, k11, k12, &
-                    vm(3), et(3), c3(3), gs(3), bv(3), bx3(3), ferr(2), resid, sn, cs
+                    vm(3), et(3), c3(3), gs(3), bv(3), bx3(3), ferr(2), sn, cs
         integer :: n0, nt, ntot, nqt, cell, q, p, m, i, j, k, a, b, c1, c2, nloc, nsec, nl, &
-                   nz, blk, il, jl, la, lb, row, gi, gj, nlmax, ia, ib
+                   nz, blk, il, jl, la, lb, nlmax, ia, ib, ng
         logical :: derivs
         type(csc_t) :: mm
         type(fortsparse_status_t) :: info
@@ -232,13 +244,17 @@ contains
             ltab(:, 1, m) = lt(:, 1)
             ltab(:, 2, m) = clebsch_nfp*lt(:, 2)
         end do
+        ng = 0
+        if (present(gauge_moment)) then
+            ng = 1
+            gauge_moment = 0
+        end if
         if (derivs) then
             allocate (gradient(2*ntot), source=0.0_dp)
             if (present(hessian)) then
                 nz = size(quad%point_offset)*blk
-                allocate (rows(nz + size(fm%gauge_col)**2 + size(fm%fixed)), &
-                          cols(nz + size(fm%gauge_col)**2 + size(fm%fixed)), &
-                          vals(nz + size(fm%gauge_col)**2 + size(fm%fixed)))
+                allocate (rows(nz + size(fm%fixed)), cols(nz + size(fm%fixed)), &
+                          vals(nz + size(fm%fixed)))
                 rows = 1
                 cols = 1
                 vals = 0
@@ -246,7 +262,8 @@ contains
         end if
         !$omp parallel do schedule(dynamic) default(private) &
         !$omp shared(fm, derham, quad, plane_nodes, z, gradient, rows, cols, vals, n0, nt, &
-        !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error, ltab) &
+        !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error, ltab, ng, &
+        !$omp        gauge_moment) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
             call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
@@ -275,6 +292,11 @@ contains
                 hloc = 0
             end if
             gloc = 0
+            if (ng > 0) then
+                if (allocated(mloc)) deallocate (mloc, turn)
+                allocate (mloc(nsec), turn(nsec))
+                mloc = 0
+            end if
             ! values per plane, the wall angles of the cell on one branch
             ref = 0
             do i = 1, nloc
@@ -330,6 +352,15 @@ contains
                         wh(35), wh(36))
                     wt = wq*abs(detf)*two_pi/nqt
                     energy = energy + wt*w
+                    if (ng > 0) then
+                        ! the wall functions of plane 1
+                        turn = 0
+                        do i = 1, nloc
+                            if (is_w(i)) call flux_map_gauge_moment(u(1), u(2), &
+                                sx(1, ix(i), 1), sx(2, ix(i), 1), turn(ix(i)))
+                        end do
+                        mloc = mloc + wt*sm(1)*lt(1, 1)*turn
+                    end if
                     if (present(exact_field)) then
                         c3 = [u(4)*u(8) - u(5)*u(7), u(5)*u(6) - u(3)*u(8), u(3)*u(7) - u(4)*u(6)]
                         gs = 2*(u(1)*u(3:5) + u(2)*u(6:8))
@@ -388,6 +419,11 @@ contains
                     end if
                 end do
             end do
+            if (ng > 0) then
+                !$omp critical (flux_map3d_moments)
+                gauge_moment(idx(:nsec)) = gauge_moment(idx(:nsec)) + mloc
+                !$omp end critical (flux_map3d_moments)
+            end if
             if (.not. derivs) cycle
             do i = 1, nl
                 !$omp atomic
@@ -432,25 +468,6 @@ contains
         !$omp end parallel do
         if (present(field_error)) field_error = ferr
         nz = size(quad%point_offset)*blk
-        ! gauge penalty
-        do row = 1, size(fm%gauge_target)
-            associate (cg => fm%gauge_col(fm%gauge_ptr(row):fm%gauge_ptr(row + 1) - 1), &
-                       vg => fm%gauge_val(fm%gauge_ptr(row):fm%gauge_ptr(row + 1) - 1))
-                resid = dot_product(vg, z(cg)) - fm%gauge_target(row)
-                energy = energy + 0.5_dp*fm%gauge_weight*resid**2
-                if (derivs) gradient(cg) = gradient(cg) + fm%gauge_weight*resid*vg
-                if (present(hessian)) then
-                    do b = 1, size(cg)
-                        do a = 1, b
-                            nz = nz + 1
-                            rows(nz) = min(cg(a), cg(b))
-                            cols(nz) = max(cg(a), cg(b))
-                            vals(nz) = fm%gauge_weight*vg(a)*vg(b)
-                        end do
-                    end do
-                end if
-            end associate
-        end do
         if (.not. present(hessian)) return
         shift = maxval(abs(vals(:nz)))
         do k = 1, size(fm%fixed)
@@ -536,11 +553,9 @@ contains
 
     subroutine flux_map3d_solve(fm, derham, quad, profiles, plane_nodes, tolerance, max_steps, &
                                 status)
-        !! Minimises W from fm%z by Newton steps with an identity shift, as
-        !! flux_map_solve: a step is accepted when the energy decreases as the
-        !! quadratic model predicts; a rejected step raises the shift.
-        !! Converged when the gradient scaled by the Hessian diagonal is below
-        !! tolerance. Status 1: no acceptable step, 2: step limit.
+        !! Solves from fm%z by flux_map_newton (the one solver loop of the
+        !! flux map), with the gauge constraints built at fm%z. Status 1: no
+        !! acceptable step, 2: step limit.
         type(flux_map3d_t), intent(inout) :: fm
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
@@ -548,191 +563,48 @@ contains
         real(dp), intent(in) :: plane_nodes(:, :, :), tolerance
         integer, intent(in) :: max_steps
         integer, intent(out) :: status
-        type(csr_t) :: hessian, shifted, full
-        type(eu_constrained_t) :: factor
-        real(dp), allocatable :: grad(:), diag(:), delta(:), hd(:), zt(:), zero(:), gt(:)
-        real(dp) :: w, wt, lam, dmin, pred, alpha
-        integer :: it, i, p, n, st, nneg, nzero, npos
-        logical :: accepted, sure
-        logical, allocatable :: free(:)
-        integer(int64) :: c0, c1, rate
-        real(dp) :: t_hess, t_energy, t_solve
+        type(newton_report_t) :: report
+        real(dp), allocatable :: z(:)
 
-        n = 2*fm%n0*fm%nt
-        t_hess = 0
-        t_energy = 0
-        t_solve = 0
-        call system_clock(c0, rate)
-        allocate (diag(n), delta(n), hd(n), free(n), zero(size(fm%fixed)))
-        zero = 0
-        free = .true.
-        free(fm%fixed) = .false.
-        lam = 1e-9_dp
-        fm%steps = 0
-        fm%converged = .false.
-        fm%negative_eigenvalues = -1
-        fm%zero_eigenvalues = -1
-        fm%inertia_reliable = .false.
-        status = 2
-        if (fm%gauge_weight == 0 .and. size(fm%gauge_target) > 0) then
-            call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, fm%z, w, grad, hessian)
-            call diagonal(hessian, diag)
-            fm%gauge_weight = sum(abs(diag), free)/count(free)
-        end if
-        do it = 0, max_steps
-            call tick(c0)
-            call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, fm%z, w, grad, hessian)
-            call tock(c0, t_hess)
-            call diagonal(hessian, diag)
-            grad(fm%fixed) = 0
-            fm%energy = w
-            fm%gradient_norm = norm2(pack(grad/sqrt(abs(diag) + tiny(1.0_dp)), free))
-            if (fm%verbose) print '(a,i4,a,es20.12,a,es10.2,a,es9.1)', '    step', it, '  W', w, &
-                '  |g|', fm%gradient_norm, '  shift', lam
-            if (fm%gradient_norm < tolerance) then
-                fm%converged = .true.
-                status = 0
-                call inertia_at_convergence()
-                call report()
-                return
-            end if
-            if (it == max_steps) then
-                call report()
-                return
-            end if
-            dmin = minval(abs(diag), free)
-            accepted = .false.
-            if (fm%stationary) then
-                call tick(c0)
-                call constrained_solve(hessian, -grad, delta, st)
-                call tock(c0, t_solve)
-                if (st /= 0) then
-                    status = 1
-                    call report()
-                    return
-                end if
-                alpha = 1
-                do while (alpha > 1e-4_dp)
-                    zt = fm%z + alpha*delta
-                    call tick(c0)
-                    call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zt, wt, gt)
-                    call tock(c0, t_energy)
-                    gt(fm%fixed) = 0
-                    if (norm2(pack(gt/sqrt(abs(diag) + tiny(1.0_dp)), free)) < &
-                        (1 - alpha/4)*fm%gradient_norm) then
-                        accepted = .true.
-                        exit
-                    end if
-                    alpha = alpha/2
-                end do
-                if (.not. accepted) then
-                    status = 1
-                    call report()
-                    return
-                end if
-                fm%z = zt
-                fm%steps = fm%steps + 1
-                cycle
-            end if
-            do while (lam < 1e12_dp)
-                shifted = hessian
-                do i = 1, n
-                    do p = shifted%row_ptr(i), shifted%row_ptr(i + 1) - 1
-                        if (shifted%col(p) == i) shifted%val(p) = shifted%val(p) + lam*dmin
-                    end do
-                end do
-                call tick(c0)
-                call constrained_solve(shifted, -grad, delta, st)
-                call tock(c0, t_solve)
-                if (st == 0) then
-                    call upper_matvec(hessian, delta, hd)
-                    pred = -(dot_product(grad, delta) + 0.5_dp*dot_product(delta, hd))
-                    zt = fm%z + delta
-                    call tick(c0)
-                    call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zt, wt)
-                    call tock(c0, t_energy)
-                    if (pred > 0 .and. wt == wt .and. &
-                        w - wt > 1e-4_dp*pred - 1e-14_dp*abs(w)) then
-                        fm%z = zt
-                        fm%steps = fm%steps + 1
-                        lam = max(lam/100, 1e-12_dp)
-                        accepted = .true.
-                        exit
-                    end if
-                end if
-                lam = 10*lam
-            end do
-            if (.not. accepted) then
-                status = 1
-                call report()
-                return
-            end if
-        end do
+        call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, fm%z, fm%gauge)
+        z = fm%z
+        call flux_map_newton(energy_system, z, fm%fixed, fm%gauge, gauge_at, fm%stationary, &
+                             fm%relaxed_steps, fm%verbose, tolerance, max_steps, report, status)
+        fm%z = z
+        fm%steps = report%steps
+        fm%energy = report%energy
+        fm%gradient_norm = report%gradient_norm
+        fm%converged = report%converged
+        fm%negative_eigenvalues = report%negative_eigenvalues
+        fm%zero_eigenvalues = report%zero_eigenvalues
+        fm%inertia_reliable = report%inertia_reliable
 
     contains
 
-        subroutine tick(c)
-            integer(int64), intent(out) :: c
-            call system_clock(c)
-        end subroutine tick
+        subroutine gauge_at(zz, gauge)
+            real(dp), intent(in) :: zz(:)
+            type(newton_constraints_t), intent(inout) :: gauge
 
-        subroutine tock(c, acc)
-            integer(int64), intent(in) :: c
-            real(dp), intent(inout) :: acc
-            integer(int64) :: now
-            call system_clock(now)
-            acc = acc + real(now - c, dp)/rate
-        end subroutine tock
+            call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, zz, gauge)
+        end subroutine gauge_at
 
-        subroutine constrained_solve(k, rhs, x, status)
-            !! K x = rhs on the free slots, x = 0 on the fixed ones; one factor
-            !! object for the whole solve, so the ordering and the symbolic
-            !! analysis of the fixed pattern are computed once.
-            type(csr_t), intent(in) :: k
-            real(dp), intent(in) :: rhs(:)
-            real(dp), intent(out) :: x(:)
-            integer, intent(out) :: status
+        subroutine energy_system(zz, energy, gradient, hessian)
+            real(dp), intent(in) :: zz(:)
+            real(dp), intent(out) :: energy
+            real(dp), intent(out), optional :: gradient(:)
+            type(csr_t), intent(out), optional :: hessian
+            real(dp), allocatable :: g(:)
 
-            call factorise(k, status)
-            if (status == 0) call eu_constrained_apply(factor, rhs, x, status)
-        end subroutine constrained_solve
-
-        subroutine factorise(k, status)
-            !! k: upper triangle of a symmetric matrix of the pattern of the
-            !! Hessian: LDL^T of it, or LU of its mirror.
-            type(csr_t), intent(in) :: k
-            integer, intent(out) :: status
-
-            if (fm%symmetric_solver) then
-                call eu_constrained_refactor(k, fm%fixed, factor, status, symmetric=.true.)
+            if (present(hessian)) then
+                call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g, &
+                                       hessian)
+            else if (present(gradient)) then
+                call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g)
             else
-                call flux_map3d_expand_symmetric(k, full)
-                call eu_constrained_refactor(full, fm%fixed, factor, status)
+                call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy)
             end if
-        end subroutine factorise
-
-        subroutine inertia_at_convergence()
-            !! Inertia of the Hessian itself (no shift) at the final state.
-            if (.not. fm%symmetric_solver) return
-            call tick(c0)
-            call factorise(hessian, st)
-            call tock(c0, t_solve)
-            ! an exactly singular block still has its counts
-            call eu_constrained_inertia(factor, nneg, nzero, npos, sure, st)
-            if (st /= 0) return
-            fm%negative_eigenvalues = nneg
-            fm%zero_eigenvalues = nzero
-            fm%inertia_reliable = sure
-            if (fm%verbose) print '(a,i0,a,i0,a,i0,a,l1)', &
-                '    Hessian inertia at the solution (negative, zero, positive): ', nneg, ', ', &
-                nzero, ', ', npos, '  reliable ', sure
-        end subroutine inertia_at_convergence
-
-        subroutine report()
-            call eu_constrained_free(factor)
-            if (fm%verbose) print '(a,3f9.2)', '    time: energy+gradient+Hessian, energy(+gradient), linear solves (s)', &
-                t_hess, t_energy, t_solve
-        end subroutine report
+            if (present(gradient)) gradient = g
+        end subroutine energy_system
     end subroutine flux_map3d_solve
 
     subroutine flux_map3d_expand_symmetric(upper, full)
@@ -781,35 +653,5 @@ contains
             end do
         end do
     end subroutine flux_map3d_expand_symmetric
-
-    pure subroutine upper_matvec(a, x, y)
-        !! y = A x for the symmetric A given by its upper triangle by rows.
-        type(csr_t), intent(in) :: a
-        real(dp), intent(in) :: x(:)
-        real(dp), intent(out) :: y(:)
-        integer :: i, p, j
-
-        y = 0
-        do i = 1, a%nrow
-            do p = a%row_ptr(i), a%row_ptr(i + 1) - 1
-                j = a%col(p)
-                y(i) = y(i) + a%val(p)*x(j)
-                if (j /= i) y(j) = y(j) + a%val(p)*x(i)
-            end do
-        end do
-    end subroutine upper_matvec
-
-    pure subroutine diagonal(a, d)
-        type(csr_t), intent(in) :: a
-        real(dp), intent(out) :: d(:)
-        integer :: i, p
-
-        d = 0
-        do i = 1, a%nrow
-            do p = a%row_ptr(i), a%row_ptr(i + 1) - 1
-                if (a%col(p) == i) d(i) = d(i) + a%val(p)
-            end do
-        end do
-    end subroutine diagonal
 
 end module milca_flux_map_3d

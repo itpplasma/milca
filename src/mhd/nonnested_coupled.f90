@@ -60,6 +60,8 @@ module milca_nonnested_coupled
     use milca_island_closure, only: island_closure_t, island_closure_check, &
         ISLAND_INVALID, ISLAND_NULL_FIELD, ISLAND_BAD_DATA, ISLAND_DELEGATE_B
     use milca_gs_direct, only: gs_direct_available, gs_direct_mpi_ready
+    use fortfem_parameter_continuation, only: continuation_options_t, &
+        continuation_report_t, continuation_run
     use milca_equilibrium_nonnested, only: free_b_field_t, nn_divergence
     use milca_nonnested_profile, only: nn_fitted_source_t
     use milca_nonnested_leaves, only: coupled_current, coupled_current_jvp, &
@@ -687,9 +689,11 @@ contains
         real(dp), intent(in), optional :: tol, decades
         integer, intent(in), optional :: max_steps
         type(nc_problem_t) :: stage
+        type(continuation_options_t) :: path
+        type(continuation_report_t) :: walked
         real(dp), allocatable :: xs(:)
-        real(dp) :: span, s, s_ok, ds, ds_max, target
-        integer :: steps, stages, total, st
+        real(dp) :: span, ds_max, target
+        integer :: steps, st
         status = 1
         target = 1.0e-11_dp; ds_max = 1; steps = 12
         if (present(tol)) target = tol
@@ -703,32 +707,35 @@ contains
         if (problem%g_perp <= 0 .or. problem%g_par < problem%g_perp) return
         span = max(log10(problem%chi_par/problem%chi_perp), &
             log10(problem%g_par/problem%g_perp))
-        ds_max = merge(1.0_dp, min(1.0_dp, ds_max/max(span, tiny(1.0_dp))), &
-            span <= 0)
         stage = problem
-        s = merge(1.0_dp, 0.0_dp, span <= 0) ! isotropic: one plain solve
-        s_ok = 0; ds = ds_max; stages = 0; total = 0
-        do
+        if (span <= 0) then
+            ! isotropic: one plain solve
             xs = x
-            call set_stage(s)
-            call nc_solve(field, stage, xs, report, st, tol=target, max_steps=steps)
-            stages = stages + 1; total = total + report%newton_steps
-            if (st == 0) then
-                x = xs; s_ok = s
-                if (s >= 1) exit
-                ds = min(ds_max, 2*ds)
-            else
-                if (s <= 0 .or. ds*span < 1.0_dp/64) then
-                    report%stages = stages; report%total_steps = total
-                    return
-                end if
-                ds = ds/2
-            end if
-            s = min(1.0_dp, s_ok + ds)
-        end do
-        report%stages = stages; report%total_steps = total
-        status = 0
+            call anisotropy_stage(1.0_dp, xs, walked%total_steps, st)
+            report%stages = 1; report%total_steps = walked%total_steps
+            if (st /= 0) return
+            x = xs; status = 0
+            return
+        end if
+        ! the shared driver (fortfem_parameter_continuation): the isotropic
+        ! problem first, then steps of at most ds_max in s, halved on failure
+        path%max_step = min(1.0_dp, ds_max/span)
+        path%min_step = 1.0_dp/(64*span)
+        call continuation_run(anisotropy_stage, x, path, walked, st)
+        report%stages = walked%stages; report%total_steps = walked%total_steps
+        if (st == 0) status = 0
     contains
+        subroutine anisotropy_stage(t, xs, newton_steps, stage_status)
+            ! nc_solve at the anisotropy of s = t from xs.
+            real(dp), intent(in) :: t
+            real(dp), intent(inout) :: xs(:)
+            integer, intent(out) :: newton_steps, stage_status
+            call set_stage(t)
+            call nc_solve(field, stage, xs, report, stage_status, tol=target, &
+                max_steps=steps)
+            newton_steps = report%newton_steps
+        end subroutine
+
         subroutine set_stage(t)
             real(dp), intent(in) :: t
             stage%chi_par = problem%chi_perp*(problem%chi_par/problem%chi_perp)**t

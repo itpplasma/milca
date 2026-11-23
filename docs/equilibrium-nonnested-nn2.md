@@ -529,6 +529,12 @@ pressure order >= k + 0.6 at ratio 1 only. CTest
 Ratios 1e3 to 1e6, N = 4 and P3 are in the sCluster study (`landreman`
 mode); a failing gate there is reported, not retuned.
 
+Since 2026-11-23 `nc_continue` runs on the continuation driver shared with
+the flux map (FortFEM `fortfem_parameter_continuation`; the policy below is
+that driver's). Local P2, N = 2, nr = 4 and 8 at ratio 1e6 reproduce every
+printed digit: 8 stages, 16 Newton steps, path differences 1.08e-9, 9.79e-8,
+4.76e-9.
+
 Continuation in the anisotropy (`nc_continue`). The first sCluster study
 (jobs 3222997/8) gave no result at ratio 1e6: from the shifted seed the
 Newton iteration took damped steps (line-search factors 1/2 to 1/256)

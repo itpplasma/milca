@@ -22,7 +22,7 @@ module flux_map_sections
     use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp
     use milca_spline_ale, only: spline_geometry_dofs, spline_set_geometry
     use milca_flux_map, only: flux_map_profiles
-    use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_t, flux_map3d_init, flux_map3d_gauge_row, &
+    use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_t, flux_map3d_init, &
         flux_map3d_point, flux_map3d_expand_symmetric
     implicit none
     private
@@ -48,7 +48,7 @@ module flux_map_sections
     end type fm3_case_t
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
-    public :: fm3_build, fm3_start, fm3_start_polar, fm3_gauge_symmetric, fm3_axis, fm3_mesh_quality, &
+    public :: fm3_build, fm3_start, fm3_start_polar, fm3_axis, fm3_mesh_quality, &
               fm3_locate, fm3_state, fm3_flux, fm3_prolong, fm3_preimage, &
               fm3_dump_hessian, fm3_wall_winding, fm3_interface_jump
 
@@ -278,43 +278,6 @@ contains
             end do
         end do
     end subroutine fm3_start_polar
-
-    subroutine fm3_gauge_symmetric(c, status)
-        !! Gauge rows for a state with stellarator symmetry (plane 1 up-down
-        !! symmetric about Z = 0): y_h = 0 at points of Z = 0 inside plane 1
-        !! and Theta_h = 0 at its outboard wall node.
-        type(fm3_case_t), intent(inout) :: c
-        integer, intent(out) :: status
-        integer, allocatable :: rowptr(:), colidx(:), wblock(:)
-        real(dp), allocatable :: val(:), wxi(:, :), ws(:, :)
-        real(dp) :: rmin, rmax, point(2), xi(2)
-        integer :: ng, k, block, ntot
-
-        ntot = c%n0*c%nt
-        rmin = minval(c%samples(1, :, 1), abs(c%samples(2, :, 1)) < 1e-9_dp)
-        rmax = maxval(c%samples(1, :, 1), abs(c%samples(2, :, 1)) < 1e-9_dp)
-        ng = 4*c%cells + 1
-        block = 1
-        do k = 1, ng - 1
-            point = [rmin + (rmax - rmin)*real(k, dp)/ng, 0.0_dp]
-            call spline_locate(c%space, block, point, block, xi, status)
-            if (status /= 0) return
-            call spline_point_matrix(c%space, [block], reshape(xi, [2, 1]), 0, rowptr, colidx, &
-                                     val, status)
-            if (status /= 0) return
-            if (.not. any(c%fm%is_wall(colidx) .and. abs(val) > 1e-14_dp)) &
-                call flux_map3d_gauge_row(c%fm, ntot + colidx, val, 0.0_dp)
-        end do
-        call spline_boundary_nodes(c%space, LAYOUT_WALL, 1, wblock, wxi, ws, status)
-        if (status /= 0) return
-        k = minloc(abs(ws(2, :)), 1, ws(1, :) > c%centre(1, 1))
-        status = 3
-        if (abs(ws(2, k)) > 1e-9_dp) return
-        call spline_point_matrix(c%space, wblock(k:k), wxi(:, k:k), 0, rowptr, colidx, val, status)
-        if (status /= 0) return
-        call flux_map3d_gauge_row(c%fm, pack(colidx, c%fm%is_wall(colidx)), &
-                                  pack(val, c%fm%is_wall(colidx)), 0.0_dp)
-    end subroutine fm3_gauge_symmetric
 
     subroutine fm3_locate(c, x0, block, d0, nv, gn, status)
         !! Section functions at the point x0 of the reference plane 1: their
@@ -698,7 +661,7 @@ contains
 
     subroutine fm3_dump_hessian(c, profiles)
         !! With the environment variable MILCA_FM3_HESSIAN=prefix: the Hessian
-        !! of W at c%fm%z (with the gauge penalty, if any) as CSR, the state,
+        !! of W at c%fm%z (without the gauge constraints) as CSR, the state,
         !! the gradient, the fixed slots, which section functions are wall
         !! functions, W, the per-plane L2 mass matrix of the section functions
         !! (fm3_section_mass) and the node coordinates, to
@@ -721,7 +684,7 @@ contains
         open (newunit=unit, file=trim(path), access='stream', form='unformatted', &
               status='replace')
         write (unit) int(h%nrow, int32), int(size(h%val), int32), int(c%n0, int32), &
-            int(c%nt, int32), int(size(c%fm%fixed), int32), int(size(c%fm%gauge_target), int32)
+            int(c%nt, int32), int(size(c%fm%fixed), int32), 0_int32
         write (unit) int(h%row_ptr, int32), int(h%col, int32), h%val, c%fm%z, g, &
             int(c%fm%fixed, int32), merge(1_int32, 0_int32, c%fm%is_wall), w
         write (unit) fm3_section_mass(c), c%base

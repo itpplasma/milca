@@ -123,16 +123,36 @@ in the prototype). Reopened only if P1 shows amplification at realistic
 ratios B_φ/B_pol, then with the force-balance check of P0a as acceptance.
 
 P0c, shared numerics first (was P5), because a comparison of solvers with
-penalised gauges measures the penalties:
-- S1 gauge by constraints: one module for moment constraints orthogonal
-  to a continuous symmetry (k(s) of the flux map, the slide of the
-  Lagrangian map, the closed-line gauge of Φ in NN2). Gate: F1 and F2b on
-  meshes without symmetry and without the symmetry rows.
-- S2 stiff parameters: one continuation driver and one step acceptance
-  that tolerates a curved stiff constraint. Gates: F1 from a cold start at
-  B_φ/B_pol = 150 without hand-set stages; the NN2 ratio 1e6 case from the
-  seed.
-- One solver loop for F1 and F2 (duplicated at present).
+penalised gauges measures the penalties: done 2026-11-23 for the flux map,
+numbers and the hypotheses with their outcomes in
+[flux-map.md](flux-map.md), "Gauge constraint, one solver loop and
+continuation"; generic parts in FortFEM (`fortfem_constrained_newton`,
+`fortfem_parameter_continuation`, doc/CONSTRAINED_NEWTON.md there).
+- S1 gauge by constraints: `milca_gauge_moments`, one module for moment
+  constraints orthogonal to a continuous symmetry, with dependent
+  generators dropped. The flux map uses it for the rotation of the disc,
+  the one exact symmetry of its discrete energy; the penalty and symmetry
+  rows are gone. Gate passed: F1 and F2b on meshes without symmetry and
+  without symmetry rows, same errors as before. Ruled out: constraining
+  k(s) beyond the rotation (it moves the solution by 0.5 to 33 %). Not
+  done, each is more than a small change and is the next step of its lane:
+  the slide of the Lagrangian map (removed there by reducing the axis
+  basis, `nested_axis_basis`), the closed-line gauge of Φ in NN2 (proposed
+  in the NN2 document, no code yet).
+- S2 stiff parameters: one continuation driver, used by the flux map
+  (guide field) and by NN2 (`nc_continue`, anisotropy). Gates passed: F1
+  from a cold start at B_φ/B_pol = 150, stages chosen by the driver; NN2
+  P2 at ratio 1e6 from the shifted seed (nr 4 and 8, N = 2) with the
+  stages, steps and path differences it had. Step acceptance: three rules
+  meant to tolerate the stiff constraint were tested and ruled out for the
+  flux map (the Hessian is indefinite far from the solution; that, not the
+  curvature of the constraint, refuses the steps); relaxed steps exist in
+  FortFEM and are off here (fewer steps on F1 without symmetry, more on
+  the decks). The NN2 Newton iteration is not on the shared loop.
+- One solver loop for F1 and F2: done (`flux_map_newton`), Newton on the
+  KKT system by LDLᵀ with the inertia on the constraints.
+- Found on the way: a mesh without symmetry costs the minimiser up to
+  three times the Newton steps (soft k(s) directions). Open.
 
 **P1. Head-to-head, flux map against the Lagrangian map**, VMEC++ as the
 outside reference, on identical cases and inputs:
@@ -271,8 +291,9 @@ gauge work of branch `label/qa-recipe` stays unlanded), the frozen-map
 relabelling (B1–B6, R1), meshes that follow the magnetic axis, gate C as
 formulated.
 
-**Not run so far in the flux map:** any case with pressure in 3D, QH and
-QI decks, a non-symmetric case, free boundary, any region coupling. Speed:
+**Not run so far in the flux map:** QI decks, an equilibrium without
+symmetry (the meshes of gates F1 and F2b have none since P0c), free
+boundary, any region coupling. Speed:
 the Hessian couples all planes of a section cell and is factorised
 directly; a sparse toroidal basis or a Krylov solver is owed before a
 time comparison means anything.
