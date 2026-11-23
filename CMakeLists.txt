@@ -346,8 +346,9 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # with rooted trees #255, parametric mass matrices #256, the tree for one
 # t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
 # symmetry #263 #265 and polar quadrature at point singularities #267, on
-# block sides and vertices #268).
-set(MILCA_FORTFEM_REVISION "07c17eaef9a64fd1b996eb17bfe5799ab2319401")
+# block sides and vertices #268, the KKT Newton with inertia and the
+# parameter continuation #288).
+set(MILCA_FORTFEM_REVISION "ce1fc21a0f3789d398cd8261122c1afacfa1f8c7")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -508,7 +509,9 @@ if(MILCA_ENABLE_OPENMP)
 endif()
 add_library(milca_sparse_direct
     ${fortfem_SOURCE_DIR}/src/topology/tree_cotree_gauge.f90
-    ${fortfem_SOURCE_DIR}/src/solvers/fortfem_sparse_direct.f90)
+    ${fortfem_SOURCE_DIR}/src/solvers/fortfem_sparse_direct.f90
+    ${fortfem_SOURCE_DIR}/src/solvers/constrained_newton.f90
+    ${fortfem_SOURCE_DIR}/src/solvers/parameter_continuation.f90)
 # FortFEM's spline THB and projections solve with the fortsparse PCG.
 target_link_libraries(milca_spatial PUBLIC fortsparse)
 target_link_libraries(milca_sparse_direct PUBLIC milca_spatial fortsparse)
@@ -524,6 +527,7 @@ target_sources(milca_equilibrium PRIVATE src/equilibrium/gs_coils.f90 src/equili
     src/equilibrium/eulerian_vacuum.f90
     src/generated/milca_eulerian_clebsch_leaves.f90
     src/equilibrium/eulerian_clebsch.f90
+    src/equilibrium/gauge_moments.f90
     src/generated/milca_flux_map_leaves.f90 src/equilibrium/flux_map.f90
     src/equilibrium/flux_map_3d.f90 src/equilibrium/flux_map_force.f90)
 target_sources(milca_equilibrium PRIVATE src/equilibrium/equilibrium_harness.f90)
@@ -912,6 +916,9 @@ add_executable(test_eulerian_clebsch_newton test/test_eulerian_clebsch_newton.f9
 target_link_libraries(test_eulerian_clebsch_newton PRIVATE milca_eulerian_test)
 add_test(NAME eulerian_clebsch_newton_gate_e1 COMMAND test_eulerian_clebsch_newton)
 # gate F1 (docs/flux-map.md): Cartesian flux map, axisymmetric
+add_executable(test_gauge_moments test/test_gauge_moments.f90)
+target_link_libraries(test_gauge_moments PRIVATE milca_equilibrium)
+add_test(NAME gauge_moments_rigid_motions COMMAND test_gauge_moments)
 add_executable(test_flux_map_axisym test/test_flux_map_axisym.f90)
 target_link_libraries(test_flux_map_axisym PRIVATE milca_eulerian_test)
 add_test(NAME flux_map_axisym_gate_f1 COMMAND test_flux_map_axisym)

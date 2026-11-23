@@ -5,17 +5,24 @@ program test_flux_map_axisym
     !!
     !!   psi(s) = psi_b s,  p(s) = source psi_b (1 - s),  tau(s) = Phi'(s)/pi.
     !!
-    !! The O-grid is centred on the middle of the wall, 15 % of the minor
-    !! radius from the magnetic axis, and stays fixed. The start is the
-    !! polar map about that centre, u = (x - c)/rho_wall(angle), so no axis
-    !! information enters: the axis is the zero of u_h after the solve.
+    !! The O-grid is centred 15 % of the minor radius from the magnetic axis
+    !! in R and, by default, 10 % of it above the midplane, so that the mesh
+    !! has no symmetry; it stays fixed. The start is the polar map about that
+    !! centre, u = (x - c)/rho_wall(angle), so no axis information enters:
+    !! the axis is the zero of u_h after the solve. The gauge theta* ->
+    !! theta* + const is removed by the moment constraint orthogonal to it
+    !! (milca_gauge_moments); there are no symmetry rows.
     !! Part 1 (pointwise B_phi): order p at R B_phi = 3. Part 2 (B_phi
-    !! projected per cell onto its mean): the error must not grow with the
-    !! guide field, R B_phi = 3, 30, 300 by continuation (B_phi/B_pol about
-    !! 1.5, 15, 150).
+    !! projected per cell onto its mean): from the cold start to R B_phi =
+    !! 300 (B_phi/B_pol about 150) by the continuation driver
+    !! (fortfem_parameter_continuation, R B_phi = 3 * 100^s), which chooses
+    !! its stages; the error must not grow with the guide field (R B_phi = 30
+    !! is solved from the state at 300).
     !! Arguments (measurements): projection degree (default 0; negative:
     !! pointwise), quadrature points per direction beyond the degree,
-    !! spline degree, verbose.
+    !! spline degree, offset of the mesh centre from the midplane in per cent
+    !! of the minor radius (10; 0: the symmetric mesh), 'relaxed' for
+    !! relaxed steps of the minimisation ('energy': the default), verbose.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_spline_layout, only: block_layout_t, layout_ogrid, layout_set_curve, &
         LAYOUT_WALL
@@ -27,7 +34,9 @@ program test_flux_map_axisym
         spline_derham_boundary_dofs, spline_derham_project
     use milca_eulerian_clebsch, only: clebsch_node_gradients
     use milca_spline_ale, only: spline_geometry_dofs
-    use milca_flux_map, only: flux_map_t, flux_map_init, flux_map_gauge_row, flux_map_system, &
+    use fortfem_parameter_continuation, only: continuation_options_t, &
+        continuation_report_t, continuation_run
+    use milca_flux_map, only: flux_map_t, flux_map_init, flux_map_system, &
         flux_map_solve
     use solovev_label_fields
     implicit none
@@ -36,9 +45,15 @@ program test_flux_map_axisym
     real(dp), parameter :: scales(3) = [1.0_dp, 10.0_dp, 100.0_dp]
     ! interpolation error of B on the axis-centred meshes of gate E1
     real(dp), parameter :: interp(3) = [2.196e-2_dp, 4.367e-3_dp, 9.017e-4_dp]
-    integer :: projection = 0, extra_points = 4, level, k, failures
-    logical :: verbose = .false.
+    integer :: projection = 0, extra_points = 4, level, k, failures, offset = 10
+    logical :: verbose = .false., relaxed = .false.
     real(dp) :: centre(2), rmin, rmax
+    ! the case of the current level (solve) and the errors of its stages
+    type(spline_quadrature_t) :: quad
+    type(spline_derham_t) :: derham
+    type(flux_map_t) :: fm
+    real(dp) :: stage_error(6, size(scales)), flux0
+    integer :: stage_cells
     real(dp) :: b_err(levels), s_err(levels), axis_err(levels), pol(levels, size(scales)), &
                 e(6, size(scales)), ref_pol
     logical :: ok
@@ -57,13 +72,22 @@ program test_flux_map_axisym
         call get_command_argument(3, arg)
         read (arg, *) degree
     end if
-    if (command_argument_count() >= 4) verbose = .true.
+    if (command_argument_count() >= 4) then
+        call get_command_argument(4, arg)
+        read (arg, *) offset
+    end if
+    if (command_argument_count() >= 5) then
+        call get_command_argument(5, arg)
+        relaxed = trim(arg) == 'relaxed'
+    end if
+    if (command_argument_count() >= 6) verbose = .true.
     call curve_chart_cylindrical(chart, 1)
     rmin = sqrt(r0**2 - sqrt(psi_b/alpha))
     rmax = sqrt(r0**2 + sqrt(psi_b/alpha))
-    centre = [0.5_dp*(rmin + rmax), 0.0_dp]
-    print '(a,f7.4,a,f7.4,a,f6.3)', 'mesh centre R ', centre(1), '  magnetic axis R ', r0, &
-        '  offset / minor radius ', (r0 - centre(1))/(0.5_dp*(rmax - rmin))
+    centre = [0.5_dp*(rmin + rmax), 0.01_dp*offset*0.5_dp*(rmax - rmin)]
+    print '(a,f7.4,a,f7.4,a,2f7.3)', 'mesh centre R ', centre(1), '  magnetic axis R ', r0, &
+        '  offset of the mesh centre / minor radius (R, Z) ', &
+        (r0 - centre(1))/(0.5_dp*(rmax - rmin)), centre(2)/(0.5_dp*(rmax - rmin))
 
     print '(a)', 'pointwise B_phi, R B_phi = 3'
     do level = 1, levels
@@ -84,11 +108,11 @@ program test_flux_map_axisym
     end do
 
     print '(a,i0,a)', 'B_phi projected onto degree ', projection, &
-        ' per cell, R B_phi = 3, 30, 300 by continuation'
+        ' per cell, cold start at R B_phi = 300 by the continuation driver'
     do level = 1, levels
         call solve(cells(level), projection, scales, e, ok, ref_pol)
         pol(level, :) = e(2, :)
-        call check(ok, 'Newton converges at every guide field')
+        call check(ok, 'cold start at R B_phi = 300: the continuation converges, no hand-set stage')
         call check(abs(pol(level, 3)/pol(level, 2) - 1) < 0.05_dp, &
                    'B_pol error saturates: R B_phi = 300 within 5 % of 30')
         call check(pol(level, 3) < 1.25_dp*pol(level, 1), &
@@ -153,28 +177,28 @@ contains
     end function wall_radius
 
     subroutine solve(n, proj, guide, e, converged, ref_pol)
-        !! Continuation through the guide fields. Per stage e = relative L2
-        !! errors of B and B_pol, the max error of s, the relative L2 errors
-        !! of B_phi pointwise and projected, the axis error. ref_pol: B_pol
-        !! of the projected exact label psi_N on this mesh.
+        !! One guide field (guide of size one): the solve from the polar
+        !! start. Several: from the polar start to the last of them by the
+        !! continuation driver in s, R B_phi = 3 guide(last)^s, then the
+        !! guide fields between from the state at the last. Per guide field e
+        !! = relative L2 errors of B and B_pol, the max error of s, the
+        !! relative L2 errors of B_phi pointwise and projected, the axis
+        !! error. ref_pol: B_pol of the projected exact label psi_N on this
+        !! mesh.
         integer, intent(in) :: n, proj
         real(dp), intent(in) :: guide(:)
         real(dp), intent(out) :: e(:, :), ref_pol
         logical, intent(out) :: converged
         type(block_layout_t) :: layout
         type(spline_space_options_t) :: options
-        type(spline_quadrature_t) :: quad
-        type(spline_derham_t) :: derham
-        type(flux_map_t) :: fm
-        real(dp), allocatable :: samples(:, :), ctrl(:, :), val(:), s(:), gs(:, :), bt(:), &
-                                 bb(:)
-        integer, allocatable :: wall(:), rowptr(:), colidx(:), wblock(:)
-        real(dp), allocatable :: wxi(:, :), ws(:, :)
-        real(dp) :: d(2), theta, xi(2), point(2), energy, x(3), j3(3, 3), b_ex(3), w, &
-                    bpol(2), num(5), den(3), flux0, flux1, axis(2), uv(2), jac(2, 2), det
+        type(continuation_options_t) :: path
+        type(continuation_report_t) :: report
+        real(dp), allocatable :: samples(:, :), ctrl(:, :), bt(:), z(:), sl(:), gs(:, :), bb(:)
+        integer, allocatable :: wall(:)
+        real(dp) :: d(2), theta, energy, x(3), j3(3, 3), w, num(5), den(3)
         real(dp), allocatable :: chi(:), v0(:, :, :), gn(:, :, :)
         integer, allocatable :: d0(:)
-        integer :: st, n0, i, k, block, it, p, ng, stage, cell, q
+        integer :: st, n0, i, p, stage, cell, q
 
         call boundary_samples(samples)
         call layout_ogrid(centre, 0.5_dp*(rmax - rmin), 0.5_dp, layout, st)
@@ -196,6 +220,8 @@ contains
         call flux_map_init(fm, n0, wall)
         fm%projection = proj
         fm%verbose = verbose
+        fm%relaxed_steps = relaxed
+        stage_cells = n
         ! start: the polar map about the mesh centre, from the control points
         call spline_geometry_dofs(space, ctrl, st)
         if (st /= 0) error stop 'control points'
@@ -209,92 +235,36 @@ contains
                 fm%z(n0 + i) = d(2)/wall_radius(theta)
             end if
         end do
-        ! gauge by up-down symmetry: y_h = 0 on Z = 0 inside, Theta_h = 0 at
-        ! the outboard wall point
-        ng = 4*n + 1
-        block = 1
-        do k = 1, ng - 1
-            point = [rmin + (rmax - rmin)*real(k, dp)/ng, 0.0_dp]
-            call spline_locate(space, block, point, block, xi, st)
-            if (st /= 0) error stop 'gauge point'
-            call spline_point_matrix(space, [block], reshape(xi, [2, 1]), 0, rowptr, colidx, &
-                                     val, st)
-            if (st /= 0) error stop 'gauge row'
-            if (.not. any(fm%is_wall(colidx) .and. abs(val) > 1e-14_dp)) &
-                call flux_map_gauge_row(fm, n0 + colidx, val, 0.0_dp)
-        end do
-        call spline_boundary_nodes(space, LAYOUT_WALL, 1, wblock, wxi, ws, st)
-        if (st /= 0) error stop 'wall nodes'
-        k = minloc(abs(ws(2, :)), 1, ws(1, :) > centre(1))
-        if (abs(ws(2, k)) > 1e-10_dp) error stop 'no wall node on the outboard midplane'
-        call spline_point_matrix(space, wblock(k:k), wxi(:, k:k), 0, rowptr, colidx, val, st)
-        if (st /= 0) error stop 'wall gauge row'
-        call flux_map_gauge_row(fm, pack(colidx, fm%is_wall(colidx)), &
-                                pack(val, fm%is_wall(colidx)), 0.0_dp)
-        allocate (s(quad%point_count), gs(2, quad%point_count), bt(quad%point_count), &
+        allocate (bt(quad%point_count), sl(quad%point_count), gs(2, quad%point_count), &
                   bb(quad%point_count))
         flux_scale = guide(1)
-        call flux_map_system(fm, derham, quad, profiles, fm%z, energy, label=s, grad_label=gs, &
+        call flux_map_system(fm, derham, quad, profiles, fm%z, energy, label=sl, grad_label=gs, &
                              bphi=bt, bphi_projected=bb)
         flux0 = sum(quad%weight*bt)/(toroidal_flux(1.0_dp)*flux_scale)
-        converged = .true.
-        do stage = 1, size(guide)
-            flux_scale = guide(stage)
-            call flux_map_solve(fm, derham, quad, profiles, 1e-9_dp*guide(stage), 60, st)
-            converged = converged .and. st == 0
-            call flux_map_system(fm, derham, quad, profiles, fm%z, energy, label=s, &
-                                 grad_label=gs, bphi=bt, bphi_projected=bb)
-            flux1 = sum(quad%weight*bt)/(toroidal_flux(1.0_dp)*flux_scale)
-            num = 0
-            den = 0
-            e(3, stage) = 0
-            do p = 1, quad%point_count
-                call full(quad%block(p), quad%xi(:, p), 0.0_dp, x, j3)
-                b_ex = exact_b(x)
-                b_ex(2) = flux_scale*b_ex(2)
-                w = quad%weight(p)*x(1)
-                bpol = psi_b*[-gs(2, p), gs(1, p)]/x(1)
-                num(1) = num(1) + w*((bpol(1) - b_ex(1))**2 + (bpol(2) - b_ex(3))**2)
-                den(1) = den(1) + w*(b_ex(1)**2 + b_ex(3)**2)
-                num(2) = num(2) + w*(bt(p) - b_ex(2))**2
-                num(3) = num(3) + w*(bb(p) - b_ex(2))**2
-                den(2) = den(2) + w*b_ex(2)**2
-                e(3, stage) = max(e(3, stage), abs(s(p) - psi(x(1), x(3))/psi_b))
+        if (size(guide) == 1) then
+            call flux_map_solve(fm, derham, quad, profiles, 1e-9_dp*guide(1), 150, st)
+            converged = st == 0
+            print '(a,i0,a,i0,a,l1)', '  Hessian inertia on the gauge constraint: negative ', &
+                fm%negative_eigenvalues, ', zero ', fm%zero_eigenvalues, '  reliable ', &
+                fm%inertia_reliable
+            call errors(1, fm%steps)
+        else
+            z = fm%z
+            call continuation_run(guide_stage, z, path, report, st)
+            fm%z = z
+            converged = st == 0
+            print '(a,i0,a,i0,a,i0,a,f6.3)', '  continuation: stages ', report%stages, &
+                ', failed ', report%failed_stages, ', Newton steps ', report%total_steps, &
+                ', reached s = ', report%reached
+            call errors(size(guide), report%total_steps)
+            do stage = size(guide) - 1, 2, -1
+                flux_scale = guide(stage)
+                call flux_map_solve(fm, derham, quad, profiles, 1e-9_dp*guide(stage), 60, st)
+                converged = converged .and. st == 0
+                call errors(stage, fm%steps)
             end do
-            e(2, stage) = sqrt(num(1)/den(1))
-            e(4, stage) = sqrt(num(2)/den(2))
-            e(5, stage) = sqrt(num(3)/den(2))
-            ! B with the pointwise B_phi (the projection enters the energy only)
-            e(1, stage) = sqrt((num(1) + num(2))/(den(1) + den(2)))
-            ! magnetic axis: the zero of u_h, Newton from the mesh centre
-            axis = centre
-            block = 1
-            do it = 1, 30
-                call spline_locate(space, block, axis, block, xi, st)
-                if (st /= 0) error stop 'axis location'
-                do k = 0, 2
-                    call spline_point_matrix(space, [block], reshape(xi, [2, 1]), k, rowptr, &
-                                             colidx, val, st)
-                    if (any(fm%is_wall(colidx) .and. abs(val) > 1e-14_dp)) &
-                        error stop 'axis at the wall'
-                    if (k == 0) then
-                        uv = [dot_product(val, fm%z(colidx)), dot_product(val, fm%z(n0 + colidx))]
-                    else
-                        jac(:, k) = [dot_product(val, fm%z(colidx)), &
-                                     dot_product(val, fm%z(n0 + colidx))]
-                    end if
-                end do
-                det = jac(1, 1)*jac(2, 2) - jac(1, 2)*jac(2, 1)
-                axis = axis - [jac(2, 2)*uv(1) - jac(1, 2)*uv(2), &
-                               jac(1, 1)*uv(2) - jac(2, 1)*uv(1)]/det
-                if (norm2(uv) < 1e-13_dp) exit
-            end do
-            e(6, stage) = norm2(axis - [r0, 0.0_dp])
-            print '(a,i2,a,f6.0,a,i3,a,es9.2,a,es9.2,a,es9.2,a,es9.2,a,es9.2,a,es9.2,a,es8.1)', &
-                'cells', n, ' R B_phi', f0*flux_scale, ' steps', fm%steps, ' B', e(1, stage), &
-                ' B_pol', e(2, stage), ' s', e(3, stage), ' B_phi', e(4, stage), ' proj', &
-                e(5, stage), ' axis', e(6, stage), ' flux change', abs(flux1 - flux0)
-        end do
+        end if
+        e(:, :size(guide)) = stage_error(:, :size(guide))
         ! reference: B_pol of the projected exact label on this mesh
         allocate (chi(n0))
         call spline_derham_project(derham, 0, label, chi, st, 12)
@@ -313,5 +283,89 @@ contains
         end do
         ref_pol = sqrt(num(1)/den(1))
     end subroutine solve
+
+    subroutine guide_stage(s, x, steps, status)
+        !! The stage R B_phi = 3 scales(last)^s of the continuation, from x.
+        real(dp), intent(in) :: s
+        real(dp), intent(inout) :: x(:)
+        integer, intent(out) :: steps, status
+
+        flux_scale = scales(size(scales))**s
+        fm%z = x
+        call flux_map_solve(fm, derham, quad, profiles, 1e-9_dp*flux_scale, 150, status)
+        steps = fm%steps
+        if (status /= 0) return
+        x = fm%z
+        if (s == 0) call errors(1, steps)
+    end subroutine guide_stage
+
+    subroutine errors(stage, steps)
+        !! Errors of the state fm%z at the guide field flux_scale into
+        !! stage_error(:, stage).
+        integer, intent(in) :: stage, steps
+        real(dp), allocatable :: s(:), gs(:, :), bt(:), bb(:), val(:)
+        integer, allocatable :: rowptr(:), colidx(:)
+        real(dp) :: energy, x(3), j3(3, 3), b_ex(3), w, bpol(2), num(5), den(3), flux1, &
+                    axis(2), uv(2), jac(2, 2), det, xi(2)
+        integer :: st, n0, k, block, it, p
+
+        n0 = fm%n0
+        allocate (s(quad%point_count), gs(2, quad%point_count), bt(quad%point_count), &
+                  bb(quad%point_count))
+        call flux_map_system(fm, derham, quad, profiles, fm%z, energy, label=s, &
+                             grad_label=gs, bphi=bt, bphi_projected=bb)
+        flux1 = sum(quad%weight*bt)/(toroidal_flux(1.0_dp)*flux_scale)
+        num = 0
+        den = 0
+        stage_error(3, stage) = 0
+        do p = 1, quad%point_count
+            call full(quad%block(p), quad%xi(:, p), 0.0_dp, x, j3)
+            b_ex = exact_b(x)
+            b_ex(2) = flux_scale*b_ex(2)
+            w = quad%weight(p)*x(1)
+            bpol = psi_b*[-gs(2, p), gs(1, p)]/x(1)
+            num(1) = num(1) + w*((bpol(1) - b_ex(1))**2 + (bpol(2) - b_ex(3))**2)
+            den(1) = den(1) + w*(b_ex(1)**2 + b_ex(3)**2)
+            num(2) = num(2) + w*(bt(p) - b_ex(2))**2
+            num(3) = num(3) + w*(bb(p) - b_ex(2))**2
+            den(2) = den(2) + w*b_ex(2)**2
+            stage_error(3, stage) = max(stage_error(3, stage), &
+                                        abs(s(p) - psi(x(1), x(3))/psi_b))
+        end do
+        stage_error(2, stage) = sqrt(num(1)/den(1))
+        stage_error(4, stage) = sqrt(num(2)/den(2))
+        stage_error(5, stage) = sqrt(num(3)/den(2))
+        ! B with the pointwise B_phi (the projection enters the energy only)
+        stage_error(1, stage) = sqrt((num(1) + num(2))/(den(1) + den(2)))
+        ! magnetic axis: the zero of u_h, Newton from the mesh centre
+        axis = centre
+        block = 1
+        do it = 1, 30
+            call spline_locate(space, block, axis, block, xi, st)
+            if (st /= 0) error stop 'axis location'
+            do k = 0, 2
+                call spline_point_matrix(space, [block], reshape(xi, [2, 1]), k, rowptr, &
+                                         colidx, val, st)
+                if (any(fm%is_wall(colidx) .and. abs(val) > 1e-14_dp)) &
+                    error stop 'axis at the wall'
+                if (k == 0) then
+                    uv = [dot_product(val, fm%z(colidx)), dot_product(val, fm%z(n0 + colidx))]
+                else
+                    jac(:, k) = [dot_product(val, fm%z(colidx)), &
+                                 dot_product(val, fm%z(n0 + colidx))]
+                end if
+            end do
+            det = jac(1, 1)*jac(2, 2) - jac(1, 2)*jac(2, 1)
+            axis = axis - [jac(2, 2)*uv(1) - jac(1, 2)*uv(2), &
+                           jac(1, 1)*uv(2) - jac(2, 1)*uv(1)]/det
+            if (norm2(uv) < 1e-13_dp) exit
+        end do
+        stage_error(6, stage) = norm2(axis - [r0, 0.0_dp])
+        print '(a,i2,a,f6.0,a,i3,a,es9.2,a,es9.2,a,es9.2,a,es9.2,a,es9.2,a,es9.2,a,es8.1)', &
+            'cells', stage_cells, ' R B_phi', f0*flux_scale, ' steps', steps, ' B', &
+            stage_error(1, stage), ' B_pol', stage_error(2, stage), ' s', stage_error(3, stage), &
+            ' B_phi', stage_error(4, stage), ' proj', stage_error(5, stage), ' axis', &
+            stage_error(6, stage), ' flux change', abs(flux1 - flux0)
+    end subroutine errors
 
 end program test_flux_map_axisym

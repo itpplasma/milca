@@ -158,9 +158,19 @@ program gen_flux_map
         'y_zz ', 'tau  ', 'taup ', 'gp   ', 'gpp  ', 'pp   '], &
         ['b_r ', 'b_f ', 'b_z ', 'j_r ', 'j_f ', 'j_z ', 'f_r ', 'f_f ', 'f_z ', 'm_r ', 'm_f ', &
         'm_z ', 'jac '], [bf, jf, ff, mf, c3(2)/r])
+    ! Gauge: the moment of the generator (-y, x) of a rotation of the disc
+    ! with a variation (dx, dy) of u, per unit volume. The generator is the
+    ! one of the invariance proofs above (rot, rot8); a constraint on this
+    ! moment is orthogonal to the gauge theta* -> theta* + const.
+    xf = sym('dx'); yf = sym('dy')
+    proof = engine%zero_test(rot(1)*xf + rot(2)*yf - (x*yf - y*xf))
+    if (proof%verdict /= VERDICT_TRUE) error stop 'gauge moment unproved'
+    proof = engine%zero_test(rot8(1)*xf + rot8(2)*yf - (x*yf - y*xf))
+    if (proof%verdict /= VERDICT_TRUE) error stop 'gauge moment unproved'
+    call w%emit('flux_map_gauge_moment', ['x ', 'y ', 'dx', 'dy'], ['m'], [x*yf - y*xf])
     call w%line('end module milca_flux_map_leaves')
     call w%close()
-    print '(a)', '[V] FortSym tangency, rotation invariance of the kernels (axisymmetric and 3D), Hessian symmetry, div B = 0 and F . B = 0 of the force-balance leaf proved; flux-map leaves generated'
+    print '(a)', '[V] FortSym tangency, rotation invariance of the kernels (axisymmetric and 3D), Hessian symmetry, div B = 0 and F . B = 0 of the force-balance leaf, the gauge moment proved; flux-map leaves generated'
 
 contains
 

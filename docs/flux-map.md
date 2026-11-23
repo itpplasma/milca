@@ -62,7 +62,10 @@ the frame H^(1/2) (the linearisation of u at the axis), the adapted forms
 
 Gauge. A rotation of each flux circle, θ* → θ* + k(s), leaves β and B
 unchanged (the gauge g → g + k(χ) of the label lane). A further freedom is
-the choice of ζ, which is fixed by giving ζ.
+the choice of ζ, which is fixed by giving ζ. Of this family the discrete
+energy keeps one exact symmetry, the rigid rotation k = const; it is removed
+by a moment constraint (section 4, "Gauge constraint, one solver loop and
+continuation").
 
 Variations. δu = −ξ·∇u for a displacement ξ; the component of ξ along B
 drops out, so δu and ξ_⊥ correspond one to one, and stable equilibria are
@@ -143,8 +146,14 @@ profiles of gate E1 (ψ(s) = ψ_b s, p linear, τ = −2F' from the toroidal
 flux), degree 2, FortFEM O-grid centred on the middle of the wall (15 % of
 the minor radius from the axis) and fixed. Start: the polar map about the
 mesh centre from the control points, u = (x − c)/ρ_wall(angle). Newton with
-an identity shift, accepted on energy decrease. Gauge by up-down symmetry:
-penalty rows y_h = 0 on Z = 0 and Θ_h = 0 at the outboard wall node.
+an identity shift, accepted on energy decrease. The numbers of this
+subsection were measured on the mesh centred on the midplane with the gauge
+by up-down symmetry (penalty rows y_h = 0 on Z = 0 and Θ_h = 0 at the
+outboard wall node, removed 2026-11-23). The gate now runs on a mesh without
+symmetry (centre 10 % of the minor radius above the midplane), with the
+moment constraint of the rotation and from a cold start at R B_φ = 300
+through the continuation driver; its numbers are in "Gauge constraint, one
+solver loop and continuation" below.
 
 Pointwise B_φ, R B_φ = 3 (relative L2 errors, s in the maximum norm, axis
 in metres):
@@ -324,7 +333,8 @@ needed (the dump).
 
 QA driver (`test_flux_map_qa`, opt-in, not a registered test): the
 Landreman–Paul QA deck of [benchmarks/label-qa](../benchmarks/label-qa/README.md),
-one field period, p = 0, ι prescribed, gauge by stellarator symmetry,
+one field period, p = 0, ι prescribed, gauge by stellarator symmetry
+(symmetry rows until 2026-11-23, since then the moment constraint),
 stages "degree:cells:planes" solved in turn from the previous one
 (`fm3_prolong`). Compared by `compare.py` with VMEC++ (9 s, energy
 0.281794): axis and surfaces on the 64 reference planes, surfaces traced as
@@ -742,6 +752,149 @@ against 14.5 mm, 29 planes 18 against 15.3 mm, energy +2.8e-4 against
   grading helps, c = 0.5 most in the residual; prediction (band s > 0.9
   at least halved) not met.
 
+### Gauge constraint, one solver loop and continuation (P0c, 2026-11-23)
+
+What changed. `flux_map_solve` and `flux_map3d_solve` were two copies of one
+loop. Both now call `flux_map_newton`, which is FortFEM's
+`fortfem_constrained_newton` (FortFEM doc/CONSTRAINED_NEWTON.md): Newton on
+the KKT system of W with linear constraints, factorised by LDLᵀ, with the
+inertia of the Hessian on the constraints. Both Hessians are assembled as
+upper triangles; the axisymmetric solve gained the inertia and the
+stationary mode. The penalty rows, their weight and the symmetry rows of the
+tests are deleted. Implementation and gate conditions changed together: F1
+and F2b moved to meshes without symmetry, and the F1 guide-field part starts
+cold at the strongest field. The earlier numbers stay above as the record.
+
+Gauge (S1). The rotation of the disc by one angle maps the discrete space
+onto itself (interior values rotate, wall angles shift), so it is an exact
+symmetry of W_h and the Hessian is singular along it at every stationary
+point. A rotation by k(s) with k not constant is a symmetry of W but not of
+W_h: the rotated u_h is not in the spline space. The rotation is removed by
+one linear constraint from `milca_gauge_moments` (moment constraints
+orthogonal to a continuous symmetry: rows ⟨g_j(z_ref), z − z_ref⟩_M = 0 for
+generators g_j, generators that are dependent in the Gram matrix dropped;
+`test_gauge_moments` checks it on the six rigid motions of a point cloud).
+Here g is the generator (−y, x), whose pointwise moment with a variation is
+the generated leaf `flux_map_gauge_moment` (the generator of the invariance
+proofs of `gen_flux_map`), M is restricted to the wall functions (of plane 1
+in 3D), and the reference follows the iterate: every Newton step keeps the
+mean wall angle of that plane, weighted by the moment of the generator with
+each wall function. The multiplier vanishes at convergence (1e-16 to 1e-18
+in the runs below).
+
+| Hypothesis and prediction | Result |
+|---|---|
+| The KKT matrix with the gauge row is factorised without shift or penalty; prediction: gates unchanged, inertia reliable, linear solves at most 1.5 times as long | confirmed for the row on the wall functions of one plane (0.56 s against 0.48 s without a row, F2b at 3536 unknowns); ruled out for a row over the whole volume (4.14 s) and over the section of one plane (0.89 s) |
+| On symmetric meshes the constraint reproduces the numbers of the symmetry rows | confirmed: F1 B 2.42e-2, 7.11e-3, 1.93e-3 and 14, 17, 23 steps (rows: 14, 18, 23); F2a identical with inertia 2, 2, 4; F2b on the symmetric planes 3.658e-2, 7.064e-3, 9 + 16 steps, 6 negative eigenvalues; the five decks below |
+| The same accuracy on meshes without symmetry, without symmetry rows (the gate) | confirmed: F1 with the centre 10 % above the midplane B 2.42e-2, 7.11e-3, 1.93e-3, axis 4.8e-3, 1.2e-4, 1.3e-5, rates 1.77, 1.88; F2b on planes shifted by 0.37 of their spacing B 3.658e-2, 7.066e-3 (rate 2.37), 10 + 19 steps, 6 negative eigenvalues, axis 1.6e-3, 3.4e-3 |
+| Constraining several k_j(s) is harmless below the radial resolution and removes the slow steps | ruled out as stated (table below) |
+
+In 2D the Hessian on the constraint has no negative eigenvalue on any of the
+three meshes; the 2, 2, 4 of F2a belong to the three planes (n = ±1).
+
+Moments of several gauge functions k_j(s) (F1, pointwise B_φ, R B_φ = 3,
+mesh without symmetry, energy acceptance; measured during development with
+moments over the whole section, code that is not landed). "Start": the rows
+are fixed at the start state; "iterate": they follow the state.
+
+| gauge functions | rows at | B error on 2, 4, 8 cells | Newton steps |
+|---|---|---|---|
+| none (the shift holds the rotation) | | 2.42e-2, 7.11e-3, 1.93e-3 | 14, 22, 33 |
+| rotation, moment over the section | iterate | 2.42e-2, 7.11e-3, 1.93e-3 | 15, 28, 45 |
+| rotation, wall moment (landed) | iterate | 2.42e-2, 7.11e-3, 1.93e-3 | 15, 27, 68 |
+| cells + 1 hat functions of √s | start | 2.46e-2, 7.43e-3, 2.65e-3 | 15, 21, 29 |
+| cells + 1 hat functions of √s | iterate | 2.44e-2, 7.42e-3, 2.06e-3 | 12, 21, 28 |
+| 2 Legendre polynomials in s | iterate | 2.42e-2, 7.11e-3, 1.93e-3 | 13, 21, 36 |
+| 3 | iterate | 2.43e-2, 7.14e-3, 1.94e-3 | 14, 22, 33 |
+| 4 | iterate | 2.47e-2, 7.16e-3, 1.94e-3 | not converged, 20, 30 |
+| 6 | iterate | 3.21e-2, 8.17e-3, 2.01e-3 | 17, not converged, 25 |
+| 4, then the rotation alone from that state (relaxed steps) | iterate | 2.42e-2, 7.11e-3, 1.93e-3 | 13 + 4, 20 + 4, 30 + 4 |
+| 6, then the rotation alone (relaxed steps) | iterate | 2.42e-2, 7.11e-3, 1.93e-3 | 17 + 7, 22 + 8, 25 + 7 |
+
+The last two rows were run with relaxed steps (below), with which the
+rotation alone over the section takes 13, 28, 44 steps. On the symmetric
+mesh the rows with 0, 1, cells + 1 and 16 functions were run and give the
+same numbers (14, 17, 23 steps). Read:
+
+- The k(s) directions are soft, not null. A mesh without symmetry excites
+  them and the minimiser needs up to three times the steps at 8 cells (68
+  against 23); the count moves by a third with the choice of the single row
+  and is lowest without one (33).
+- A constraint on them is a constraint on the solution: 0.5 % in B with
+  three smooth functions, 4 to 33 % with six, and the axis by more (3.0e-3
+  against 1.2e-4 at 4 cells with hat functions fixed at the start).
+- Constraining and then releasing them returns the unconstrained state
+  and saves steps at 8 cells (34 and 32 against 44). Not landed: rows over
+  the section cost 1.9 to 8.6 times in the 3D factorisation. Open.
+
+Step acceptance (S2). One loop, two modes as before: minimisation (energy
+test with an identity shift) and the stationary point next to the start
+(line search on the scaled gradient norm).
+
+| Hypothesis and prediction | Result |
+|---|---|
+| The natural monotonicity test (the simplified Newton correction from the factors of the step must contract; affine covariant, so blind to the stiffness) converges from the cold start at R B_φ = 300 | ruled out: as the only test it finds no admissible damping after 1 to 26 steps from the polar start already at R B_φ = 3, on both meshes, and after 3, 6, 10 and 20 energy steps at R B_φ = 300; as a fallback of the energy test it accepted none of the refused steps |
+| A second-order correction (the simplified correction added to the refused trial point) rescues the refused steps | ruled out: none accepted at R B_φ = 300 |
+| The steps refused at a strong guide field are refused for the curvature of the constraint R τ det ∇u = f(s) | ruled out: the matrix is indefinite there. Negative eigenvalues on the gauge constraint along the cold path at R B_φ = 300, 4 cells, at the first trial shift of steps 2, 6, 10, 14, 30: 72, 17, 5, 1, 51; the accepted shift stays at 1e-3 of the smallest diagonal, which grows with B_φ², for 25 steps. At R B_φ = 3 (2 cells) it falls to 1e-5 within 14 steps |
+| The gradient-norm line search of the stationary mode can be replaced by the natural monotonicity test | ruled out: F2b stops after 3 steps on the second level |
+| Relaxed steps (watchdog: a refused step on a positive matrix is taken on trial and judged with the next one; FortFEM `NEWTON_ACCEPT_ENERGY_RELAXED`) reduce the steps | confirmed on a curved stiff valley (FortFEM test: 568 → 109 steps at stiffness 1e6) and on F1 without symmetry (pointwise, 8 cells: 68 → 38); ruled out on the decks (QA second stage 16 → 23 to 27 steps, stellarator first stage 12 → 14, QA wall time +20 %). Off by default (`relaxed_steps`) |
+
+So no acceptance rule tested makes the cold start at a strong guide field
+direct; the obstacle is the indefinite Hessian far from the solution
+(section 3: the spurious modes freed by the projection), which only a state
+near the solution avoids. That is what the continuation supplies.
+
+Continuation (S2). `fortfem_parameter_continuation`: the caller solves one
+stage P(s), the driver chooses s: P(0) from the start, then steps that
+double after a converged stage and halve after a failed one. F1 uses it
+with R B_φ = 3 · 100^s from the polar start, at most 150 Newton steps per
+stage, no stage set by hand (B_φ projected on the cell mean; B_pol error at
+the three guide fields, R B_φ = 30 solved from the state at 300):
+
+| mesh | cells | stages (failed) | Newton steps, s = 0 + step to 1 | B_pol at R B_φ = 3, 30, 300 |
+|---|---|---|---|---|
+| without symmetry (gate) | 2 | 2 (0) | 16 + 20 | 2.20e-2, 2.28e-2, 2.28e-2 |
+| | 4 | 2 (0) | 24 + 77 | 6.18e-3, 7.17e-3, 7.21e-3 |
+| | 8 | 2 (0) | 70 + 58 | 1.83e-3, 1.95e-3, 1.95e-3 |
+| symmetric | 2 | 2 (0) | 17 + 18 | 2.20e-2, 2.28e-2, 2.28e-2 |
+| | 4 | 2 (0) | 21 + 25 | 6.14e-3, 7.20e-3, 7.24e-3 |
+| | 8 | 2 (0) | 37 + 10 | 1.83e-3, 1.95e-3, 1.95e-3 |
+
+In B_pol the states are those of the hand-set stages 3 → 30 → 300 (2.28e-2,
+7.21e-3, 1.95e-3; 17 + 6 + 4, 23 + 5 + 4 and 41 + 4 + 3 steps). The error of
+B with the pointwise B_φ differs between paths and meshes at 4 cells (3.05e-2
+by the hand-set stages, 2.26e-2 and 2.83e-2 in the two rows above) and at
+R B_φ = 3 (1.03e-2 and 1.14e-2): with the cell mean in the energy the
+converged states differ in the pointwise B_φ. Not followed up. The step from 3 to 300
+converges in one stage but is not cheap; a stage limit of a few steps would
+make the driver insert R B_φ = 30 as the hand-set path did. Without the
+continuation the cold start at R B_φ = 300 converges in 44 steps on 2 cells
+and is not converged after 60 on 4 and 8 cells (B_pol 7.8e-3 and 1.6e-2
+there). Rates of B_pol at the three guide fields on the gate mesh: 1.83,
+1.67, 1.66 and 1.75, 1.88, 1.88. The gate takes 33 s (10 s before).
+
+NN2. `nc_continue` (anisotropy ratio) runs on the same driver. P2, N = 2,
+nr = 4 and 8 at ratio 1e6 from the shifted seed: 8 stages and 16 Newton
+steps on each mesh, last backward error 8.6e-16 and 1.0e-15, path check
+1.08e-9, 9.79e-8, 4.76e-9 in A, p, V: every printed digit as before the
+change. The NN2 Newton iteration itself (a non-symmetric residual with its
+own line search) is not on the shared loop.
+
+Standard decks after the change (stages 2:2:9 then 2:4:13, 8 threads; the
+table of "Section meshes by harmonic maps"):
+
+| deck | Newton steps | energy | axis max dR | time (before) |
+|---|---|---|---|---|
+| QA | 15 + 16 | +5.33e-5 | 0.109 mm | 7.9 s (7.4) |
+| QH | 12 + 10 | +3.64e-4 | 1.66 mm | 6.5 s (5.9) |
+| CTH | 11 + 10 | −3.0e-5 | 0.76 mm | 6.3 s (5.8) |
+| stellarator standard | 12 + 13 | +4.91e-4 | 14.9 mm | 6.7 s (6.4) |
+| li383 | 13 + 11 | −1.67e-4 | 1.77 mm | 6.6 s (6.2) |
+
+Steps, energies (QA to 11 digits) and axes are unchanged, no negative
+eigenvalue; the gauge row and its rebuild at every step cost 3 to 10 % of
+the time.
+
 ## 5. Sequence
 
 The order of work, the gates still owed for F2 and the comparison with the
@@ -843,11 +996,17 @@ Each with the run that would settle it in the roadmap (P0a–P0c).
   ("Force-balance residual"). Owed: the cause in the wall layer, then
   parity at degree 3 or 4. The floor of F2b beyond 4 cells (planes or
   the saddle) is not isolated.
-- Gauge without a symmetry: constraints orthogonal to θ* → θ* + k(s)
-  instead of the symmetry penalty rows (untested in 2D and 3D).
-- Cold starts at a strong guide field: continuation works; a step
-  acceptance that tolerates the curved constraint R τ det ∇u = f(s) is
-  owed.
+- Gauge: done for the rotation, the one exact symmetry of W_h, on meshes
+  without symmetry ("Gauge constraint, one solver loop and continuation").
+  Open: the soft k(s) directions cost up to three times the Newton steps on
+  a mesh without symmetry; constraining and releasing them saves a quarter
+  of the steps in the one case measured and needs rows that keep the 3D
+  factorisation sparse.
+- Cold starts at a strong guide field: done by the continuation driver. No
+  acceptance rule tested makes the direct start work; the Hessian is
+  indefinite far from the solution there.
+- A state without symmetry (the meshes of F1 and F2b have none now, the
+  equilibria still do).
 - Projection in 3D: none is stable so far; dropped (roadmap P0b,
   2026-11-22). A candidate is B_h = Π_2(u_h*β) with a commuting
   projection, in mixed form.
@@ -882,6 +1041,14 @@ Each with the run that would settle it in the roadmap (P0a–P0c).
 - The exact vacuum state of `test_flux_map_force` (field B₀R₀/R in a torus
   of circular section, its flux label and straight-field-line angle) and
   curl(∇s×∇φ) = −Δ*s ∇φ are derived here, not taken from a source.
+- Step acceptance: Deuflhard, Newton Methods for Nonlinear Problems
+  (Springer 2004), for the natural monotonicity test; Chamberlain, Powell,
+  Lemaréchal and Pedersen, The watchdog technique for forcing convergence in
+  algorithms for constrained optimization, Math. Programming Study 16 (1982),
+  for relaxed steps; the inertia of a KKT matrix from Nocedal and Wright,
+  Numerical Optimization (2nd ed., Springer 2006). All three cited from
+  memory, to be confirmed before they are relied on. Implementation in
+  FortFEM (doc/CONSTRAINED_NEWTON.md).
 - No code of others was used. Reference data: VMEC++ 0.9.3 results of
   benchmarks/label-qa and benchmarks/flux-map-standard; DESC 0.17.4
   (github.com/PlasmaControl/DESC, MIT) for the QA axis

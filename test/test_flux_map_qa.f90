@@ -43,7 +43,7 @@ program test_flux_map_qa
     character(512) :: deck = '../benchmarks/label-qa/input.landreman-paul-qa-iota', &
                       outdir = 'flux-map-qa-out', stages = '2:2:9', arg
     integer :: stage_spec(3, max_stages), nstages, istage, k, st, u, newton_total, j
-    real(dp) :: phiedge, kappa = 1, t0, t1, ts, energy, phi, axis(2), x0(2), sym
+    real(dp) :: phiedge, kappa = 1, t0, t1, ts, energy, phi, axis(2), x0(2)
     real(dp), allocatable :: iota_c(:), pres_c(:), samples(:, :, :), quality(:), flux(:)
     real(dp), allocatable :: axes(:, :), rings(:, :, :, :), bring(:, :, :, :)
     logical, allocatable :: fring(:, :, :)
@@ -140,11 +140,6 @@ program test_flux_map_qa
             else
                 call fm3_prolong(previous, c, st)
                 if (st /= 0) error stop 'prolongation'
-            end if
-            sym = maxval(abs(samples(2, 2:nsamples/2, 1) + samples(2, nsamples:nsamples/2 + 2:-1, 1)))
-            if (sym < 1e-8_dp) then
-                call fm3_gauge_symmetric(c, st)
-                if (st /= 0) error stop 'gauge rows'
             end if
             c%fm%verbose = verbose
             call flux_map3d_solve(c%fm, c%derham, c%quad, profiles, c%base, 1e-9_dp, 80, st)
@@ -421,7 +416,8 @@ contains
                 call flux_map3d_system(cv%fm, cv%derham, cv%quad, profiles, cv%base, cv%fm%z, wv)
                 print '(a,i0,a,i0,a,es17.10,a,es10.3,a,es10.3)', '    Newton from it: status ', stv, &
                     '  steps ', cv%fm%steps, '  W', wv, '  W - W_flux map', wv - w_ours, &
-                    '  max |z - z_flux map|', maxval(abs(cv%fm%z - c%fm%z))
+                    '  max |z - z_flux map| (up to a rotation of the disc)', &
+                    maxval(abs(cv%fm%z - c%fm%z))
             end if
         end do
     end subroutine vmec_check
