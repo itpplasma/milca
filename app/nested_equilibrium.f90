@@ -454,11 +454,39 @@ contains
             close (u)
         end do
         open (newunit=u, file=trim(dir)//'/summary.json', status='replace')
-        write (u, '(a,es24.16,a,i0,a,i0,a)') '{"energy_T2m3": ', magnetic, &
+        ! the energy of the flux map and of the references: int (B^2/2 - mu0 p) dV
+        write (u, '(a,es24.16,a,i0,a,i0,a)') '{"energy_T2m3": ', magnetic - kinetic, &
             ', "unknowns": ', count(.not. map%fixed), ', "newton_steps": ', &
             max(newton_total, report%iterations), '}'
         close (u)
         e = 0
+    end subroutine
+
+    subroutine perturb_start()
+        ! Diagnostic for convergence basins (benchmarks/cemv-vs-vmec):
+        ! MILCA_NESTED_START_SHIFT=d moves the interior of the start by
+        ! d (1 - s) in R (the axis by d metres, the wall stays);
+        ! MILCA_NESTED_START_ANGLE=a starts the boundary field-line angle with
+        ! eta = a sin(theta) at the wall (the m = 1, n = 0 mode).
+        character(64) :: value
+        real(dp) :: shift, angle, s
+        integer :: length, a, i
+        call get_environment_variable('MILCA_NESTED_START_SHIFT', value, length)
+        if (length > 0) then
+            read (value, *) shift
+            do a = 1, map%nodes
+                if (map%boundary(a)) cycle
+                s = sum(((map%reference(:, a) - seed%centre)/seed%axes)**2)
+                map%x(1, 1, a) = map%x(1, 1, a) + shift*(1 - s)
+            end do
+        end if
+        call get_environment_variable('MILCA_NESTED_START_ANGLE', value, length)
+        if (length > 0 .and. map%nangle > 0) then
+            read (value, *) angle
+            do i = 1, size(map%angle_m)
+                if (map%angle_m(i) == 1 .and. map%angle_n(i) == 0) map%angle(2*i) = angle
+            end do
+        end if
     end subroutine
 
     subroutine locate(y, cell, xi)
@@ -510,6 +538,7 @@ contains
             if (status /= 0) call fail('the seed is not admitted (folded or invalid input)')
             reference = free_gradient()
             seed_x = map%x
+            call perturb_start()
             if (step > 1) then
                 call ideal_map_prolong_correction(map, coarse, coarse_seed, status)
                 if (status /= 0) call fail('the resolution ladder correction failed')
