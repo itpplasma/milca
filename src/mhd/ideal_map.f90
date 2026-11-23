@@ -2206,17 +2206,32 @@ contains
             end subroutine
         end interface
         real(dp), allocatable :: et(:), ep(:), bs(:, :), hs(:, :), tv(:, :), hx(:, :)
-        real(dp), allocatable :: hcc(:, :)
+        real(dp), allocatable :: hcc(:, :), shape_jet(:, :, :), mixed_jet(:, :), mixed(:, :)
         real(dp) :: bp(3), hbb(6), hvb(12, 3), h3(3, 3), f(0:3), weight, dphi, s
-        integer :: e, g, j, a, m, c, l, k, i, jp, r, node, na, nlm, npt, pt
+        integer :: e, g, j, a, m, c, l, k, i, jp, r, node, na, nlm, npt, pt, row, njet
         na = map%nangle
         nlm = map%nloc*map%nmode
         npt = map%nq*map%nphi
         dphi = 2*acos(-1.0_dp)/(map%nfp*map%nphi)
+        ! All cells use the same reference basis. Stack its four jet components
+        ! at each quadrature point to contract the mixed block one plane at a time.
+        njet = 4*map%nq
+        allocate (shape_jet(njet, nlm, map%nphi))
+        do j = 1, map%nphi
+            do a = 1, map%nloc
+                do m = 1, map%nmode
+                    l = m + map%nmode*(a - 1)
+                    do g = 1, map%nq
+                        call test_functions(map, g, j, a, m, f)
+                        shape_jet(4*g - 3:4*g, l, j) = f
+                    end do
+                end do
+            end do
+        end do
         !$omp parallel default(shared) private(e, g, j, a, m, c, l, k, i, jp, r, node, &
-        !$omp pt, bp, hbb, hvb, h3, f, weight, s, et, ep, bs, hs, tv, hx, hcc)
+        !$omp pt, bp, hbb, hvb, h3, weight, s, et, ep, bs, hs, tv, hx, hcc, mixed_jet, mixed, row)
         allocate (et(na), ep(na), bs(3*npt, na), hs(3*npt, na), tv(12, na), &
-            hx(3*nlm, na), hcc(na, na))
+            hx(3*nlm, na), hcc(na, na), mixed_jet(njet, 3*na), mixed(nlm, 3*na))
         !$omp do schedule(dynamic, 1)
         do e = 1, map%cells
             hx = 0
@@ -2234,18 +2249,17 @@ contains
                         hbb(4), hbb(5), hbb(6)], [3, 3])
                     hs(3*pt + 1:3*pt + 3, :) = weight*matmul(h3, bs(3*pt + 1:3*pt + 3, :))
                     tv = weight*matmul(hvb, bs(3*pt + 1:3*pt + 3, :))
-                    do a = 1, map%nloc
-                        do m = 1, map%nmode
-                            call test_functions(map, g, j, a, m, f)
-                            l = m + map%nmode*(a - 1)
-                            do c = 1, 3
-                                hx(3*l - 3 + c, :) = hx(3*l - 3 + c, :) + f(0)*tv(c, :) &
-                                    + f(1)*tv(3 + c, :) + f(2)*tv(6 + c, :) &
-                                    + f(3)*tv(9 + c, :)
-                            end do
+                    do c = 1, 3
+                        do row = 1, 4
+                            mixed_jet(4*g - 4 + row, (c - 1)*na + 1:c*na) = tv(c + 3*(row - 1), :)
                         end do
                     end do
                     pt = pt + 1
+                end do
+                call dgemm('T', 'N', nlm, 3*na, njet, 1.0_dp, shape_jet(1, 1, j), &
+                    njet, mixed_jet, njet, 0.0_dp, mixed, nlm)
+                do c = 1, 3
+                    hx(c::3, :) = hx(c::3, :) + mixed(:, (c - 1)*na + 1:c*na)
                 end do
             end do
             call dgemm('T', 'N', na, na, 3*npt, 1.0_dp, bs, 3*npt, hs, 3*npt, 0.0_dp, &
@@ -2277,7 +2291,7 @@ contains
             blocks(nr + 1:, 1:nr, e) = transpose(blocks(1:nr, nr + 1:, e))
         end do
         !$omp end do
-        deallocate (et, ep, bs, hs, tv, hx, hcc)
+        deallocate (et, ep, bs, hs, tv, hx, hcc, mixed_jet, mixed)
         !$omp end parallel
     end subroutine
 
