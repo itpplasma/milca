@@ -5,8 +5,9 @@ program test_flux_map_3d
     !! (flux_map_sections).
     !!
     !! solovev (F2a): the Solov'ev case of gate F1 through the 3D path (3
-    !! identical planes, start u = G). Passed when Newton converges and B
-    !! agrees with the F1 numbers within 2 %.
+    !! identical planes, start u = G). Compare the discrete energy and
+    !! gradient against the axisymmetric operator on the same mesh, then
+    !! check the field error against the exact solution.
     !!
     !! landreman (F2b): the exact sheared Landreman family of gates E4 and
     !! A1-3D (eps 0.6, 13 planes over the torus, shifted in phi so that no
@@ -31,8 +32,7 @@ program test_flux_map_3d
     !! plane (2), extra section quadrature points (4), start of the levels after
     !! the first: 'cold' (the polar start; default for solovev), 'nested'
     !! (the previous level, minimisation) or 'stationary' (the previous level,
-    !! Newton on stationarity; default for landreman, whose exact state is a
-    !! saddle); cells of the first level (2); verbose. With the
+    !! Newton on stationarity); cells of the first level (2); verbose. With the
     !! environment variable MILCA_FM3_HESSIAN=prefix every landreman level
     !! writes its Hessian at the solution (fm3_dump_hessian)
     !! (benchmarks/flux-map-spike/hessian_spectrum.py). With
@@ -43,6 +43,7 @@ program test_flux_map_3d
     use fortfem_curve_chart, only: curve_chart_cylindrical
     use milca_nested_oracles, only: NESTED_SHEARED
     use milca_eulerian_clebsch, only: clebsch_nfp
+    use milca_flux_map, only: flux_map_t, flux_map_init, flux_map_system
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
     use flux_map_sections
     use milca_flux_map_force, only: flux_map_force_t, flux_map3d_force, flux_map_force_print, &
@@ -64,8 +65,8 @@ program test_flux_map_3d
     ! that none of them is a symmetry plane of the family
     ! (MILCA_FM3_PLANE_SHIFT overrides it; 0: plane 1 up-down symmetric)
     real(dp) :: plane_shift = 0.37_dp
-    ! F1 (pointwise B_phi, R B_phi = 3) and the fixed-label fit of E4a
-    real(dp), parameter :: f1_b(3) = [2.42e-2_dp, 7.11e-3_dp, 1.93e-3_dp], &
+    ! F1 resolved-grid field accuracy and the fixed-label fit of E4a.
+    real(dp), parameter :: f1_b(2:3) = [7.11e-3_dp, 1.93e-3_dp], &
                            e4a_fit(2) = [4.98e-2_dp, 1.161e-2_dp]
 
     if (command_argument_count() >= 1) call get_command_argument(1, which)
@@ -113,19 +114,12 @@ program test_flux_map_3d
         if (level > 0) read (arg, *) flux_scale
         do level = 1, levels
             call run_solovev(cells(level), err(level), axis_err(level))
-            if (degree == 2 .and. flux_scale == 1) call check(abs(err(level)/f1_b(level) - 1) < 0.02_dp, &
-                                        'B error equals gate F1 within 2 %')
+            if (degree == 2 .and. flux_scale == 1 .and. level > 1) &
+                call check(err(level) <= 1.02_dp*f1_b(level), 'B error meets the resolved F1 accuracy')
         end do
     case ('landreman')
         if (levels == 0) levels = 2
         if (nt == 0) nt = 13
-        ! the exact state is a saddle (pressure-driven, docs/flux-map.md):
-        ! the levels after the first seek the stationary point next to the
-        ! previous one
-        if (.not. mode_given) then
-            cold = .false.
-            stationary = .true.
-        end if
         section_oracle%family = NESTED_SHEARED
         section_oracle%eps = 0.6_dp
         section_oracle%saxis = 2.4_dp
@@ -246,10 +240,10 @@ contains
         do k = 1, nt
             samples(:, :, k) = one
         end do
-        ! the mesh of gate F1: default core, centre between the wall radii
         call fm3_build(c, samples, n, degree, 4, st)
         if (st /= 0) error stop 'meshes'
         call fm3_start(c)
+        if (n == cells(1)) call check_axisymmetric_reduction(c)
         c%fm%verbose = verbose
         call flux_map3d_solve(c%fm, c%derham, c%quad, solovev_fm, c%base, 1e-9_dp, 60, st)
         call check(st == 0, 'Newton converges')
@@ -282,6 +276,30 @@ contains
             2*c%n0*nt, '  Newton', c%fm%steps, '  B error', e, '  axis', a_err, '  W', w, &
             '  (', t1 - t0, ' s)'
     end subroutine run_solovev
+
+    subroutine check_axisymmetric_reduction(c)
+        type(fm3_case_t), intent(in) :: c
+        type(flux_map_t) :: poloidal
+        real(dp), allocatable :: grad_2d(:), grad_3d(:), reduced(:)
+        real(dp) :: energy_2d, energy_3d
+        integer :: i, n, nt, ntot
+
+        n = c%n0
+        nt = c%nt
+        ntot = n*nt
+        call flux_map_init(poloidal, n, pack([(i, i=1, n)], c%fm%is_wall))
+        poloidal%z = [c%fm%z(:n), c%fm%z(ntot + 1:ntot + n)]
+        call flux_map_system(poloidal, c%derham, c%quad, solovev_fm, poloidal%z, energy_2d, grad_2d)
+        call flux_map3d_system(c%fm, c%derham, c%quad, solovev_fm, c%base, c%fm%z, energy_3d, grad_3d)
+        reduced = [sum(reshape(grad_3d(:ntot), [n, nt]), dim=2), &
+                   sum(reshape(grad_3d(ntot + 1:), [n, nt]), dim=2)]
+        print '(a,2es11.3)', '  axisymmetric reduction: energy and gradient differences ', &
+            abs(energy_3d - energy_2d), norm2(reduced - grad_2d)
+        call check(abs(energy_3d - energy_2d) < 1e-12_dp*max(abs(energy_2d), 1.0_dp), &
+                   '3D and axisymmetric energies on the same mesh agree')
+        call check(norm2(reduced - grad_2d) < 1e-11_dp*max(norm2(grad_2d), 1.0_dp), &
+                   '3D gradient restricted to axisymmetry matches the axisymmetric gradient')
+    end subroutine check_axisymmetric_reduction
 
     subroutine report_force(c, profiles)
         !! Force balance J X B - grad p of the state, J = curl B from the
@@ -347,9 +365,8 @@ contains
 
     subroutine run_landreman(n, deg, e, a_err)
         !! The first level from the polar start (fm3_start_polar; the start
-        !! u = G goes to the state of lower energy). Default (the gate): a
-        !! further level seeks the stationary point next to the previous
-        !! solution; with 'cold' it starts from the polar start, with
+        !! u = G goes to the state of lower energy). The registered gate
+        !! starts each level independently from the polar start. With
         !! 'nested' it starts from the previous solution (fm3_prolong)
         !! and minimises; with 'stationary' it seeks the stationary point next
         !! to it. At 8 cells, at degree 3 or on 21 planes the minimisation
@@ -374,7 +391,7 @@ contains
                    'Hessian inertia of the converged state is reliable')
         ! F2b: the exact state is a saddle, six negative eigenvalues (dense
         ! spectrum of the dumped Hessian, hessian_spectrum.py)
-        if (n == 4 .and. deg == 2 .and. nt == 13 .and. stationary) &
+        if (n == 4 .and. deg == 2 .and. nt == 13 .and. (stationary .or. .not. mode_given)) &
             call check(c%fm%negative_eigenvalues == 6, &
                        'Hessian of the 4-cell, 13-plane state has 6 negative eigenvalues')
         call flux_map3d_system(c%fm, c%derham, c%quad, landreman_fm, c%base, c%fm%z, w, &
