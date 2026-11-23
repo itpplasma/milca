@@ -347,7 +347,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # t-node #259, PCG projections #261, sparse mode coupling #262, stellarator
 # symmetry #263 #265 and polar quadrature at point singularities #267, on
 # block sides and vertices #268).
-set(MILCA_FORTFEM_REVISION "ec92138b1ae254a8fd0cfc33237c5adb8862a16a")
+set(MILCA_FORTFEM_REVISION "07c17eaef9a64fd1b996eb17bfe5799ab2319401")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
@@ -525,7 +525,7 @@ target_sources(milca_equilibrium PRIVATE src/equilibrium/gs_coils.f90 src/equili
     src/generated/milca_eulerian_clebsch_leaves.f90
     src/equilibrium/eulerian_clebsch.f90
     src/generated/milca_flux_map_leaves.f90 src/equilibrium/flux_map.f90
-    src/equilibrium/flux_map_3d.f90)
+    src/equilibrium/flux_map_3d.f90 src/equilibrium/flux_map_force.f90)
 target_sources(milca_equilibrium PRIVATE src/equilibrium/equilibrium_harness.f90)
 add_executable(test_equilibrium_harness test/test_equilibrium_harness.f90)
 target_link_libraries(test_equilibrium_harness PRIVATE milca)
@@ -919,6 +919,9 @@ add_executable(test_flux_map_3d test/test_flux_map_3d.f90)
 target_link_libraries(test_flux_map_3d PRIVATE milca_eulerian_test)
 add_test(NAME flux_map_3d_gate_f2a COMMAND test_flux_map_3d solovev)
 add_test(NAME flux_map_3d_gate_f2b COMMAND test_flux_map_3d landreman)
+add_executable(test_flux_map_force test/test_flux_map_force.f90)
+target_link_libraries(test_flux_map_force PRIVATE milca_eulerian_test)
+add_test(NAME flux_map_force_balance COMMAND test_flux_map_force)
 add_executable(test_flux_map_qa test/test_flux_map_qa.f90)
 target_link_libraries(test_flux_map_qa PRIVATE milca_eulerian_test milca_importers)
 # gate A1 (docs/equilibrium-roadmap.md): label lane on an ALE mesh, one axis
@@ -1741,6 +1744,8 @@ if(MILCA_FORTSYM_BUILD)
         -DWORK=${CMAKE_BINARY_DIR}/eulerian-clebsch-regeneration
         -DLEAF=milca_eulerian_clebsch_leaves.f90
         -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_leaf_regeneration.cmake)
+    milca_test_labels(eulerian_clebsch_leaf_regeneration fast CLASSES equilibrium
+        TARGETS gen_eulerian_clebsch)
     add_test(NAME flux_map_leaf_regeneration COMMAND ${CMAKE_COMMAND}
         -DGENERATOR=$<TARGET_FILE:gen_flux_map>
         -DEXPECTED=${CMAKE_SOURCE_DIR}/src/generated/milca_flux_map_leaves.f90

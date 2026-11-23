@@ -543,6 +543,205 @@ MILCA_FM3_PSCALE).
   energy; the standard decks with pressure have none. The Mercier criterion
   of the two analytic states has not been evaluated.
 
+### Force-balance residual, independent of the energy (2026-11-23)
+
+Module `milca_flux_map_force`, leaf `flux_map_force_3d` (FortSym, in
+`gen/gen_flux_map.f90`; proved there: ∇·B = 0 and F·B = 0), test
+`flux_map_force_balance`. Nothing of it enters the solver.
+
+Definition. From the 2-jet of u = (x, y) in the cylindrical coordinates
+(R, φ, Z) the leaf forms B of (1), J = ∇×B, F = J×B − p′(s)∇s and
+∇(B²/2), all pointwise; J comes from the second derivatives of the map and
+not from the gradient of W. For the discrete state the jet is that of u_h
+inside each cell (the section functions with their second derivatives, the
+trigonometric basis in t, the isoparametric planes and the wall part
+σ (cos Θ_h, sin Θ_h), changed to (R, φ, Z) by the chain rule). Reported:
+
+- η_B = ‖F‖/‖∇(B²/2)‖ and η_p = ‖F‖/‖∇p‖, ratios of L² norms over the
+  volume (η_p only with pressure; a vacuum state has η_B = ‖J×B‖/‖∇B²/2‖),
+  the same over s > 0.1, and per band of s (ten bands) the root mean
+  squares;
+- the parts of F along ∇s (radial balance) and along B×∇s (equal to
+  |B| |J·∇s|/|∇s|: current crossing the surfaces); F·B = 0 identically;
+- separately, because the volume norm does not see it: the jump of B²/2
+  across the C0 block interfaces of the section (B·n is continuous there,
+  the tangential field need not be), relative rms.
+
+The same measure for a VMEC state (`fm3_vmec_force`, `vmec_state_jet`): no
+mesh; u = ρ (cos θ*, sin θ*), θ* = θ + λ, as a function of (R, φ, Z)
+through the 2-jets of R, Z, λ in (ρ, θ, ζ), on the midpoints of 200 equal
+intervals of s. Radially a coefficient is ρ^parity h(s), parity = mod(m, 2),
+h the C2 cubic spline through the grid values (VMEC's own variables); the
+profiles are those of the deck. The first version divided by ρ^m as
+`vmec_state_eval` does and gave residuals of order 100 inside s = 0.2 on
+QA: the high modes of a wout file are not ∝ ρ^m near the axis.
+
+Oracles (`test_flux_map_force`): the leaf on B = e_φ/R (J = 0) and on a
+poloidal field with J_φ = −ψ′ Δ*s/R; the change of variables of the 2-jet
+on an analytic function; J and F of a discrete 3D state (Landreman
+sections, 13 planes, degree 3, 15 points with wall cells) against the curl
+of B_h of `flux_map3d_point` by central differences (7e-10 relative); and
+the VMEC route on an exact state, the vacuum field B₀R₀/R in a torus of
+circular section, whose flux coordinates are closed forms (2πB₀R₀ (R₀ −
+√(R₀² − r²)) = sΦ, θ* = 2 atan(√((R₀ − r)/(R₀ + r)) tan(θ/2))): η_B =
+1.8e-9 and 1.5e-10 on 26 and 51 surfaces, the axis region included.
+
+Convergence on the exact cases (relative L² error of B; η_p). Solov'ev of
+F2a, 3 planes, start u = G:
+
+| degree | cells 2 | 4 | 8 | 16 | 32 | rates |
+|---|---|---|---|---|---|---|
+| 2, B | 2.394e-2 | 7.067e-3 | 1.912e-3 | 4.879e-4 | 1.233e-4 | 1.76, 1.89, 1.97, 1.98 |
+| 2, η_p | 1.03e-1 | 6.43e-2 | 3.73e-2 | 1.96e-2 | 9.94e-3 | 0.68, 0.79, 0.93, 0.98 |
+| 3, B | 7.098e-3 | 1.801e-3 | 2.364e-4 | | | 1.98, 2.93 |
+| 3, η_p | 3.68e-2 | 1.87e-2 | 4.58e-3 | | | 0.98, 2.03 |
+| 4, B | 2.338e-3 | 5.424e-4 | 3.084e-5 | | | 2.11, 4.14 |
+| 4, η_p | 1.17e-2 | 4.16e-3 | 6.15e-4 | | | 1.49, 2.76 |
+
+B converges at order p and the residual at order p − 1 (J takes one more
+derivative), from 4 to 8 cells on; 2 cells are below the asymptotic range
+at degrees 3 and 4. Jump of B²/2 at the block interfaces, degree 2: 5.9e-3,
+2.1e-3 on 2, 4 cells.
+
+The order 1.8–1.9 of F1 is not an order loss (prediction: if it is
+pre-asymptotic, the rate from 8 to 16 cells is at least 1.95; confirmed).
+On the F1 mesh itself (`test_flux_map_axisym`, pointwise, cells 8, 16, 32):
+B 1.93e-3, 4.90e-4, 1.23e-4 (rates 1.98, 1.99), B_pol 1.89e-3, 4.89e-4,
+1.23e-4, the projected exact label 9.08e-4, 2.13e-4, 5.23e-5 (2.09, 2.03).
+B_pol over the projected label is 1.04, 1.49, 2.08, 2.30, 2.35 on 2 to 32
+cells: it levels off, a constant of 2.3 to 2.4 against the L² projection
+of the exact label. The projection converges faster than its order on the
+coarse meshes (2.34, 2.29), which made the ratio grow there.
+
+Guide field (isolating run, Solov'ev, degree 2, `MILCA_FM3_GUIDE` scales
+the toroidal field; the state stays exact). R B_φ = 3, 9, 30:
+
+| R B_φ | B error, 4 cells | η_B on 2, 4, 8 cells | η_p |
+|---|---|---|---|
+| 3 | 7.07e-3 | 0.19, 0.12, 0.070 | 0.103, 0.064, 0.037 |
+| 9 | 7.56e-3 | 0.31, 0.21, 0.11 | 0.180, 0.116, 0.061 |
+| 30 | 6.89e-3 | 0.62, 0.45, 0.27 | 1.05, 0.66, 0.37 |
+
+At the same error of B the residual grows with the guide field (3.8 times
+in η_B and 10 times in η_p from R B_φ = 3 to 30 on 4 cells; prediction: at
+least 4 times in η_B), the part along B×∇s most (0.034 → 0.37 of
+‖∇B²/2‖). The order stays p − 1. A first-order current times a strong
+toroidal field: at the field ratio of devices a degree-2 state has no
+usable pointwise force balance on these meshes.
+
+Sheared Landreman family of F2b (13 planes, stationary mode, first level
+from the polar start, degrees 3 and 4 from the degree-2 state on 2 cells):
+
+| degree | B on 2, 4, 8 cells | η_p | negative eigenvalues |
+|---|---|---|---|
+| 2 | 3.658e-2, 7.064e-3, 2.534e-3 | 0.221, 0.106, 0.071 | 6, 6, 6 |
+| 3 | 1.534e-2, 6.017e-3, 2.008e-3 | 0.217, 0.066, 0.081 | 6, 7, 6 |
+| 4 | 7.263e-3, 3.381e-3, 2.351e-3 | 0.111, 0.089, 0.103 | 6, 6, 6 |
+
+No order beyond 4 cells: B stops at 2.0e-3 to 2.5e-3 and η_p at 0.07 to
+0.10 for every degree, the part of F along B×∇s still falling (0.085,
+0.042 at degree 2; 0.0086 at degree 4, 8 cells) and the radial part not.
+A floor that does not depend on the section resolution; hypothesis, not
+isolated: the 13 planes, or the position along the six unstable directions
+(axis error 5e-3 to 7e-3 at 8 cells for all degrees). The runs meant to
+isolate it left the state: from the 13-plane state on 2 cells, 17 and 21
+planes give B 2.3e-2 and 1.0e-2 at 4 cells (axis 2.6e-2, 2.8e-2); from the
+polar start on 4 cells the solve goes to the lower state as before.
+
+Standard decks, degree 2, stages 2:2:9 then 2:4:13 (the table of "Section
+meshes by harmonic maps"; axis and energy reproduce it), against the
+VMEC++ states (ns 101) on the same measure, over s > 0.1:
+
+| deck | CEMV η_B | radial, B×∇s parts | VMEC η_B | CEMV η_p | VMEC η_p | interface jump |
+|---|---|---|---|---|---|---|
+| QA | 0.73 | 0.57, 0.43 | 1.8e-3 | | | 8.9e-3 |
+| QH | 0.82 | 0.71, 0.38 | 1.7e-3 | | | 1.5e-2 |
+| CTH | 0.48 | 0.36, 0.30 | 4.3e-3 | 31 | 0.24 | 7.7e-3 |
+| stellarator standard | 0.83 | 0.71, 0.42 | 2.8e-2 | 4.3 | 0.073 | 1.9e-2 |
+| li383 | 0.66 | 0.57, 0.33 | 3.5e-2 | 3.0 | 0.11 | 1.8e-2 |
+
+(The parts are of the whole volume.) VMEC++'s own residuals of these
+states: FSQR, FSQZ, FSQL at 1e-14 to 1e-15 (the discrete equations are
+solved); `equif`, the surface-averaged radial balance, rms over s > 0.1:
+CTH 4.2e-4, stellarator 3.7e-6, li383 1.1e-4 (undefined for the vacuum decks).
+Inside s = 0.1 the VMEC states have η_B of order one, confined to the six
+grid surfaces next to the axis (QA: s < 0.06 at ns 101, s < 0.04 at
+ns 151; the whole volume gives 0.33 and 0.23); the exact vacuum state
+through the same route has none, so this belongs to the states' radial
+grid data as differentiated twice, not to the evaluation.
+
+- On the pointwise measure the degree-2 flux-map states are 20 to 500
+  times worse than VMEC++ at ns 101, although axis, surfaces and |B| agree
+  to millimetres and below one per cent: the error of B_h is small but
+  varies on the cell scale, J_h is of order p − 1, and the strong toroidal
+  field amplifies it (the Solov'ev scan above).
+- Prediction ruled out: at least 3 times less at degree 3 on 4 cells. QA,
+  13 planes, η_B over s > 0.1: 0.84 (2:2:9), 0.73 (2:4:13), 0.78 (2:8:13),
+  0.64 (3:4:13), 0.72 (4:4:13), 0.81 (3:8:13).
+- Toroidal resolution is one part (prediction: at least 2 times less from
+  13 to 21 planes at degree 3; measured 1.4): 4 cells on 13, 21, 29 planes
+  0.73, 0.67, 0.67 at degree 2 and 0.64, 0.46, 0.43 at degree 3.
+- On 21 planes: 0.46 (3:4), 0.35 (3:8), 0.43 (4:4), 0.39 (4:6). Per band
+  the interior converges and the wall layer does not: from 3:4:29 to
+  3:8:21 the bands of s < 0.5 fall from 0.07–0.18 to 0.015–0.07 (order 2
+  and above), the band s > 0.9 stays at 0.89 and 0.93. The volume number
+  is that layer. Cause not isolated (hypotheses: the unresolved tips of the
+  wall, the toroidal content of the wall; the graded meshes below lower
+  the band to 0.62).
+- Parity with VMEC on this measure is therefore open, and it is the
+  measure of the standing benchmark of the roadmap.
+
+Sign of the map and winding of the wall, at convergence (reported per
+stage by both drivers; not a step-acceptance rule). ∇φ·(∇x×∇y) has one
+sign at all quadrature points (section points times toroidal points) of
+every run above: Solov'ev −0.77 to −0.22; Landreman −8.86 to −4.13; QA
+−60.3 to −24.8; QH −68.7 to −28.1; CTH −99.4 to −20.3; stellarator −0.90 to
+−0.54; li383 −10.6 to −4.0 (2:4:13). The wall angle winds once on every
+plane (1.000000) and is monotone: the smallest step between neighbouring
+wall points is 0.39 to 0.58 of the mean step on the decks. The gates F2a
+and F2b check one sign and winding one. A folded state was met once, on
+purpose: stellarator on the graded mesh with c = 2 (below), where the range is
+−1.36 to +0.33.
+
+### Mesh grading towards tips (2026-11-23)
+
+FortFEM `harmonic_disc_build(..., grading=c)` (doc/HARMONIC_DISC_MAP.md
+there): the wall is mapped to the circle by the measure
+(1 + (c κL/2π)²)^(1/3) dl instead of the arc length l, κ the curvature and
+L the length of the wall curve. More wall cells where the wall bends; the
+correspondence is still a homeomorphism onto the circle, so the map is
+still a diffeomorphism and the certificate is unchanged. Opt-in here
+(`MILCA_FM3_GRADING=c`, argument `grading` of `fm3_build`); the default
+stays the arc length.
+
+Prediction: at 4 cells the stellarator wall distance falls at least 3 times and
+the axis approaches the 8-cell value (4 mm). stellarator, 2:2:9 then 2:4:13:
+
+| c | wall distance | certified ratio | axis max dR | energy | η_B (s > 0.1) |
+|---|---|---|---|---|---|
+| 0 | 30 mm | 0.038 | 14.9 mm | +4.9e-4 | 0.83 |
+| 0.5 | 6.9 mm | 0.084 | 47 mm | +1.7e-3 | 0.73 |
+| 1 | 8.7 mm | 0.12 | 66 mm | +4.1e-3 | 0.80 |
+| 2 | 7.1 mm | 0.089 | 61 mm | +8.1e-3 | 0.91 (folded) |
+
+c = 4: the mesh is refused. The first half holds (3.4 to 4.3 times), the
+second is ruled out: the axis is 3 to 4 times worse. With the planes (4
+cells, c = 0.5 against c = 0): 13 planes 47 against 14.9 mm, 21 planes 24
+against 14.5 mm, 29 planes 18 against 15.3 mm, energy +2.8e-4 against
++3.1e-4 on 29 planes. So:
+
+- the graded correspondence follows the tips as they move along the wall
+  with φ, the meshes slide along the wall between the planes, and 13
+  planes do not carry that (isolated by the plane scan);
+- with enough planes the graded mesh is not better either: the stellarator axis
+  error at 4 cells is not set by the distance of the mesh wall from the
+  wall curve. What 8 cells improve (4.0 mm) is not the wall fit.
+- QA, 3:4:21: wall distance 15 → 4.4 mm (c = 0.5), 2.9 mm (c = 1); η_B
+  over s > 0.1 0.46 → 0.26, 0.39; band s > 0.9 1.02 → 0.62, 1.05; axis max
+  dR 0.63 → 0.45, 0.34 mm; energy +5.2e-5 → −1.4e-5, −8.9e-6. Here the
+  grading helps, c = 0.5 most in the residual; prediction (band s > 0.9
+  at least halved) not met.
+
 ## 5. Sequence
 
 The order of work, the gates still owed for F2 and the comparison with the
@@ -638,7 +837,12 @@ Each with the run that would settle it in the roadmap (P0a–P0c).
   states are distinct equilibria.
 - QA: the floor of the axis and inner surfaces, the missing gain from the
   degree, the cost of the plane-dense Hessian (section 4).
-- B_pol at twice the projected exact label on 8 cells, order 1.8–1.9 (F1).
+- Pointwise force balance: the degree-2 states have J×B − ∇p of the order
+  of ∇(B²/2) on the standard decks (VMEC++: 2e-3 to 3.5e-2), and on QA the
+  wall layer s > 0.9 does not converge up to degree 3, 8 cells, 21 planes
+  ("Force-balance residual"). Owed: the cause in the wall layer, then
+  parity at degree 3 or 4. The floor of F2b beyond 4 cells (planes or
+  the saddle) is not isolated.
 - Gauge without a symmetry: constraints orthogonal to θ* → θ* + k(s)
   instead of the symmetry penalty rows (untested in 2D and 3D).
 - Cold starts at a strong guide field: continuation works; a step
@@ -647,10 +851,12 @@ Each with the run that would settle it in the roadmap (P0a–P0c).
 - Projection in 3D: none is stable so far; dropped (roadmap P0b,
   2026-11-22). A candidate is B_h = Π_2(u_h*β) with a commuting
   projection, in mixed form.
-- Section meshes: grading towards tips that a harmonic map under-resolves
-  (wall distance 17 to 33 mm on 4 cells of QA, stellarator, li383), a certificate
-  of the mesh between the planes, the origin of the wall samples for
-  sections without a unique outboard point at centroid height.
+- Section meshes: the curvature grading brings the wall 3 to 5 times
+  closer but does not improve the equilibria and needs more planes ("Mesh
+  grading towards tips"; off by default); a correspondence that does not
+  slide with φ is not tried. A certificate of the mesh between the planes,
+  the origin of the wall samples for sections without a unique outboard
+  point at centroid height.
 - QH against a third code; the QA and QH axis at degree 3 on more planes.
 - The relation of the Hessian to the ideal δW (section 1) is argued, not
   verified.
@@ -673,6 +879,9 @@ Each with the run that would settle it in the roadmap (P0a–P0c).
   domains, arXiv:2411.04683: section meshes as inverted harmonic maps onto
   the disc (the idea; implementation and its further sources in FortFEM,
   doc/HARMONIC_DISC_MAP.md, commit 5e881d50).
+- The exact vacuum state of `test_flux_map_force` (field B₀R₀/R in a torus
+  of circular section, its flux label and straight-field-line angle) and
+  curl(∇s×∇φ) = −Δ*s ∇φ are derived here, not taken from a source.
 - No code of others was used. Reference data: VMEC++ 0.9.3 results of
   benchmarks/label-qa and benchmarks/flux-map-standard; DESC 0.17.4
   (github.com/PlasmaControl/DESC, MIT) for the QA axis

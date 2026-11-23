@@ -8,13 +8,16 @@ module flux_map_vmec
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortfem_spline_eval, only: spline_point_matrix
     use fortfem_spline_derham, only: spline_derham_project
-    use milca_vmec_state, only: vmec_state_t, vmec_state_eval, vmec_state_invert
+    use milca_vmec_state, only: vmec_state_t, vmec_state_eval, vmec_state_invert, vmec_state_jet
+    use milca_flux_map, only: flux_map_profiles
+    use milca_flux_map_force, only: flux_map_force_t, flux_map_force_reset, flux_map_force_add, &
+        flux_map_jet_to_cylindrical, flux_map_jet_product, flux_map_jet_cos_sin
     use milca_eulerian_clebsch, only: clebsch_nfp
     use flux_map_sections, only: fm3_case_t
     implicit none
     private
 
-    public :: fm3_from_vmec
+    public :: fm3_from_vmec, fm3_vmec_force
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
     type(fm3_case_t), pointer :: cur => null()
@@ -71,6 +74,53 @@ contains
         cur => null()
         vs => null()
     end subroutine fm3_from_vmec
+
+    subroutine fm3_vmec_force(state, profiles, orientation, bands, radial, acc)
+        !! The force balance (milca_flux_map_force) of the VMEC state itself,
+        !! without a mesh: u = rho (cos theta*, orientation sin theta*),
+        !! theta* = theta + lambda, as a function of (R, phi, Z) through the
+        !! 2-jets of R, Z, lambda (vmec_state_jet, cubic splines in s), on
+        !! the midpoints of `radial` equal intervals of s, 4 mpol_max + 8
+        !! angles theta and 4 ntor_max + 8 angles zeta of one field period.
+        !! The profiles are those of the flux map (the deck), not read from
+        !! the state.
+        type(vmec_state_t), intent(in) :: state
+        procedure(flux_map_profiles) :: profiles
+        real(dp), intent(in) :: orientation
+        integer, intent(in) :: bands, radial
+        type(flux_map_force_t), intent(out) :: acc
+        real(dp) :: rho, theta, zeta, rj(10), zj(10), lj(10), tj(10), cj(10), sj(10), pj(10), &
+                    xq(10), yq(10), xc(10), yc(10), w
+        integer :: i, j, k, ntheta, nzeta
+
+        ntheta = 4*maxval(state%m) + 8
+        nzeta = 4*nint(maxval(abs(state%xn))/state%nfp) + 8
+        call flux_map_force_reset(acc, bands)
+        do i = 1, radial
+            rho = sqrt((i - 0.5_dp)/radial)
+            pj = 0
+            pj(1:2) = [rho, 1.0_dp]
+            do k = 1, nzeta
+                zeta = two_pi*(k - 1)/(nzeta*state%nfp)
+                do j = 1, ntheta
+                    theta = two_pi*(j - 1)/ntheta
+                    call vmec_state_jet(state, rho, theta, zeta, rj, zj, lj)
+                    tj = lj
+                    tj(1) = tj(1) + theta
+                    tj(3) = tj(3) + 1
+                    call flux_map_jet_cos_sin(tj, cj, sj)
+                    xq = flux_map_jet_product(pj, cj)
+                    yq = orientation*flux_map_jet_product(pj, sj)
+                    call flux_map_jet_to_cylindrical(rj, zj, 1.0_dp, xq, xc)
+                    call flux_map_jet_to_cylindrical(rj, zj, 1.0_dp, yq, yc)
+                    ! dV = R |d(R, Z)/d(rho, theta)| drho dtheta dzeta, ds = 2 rho drho
+                    w = rj(1)*abs(rj(2)*zj(3) - rj(3)*zj(2))/(2*rho*radial)*two_pi/ntheta &
+                        *two_pi/nzeta
+                    call flux_map_force_add(acc, w, rj(1), xc, yc, profiles)
+                end do
+            end do
+        end do
+    end subroutine fm3_vmec_force
 
     subroutine vmec_value(block, xi, t, values)
         !! Component `component` of u at (block, xi) of plane `plane`.

@@ -17,6 +17,13 @@ program test_flux_map_3d
     !! (4.98e-2, 1.161e-2 at 2, 4 cells) and converges at order p; the axis
     !! (zero of u) is reported (it lies along an unstable direction).
     !!
+    !! Both cases report, per level, the force balance J X B - grad p with
+    !! J = curl B_h from the second derivatives of u_h (milca_flux_map_force),
+    !! the jump of B^2/2 at the C0 block interfaces, the sign of grad phi .
+    !! (grad x X grad y) at all quadrature points and the winding of the wall
+    !! angle; one sign and winding one are checked, and at degree 2 that the
+    !! force balance converges.
+    !!
     !! Arguments: case, levels, planes, degree, toroidal quadrature points per
     !! plane (2), extra section quadrature points (4), start of the levels after
     !! the first: 'cold' (the polar start; default for solovev), 'nested'
@@ -35,8 +42,10 @@ program test_flux_map_3d
     use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
     use flux_map_sections
+    use milca_flux_map_force, only: flux_map_force_t, flux_map3d_force, flux_map_force_print, &
+        flux_map_force_norm, FORCE_F, FORCE_GRAD_B2, FORCE_GRAD_P
     use solovev_label_fields, only: solovev_profiles, exact_b, boundary_samples, r0, alpha, &
-        psi_b, chart
+        psi_b, chart, flux_scale
     use landreman_sections, only: section_oracle, section_exact_b, section_axis, &
         section_boundary_radius, section_fit_profiles, section_profiles
     implicit none
@@ -47,7 +56,7 @@ program test_flux_map_3d
     integer :: cells(3) = [2, 4, 8], start_planes = 0, planes
     logical :: verbose = .false.
     character(16) :: which = 'solovev', arg
-    real(dp) :: err(3), axis_err(3)
+    real(dp) :: err(3), axis_err(3), force_err(3)
     ! F1 (pointwise B_phi, R B_phi = 3) and the fixed-label fit of E4a
     real(dp), parameter :: f1_b(3) = [2.42e-2_dp, 7.11e-3_dp, 1.93e-3_dp], &
                            e4a_fit(2) = [4.98e-2_dp, 1.161e-2_dp]
@@ -91,9 +100,13 @@ program test_flux_map_3d
         if (levels == 0) levels = 3
         if (nt == 0) nt = 3
         call curve_chart_cylindrical(chart, 1)
+        ! diagnostic: MILCA_FM3_GUIDE multiplies the toroidal field (R B_phi =
+        ! 3 times it; the state stays exact)
+        call get_environment_variable('MILCA_FM3_GUIDE', arg, level)
+        if (level > 0) read (arg, *) flux_scale
         do level = 1, levels
             call run_solovev(cells(level), err(level), axis_err(level))
-            if (degree == 2) call check(abs(err(level)/f1_b(level) - 1) < 0.02_dp, &
+            if (degree == 2 .and. flux_scale == 1) call check(abs(err(level)/f1_b(level) - 1) < 0.02_dp, &
                                         'B error equals gate F1 within 2 %')
         end do
     case ('landreman')
@@ -129,12 +142,19 @@ program test_flux_map_3d
         error stop 'unknown case'
     end select
     do level = 2, levels
-        print '(a,2f7.2)', 'rates of B, axis', log(err(level - 1)/err(level))/log(2.0_dp), &
-            log(axis_err(level - 1)/axis_err(level))/log(2.0_dp)
+        print '(a,3f7.2)', 'rates of B, axis, force balance', &
+            log(err(level - 1)/err(level))/log(2.0_dp), &
+            log(axis_err(level - 1)/axis_err(level))/log(2.0_dp), &
+            log(force_err(level - 1)/force_err(level))/log(2.0_dp)
         call check(log(err(level - 1)/err(level))/log(2.0_dp) > degree - 0.3_dp, &
                    'B converges at order p')
         if (trim(which) == 'solovev') &
             call check(axis_err(level) < axis_err(level - 1), 'the axis converges')
+        ! J = curl B_h has the order p - 1; measured at degree 2: Solovev
+        ! 0.68, 0.79 (0.93, 0.98 on 16, 32 cells), Landreman 1.05
+        if (degree == 2 .and. level <= 2) &
+            call check(log(force_err(level - 1)/force_err(level))/log(2.0_dp) > 0.5_dp, &
+                       'the force balance |J X B - grad p|/|grad p| converges')
     end do
     if (failures > 0) error stop 'flux map 3D gate failed'
     print '(2a)', 'PASS flux map 3D gate ', trim(which)
@@ -168,6 +188,7 @@ contains
         real(dp), intent(out) :: b(3)
 
         b = exact_b([x(1), 0.0_dp, x(3)])
+        b(2) = flux_scale*b(2)
     end subroutine solovev_b
 
     subroutine landreman_fm(s, tau, gp, p)
@@ -222,7 +243,8 @@ contains
         ! the Solovev states are saddles of W too: negative eigenvalues of the
         ! dense spectrum of the dumped Hessian (hessian_spectrum.py): 2, 2, 4
         ! at 2, 4, 8 cells
-        call check(c%fm%inertia_reliable .and. c%fm%zero_eigenvalues == 0 .and. &
+        if (degree == 2) &
+            call check(c%fm%inertia_reliable .and. c%fm%zero_eigenvalues == 0 .and. &
                    (n /= 2 .or. c%fm%negative_eigenvalues == 2) .and. &
                    (n /= 4 .or. c%fm%negative_eigenvalues == 2) .and. &
                    (n /= 8 .or. c%fm%negative_eigenvalues == 4), &
@@ -230,6 +252,7 @@ contains
         call flux_map3d_system(c%fm, c%derham, c%quad, solovev_fm, c%base, c%fm%z, w, &
                                exact_field=solovev_b, field_error=ferr)
         e = sqrt(ferr(1)/ferr(2))
+        call report_force(c, solovev_fm)
         a_err = 0
         do k = 1, nt
             call fm3_axis(c, (k - 1)/real(nt, dp), solovev_fm, axis, st)
@@ -244,6 +267,33 @@ contains
             2*c%n0*nt, '  Newton', c%fm%steps, '  B error', e, '  axis', a_err, '  W', w, &
             '  (', t1 - t0, ' s)'
     end subroutine run_solovev
+
+    subroutine report_force(c, profiles)
+        !! Force balance J X B - grad p of the state, J = curl B from the
+        !! second derivatives of u_h (milca_flux_map_force), the sign of the
+        !! Jacobian and the winding of the wall angle.
+        type(fm3_case_t), intent(in) :: c
+        procedure(solovev_fm) :: profiles
+        type(flux_map_force_t) :: force
+        real(dp) :: winding(c%nt), least_step(c%nt), jump
+        integer :: st
+
+        call flux_map3d_force(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z, 10, force, st)
+        if (st /= 0) error stop 'force balance'
+        call flux_map_force_print(force, 'CEMV')
+        force_err(level) = flux_map_force_norm(force, FORCE_F, 0)/ &
+                           flux_map_force_norm(force, FORCE_GRAD_P, 0)
+        call fm3_wall_winding(c, profiles, winding, least_step, st)
+        if (st /= 0) error stop 'wall winding'
+        call fm3_interface_jump(c, profiles, jump, st)
+        if (st /= 0) error stop 'interface jump'
+        print '(a,2f10.6,a,es10.2,a,es10.2)', '  winding of the wall angle per plane, min max', &
+            minval(winding), maxval(winding), '  least step of the wall angle / mean step', &
+            minval(least_step), '  jump of B^2/2 at the block interfaces (relative rms)', jump
+        call check(force%jacobian_min*force%jacobian_max > 0, &
+                   'grad phi . (grad x X grad y) has one sign at all quadrature points')
+        call check(all(abs(winding - 1) < 1e-8_dp), 'the wall angle winds once')
+    end subroutine report_force
 
     subroutine landreman_case(n, deg, np, c, a, minor)
         !! Meshes of np planes from the wall curves (rays about the exact
@@ -319,6 +369,7 @@ contains
         call flux_map3d_system(c%fm, c%derham, c%quad, landreman_fm, c%base, c%fm%z, w, &
                                exact_field=section_exact_b, field_error=ferr)
         e = sqrt(ferr(1)/ferr(2))
+        call report_force(c, landreman_fm)
         allocate (flux(nt))
         call fm3_flux(c, landreman_fm, flux, bmin, bmax)
         print '(a,2es13.5,a,2es11.3)', '  toroidal flux through the planes, min max', &
