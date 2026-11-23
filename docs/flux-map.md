@@ -9,6 +9,16 @@ the pair (χ, g) with axis unknowns of
 specific to this direction of the map and what is not:
 [audit](equilibrium-lane-audit.md), section 4.
 
+**Name: CEMV**, *Code d'Équilibre par Moments Variationnels*, VMEC à
+l'envers. VMEC (Variational Moments Equilibrium Code) solves for the map
+from flux coordinates to physical space; CEMV solves for the map from
+physical space to flux coordinates. The French word order reverses the
+acronym as the method reverses the map, and since VMEC's direction is
+traditionally called the inverse coordinate representation, CEMV is the
+inverse of the inverse. "Moments" is kept for the pun: the section is
+discretised by splines on a disc O-grid, only the toroidal direction by a
+trigonometric basis. Comparisons against VMEC are written "CEMV vs VMEC".
+
 ## 1. Formulation
 
 Model torus: the unit disc times a circle, with Cartesian disc coordinates
