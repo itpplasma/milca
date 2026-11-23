@@ -211,7 +211,7 @@ contains
         procedure(clebsch_exact_field), optional :: exact_field
         real(dp), intent(out), optional :: field_error(2), gauge_moment(:)
         real(dp), allocatable :: v0(:, :, :), gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :), &
-                                 tb(:, :, :), gloc(:), hloc(:, :), vals(:), zx(:, :), zy(:, :), &
+                                 products(:, :, :), gloc(:), blocks(:, :, :), vals(:), zx(:, :), zy(:, :), &
                                  ax(:), ay(:), bx(:), by(:), lam(:), mw(:, :), gsec(:, :), &
                                  hs(:, :), lm(:), ltab(:, :, :), mloc(:), turn(:)
         integer, allocatable :: d0(:), ix(:), iy(:), idx(:), rows(:), cols(:)
@@ -220,16 +220,26 @@ contains
                     ft(2, 2), detf, vel(2), t, wq, wt, u(8), sig, th, gsig(3), gth(3), s, &
                     tau(3), gp(3), pr(3), w, wg(8), wh(36), h8(8, 8), ref, shift, k11, k12, &
                     vm(3), et(3), c3(3), gs(3), bv(3), bx3(3), ferr(2), sn, cs
-        integer :: n0, nt, ntot, nqt, cell, q, p, m, i, j, k, a, b, c1, c2, nloc, nsec, nl, &
-                   nz, blk, il, jl, la, lb, nlmax, ia, ib, ng
+        integer :: n0, nt, ntot, nqt, cell, q, p, m, i, j, k, a, b, c1, nloc, nsec, nl, &
+                   nz, blk, la, lb, nlmax, ia, ib, ng, nb, pair
         logical :: derivs
         type(csc_t) :: mm
         type(fortsparse_status_t) :: info
+        interface
+            subroutine dgemm(ta, tb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+                import dp
+                character, intent(in) :: ta, tb
+                integer, intent(in) :: m, n, k, lda, ldb, ldc
+                real(dp), intent(in) :: alpha, a(lda, *), b(ldb, *), beta
+                real(dp), intent(inout) :: c(ldc, *)
+            end subroutine dgemm
+        end interface
 
         n0 = fm%n0
         nt = fm%nt
         ntot = n0*nt
         nqt = fm%toroidal_points*nt + 2
+        nb = nt*(nt + 1)/2
         derivs = present(gradient)
         energy = 0
         ferr = 0
@@ -258,12 +268,23 @@ contains
                 rows = 1
                 cols = 1
                 vals = 0
+                allocate (products(nqt, 4, nb))
+                pair = 0
+                do lb = 1, nt
+                    do la = 1, lb
+                        pair = pair + 1
+                        products(:, 1, pair) = ltab(la, 1, :)*ltab(lb, 1, :)
+                        products(:, 2, pair) = ltab(la, 1, :)*ltab(lb, 2, :)
+                        products(:, 3, pair) = ltab(la, 2, :)*ltab(lb, 1, :)
+                        products(:, 4, pair) = ltab(la, 2, :)*ltab(lb, 2, :)
+                    end do
+                end do
             end if
         end if
         !$omp parallel do schedule(dynamic) default(private) &
         !$omp shared(fm, derham, quad, plane_nodes, z, gradient, rows, cols, vals, n0, nt, &
         !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error, ltab, ng, &
-        !$omp        gauge_moment) &
+        !$omp        gauge_moment, nb, products) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
             call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
@@ -286,10 +307,9 @@ contains
             if (allocated(sx)) deallocate (sx, gsec, hs, idx, gloc)
             allocate (sx(8, nsec, 2), gsec(nsec, 2), hs(nsec, nsec), idx(nl), gloc(nl))
             if (present(hessian)) then
-                if (allocated(am)) deallocate (am, tb, hloc)
-                allocate (am(nsec, nsec, 3, nqt), tb(nt, 2, nqt), hloc(nl, nl))
+                if (allocated(am)) deallocate (am, blocks)
+                allocate (am(nsec, nsec, nqt, 4), blocks(nsec, nsec, nb))
                 am = 0
-                hloc = 0
             end if
             gloc = 0
             if (ng > 0) then
@@ -386,13 +406,12 @@ contains
                             h8(j, i) = wh(a)
                         end do
                     end do
-                    tb(:, :, m) = lt
                     ! blocks (1,1), (1,2), (2,2); (2,1) is the transpose of (1,2)
-                    am(:, :, 1, m) = am(:, :, 1, m) + &
+                    am(:, :, m, 1) = am(:, :, m, 1) + &
                         wt*matmul(transpose(sx(:, :, 1)), matmul(h8, sx(:, :, 1)))
-                    am(:, :, 2, m) = am(:, :, 2, m) + &
+                    am(:, :, m, 2) = am(:, :, m, 2) + &
                         wt*matmul(transpose(sx(:, :, 1)), matmul(h8, sx(:, :, 2)))
-                    am(:, :, 3, m) = am(:, :, 3, m) + &
+                    am(:, :, m, 4) = am(:, :, m, 4) + &
                         wt*matmul(transpose(sx(:, :, 2)), matmul(h8, sx(:, :, 2)))
                     if (sig > 0) then
                         ! second derivatives of the wall part, contracted with wg
@@ -411,9 +430,9 @@ contains
                             do i = 1, nloc
                                 if (.not. is_w(i)) cycle
                                 a = ix(i)
-                                am(a, b, 1, m) = am(a, b, 1, m) + wt*(k11*lam(i)*lam(j) &
+                                am(a, b, m, 1) = am(a, b, m, 1) + wt*(k11*lam(i)*lam(j) &
                                                  + lam(i)*lm(j) + lam(j)*lm(i))
-                                am(a, b, 2, m) = am(a, b, 2, m) + wt*k12*lam(i)*lam(j)
+                                am(a, b, m, 2) = am(a, b, m, 2) + wt*k12*lam(i)*lam(j)
                             end do
                         end do
                     end if
@@ -430,38 +449,29 @@ contains
                 gradient(idx(i)) = gradient(idx(i)) + gloc(i)
             end do
             if (.not. present(hessian)) cycle
-            ! upper block triangle of the local Hessian: block (la, lb), la <= lb,
-            ! is sum_m [t1a t1b A11 + t1a t2b A12 + t2a t1b A12^T + t2a t2b A22]
+            ! Batch the four toroidal contractions over all section pairs
+            ! and upper-triangular plane pairs.
             do m = 1, nqt
-                do lb = 1, nt
-                    do la = 1, lb
-                        il = (la - 1)*nsec
-                        jl = (lb - 1)*nsec
-                        w = tb(la, 1, m)*tb(lb, 1, m)
-                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
-                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + w*am(:, :, 1, m)
-                        w = tb(la, 1, m)*tb(lb, 2, m)
-                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
-                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + w*am(:, :, 2, m)
-                        w = tb(la, 2, m)*tb(lb, 1, m)
-                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
-                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + &
-                            w*transpose(am(:, :, 2, m))
-                        w = tb(la, 2, m)*tb(lb, 2, m)
-                        if (w /= 0) hloc(il + 1:il + nsec, jl + 1:jl + nsec) = &
-                            hloc(il + 1:il + nsec, jl + 1:jl + nsec) + w*am(:, :, 3, m)
-                    end do
-                end do
+                am(:, :, m, 3) = transpose(am(:, :, m, 2))
             end do
+            call dgemm('N', 'N', nsec**2, nb, 4*nqt, 1.0_dp, am(1, 1, 1, 1), nsec**2, &
+                       products(1, 1, 1), 4*nqt, 0.0_dp, blocks(1, 1, 1), nsec**2)
             ! local entries (ia, ib), ia <= ib (a pair once; the diagonal blocks
             ! hold both orders, only ia <= ib is taken), to global (min, max)
             nz = (cell - 1)*blk
-            do ib = 1, nl
-                do ia = 1, ib
-                    nz = nz + 1
-                    rows(nz) = min(idx(ia), idx(ib))
-                    cols(nz) = max(idx(ia), idx(ib))
-                    vals(nz) = hloc(ia, ib)
+            do lb = 1, nt
+                do j = 1, nsec
+                    ib = (lb - 1)*nsec + j
+                    do la = 1, lb
+                        pair = lb*(lb - 1)/2 + la
+                        do i = 1, merge(j, nsec, la == lb)
+                            ia = (la - 1)*nsec + i
+                            nz = nz + 1
+                            rows(nz) = min(idx(ia), idx(ib))
+                            cols(nz) = max(idx(ia), idx(ib))
+                            vals(nz) = blocks(i, j, pair)
+                        end do
+                    end do
                 end do
             end do
         end do
