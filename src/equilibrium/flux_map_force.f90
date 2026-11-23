@@ -352,7 +352,7 @@ contains
     end subroutine state_jets
 
     subroutine flux_map3d_force_point(fm, derham, profiles, plane_nodes, z, block, xi, t, rz, b, &
-                                      j, f, status)
+                                      j, f, status, label, grad_b2, volume)
         !! Position (R, Z), B, J = curl B and F = J X B - grad p, components
         !! (R, phi, Z), of the state z at the block parameters xi and the
         !! toroidal parameter t.
@@ -363,6 +363,9 @@ contains
         integer, intent(in) :: block
         real(dp), intent(out) :: rz(2), b(3), j(3), f(3)
         integer, intent(out) :: status
+        !! optional: the label s, grad(B^2/2) and the volume element per unit
+        !! of the block parameters and of t
+        real(dp), intent(out), optional :: label, grad_b2(3), volume
         integer, allocatable :: rowptr(:), colidx(:), d0(:)
         real(dp), allocatable :: v(:), nj(:, :)
         real(dp) :: l(fm%nt, 3), rj(10), zj(10), xc(10), yc(10), tau(3), gp(3), pr(3), m(3), jac
@@ -390,6 +393,9 @@ contains
             xc(8), xc(9), xc(10), yc(2), yc(3), yc(4), yc(5), yc(6), yc(7), yc(8), yc(9), yc(10), &
             tau(1), tau(2), gp(1), gp(2), pr(2), b(1), b(2), b(3), j(1), j(2), j(3), f(1), f(2), &
             f(3), m(1), m(2), m(3), jac)
+        if (present(label)) label = xc(1)**2 + yc(1)**2
+        if (present(grad_b2)) grad_b2 = m
+        if (present(volume)) volume = abs(rj(2)*zj(3) - rj(3)*zj(2))*rj(1)*two_pi/clebsch_nfp
     end subroutine flux_map3d_force_point
 
     subroutine flux_map3d_force(fm, derham, quad, profiles, plane_nodes, z, bands, acc, status)

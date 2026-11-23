@@ -29,10 +29,11 @@ program test_flux_map_qa
     use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
     use fortsparse_csr, only: csr_t
+    use fortfem_spline_eval, only: spline_point_matrix
     use flux_map_sections
     use flux_map_vmec, only: fm3_from_vmec, fm3_from_vmec_failures, fm3_vmec_force
     use milca_flux_map_force, only: flux_map_force_t, flux_map3d_force, flux_map_force_print, &
-        flux_map_force_norm, FORCE_F
+        flux_map_force_norm, FORCE_F, flux_map3d_force_point
     use milca_vmec_state, only: vmec_state_t, vmec_state_read
     implicit none
     real(dp), parameter :: pi = acos(-1.0_dp)
@@ -57,6 +58,15 @@ program test_flux_map_qa
     integer :: vlen
     real(dp) :: pscale = 1 ! diagnostic: MILCA_FM3_PSCALE multiplies the pressure
     real(dp) :: grading = 0 ! MILCA_FM3_GRADING: curvature grading of the section meshes
+    ! diagnostic: MILCA_FM3_ORIGIN moves the first wall sample (disc angle 0,
+    ! and with it the block corners on the wall) by this fraction of the
+    ! deck angle
+    real(dp) :: origin_shift = 0
+    ! convergence basin: MILCA_FM3_START_AXIS = d moves the start u = G to
+    ! u + d (1 - |u|^2) e_x (the axis of the start by about d minor radii);
+    ! MILCA_FM3_START_ANGLE = a turns it by the angle a sin(theta), the wall
+    ! angle included
+    real(dp) :: start_axis = 0, start_angle = 0
     type(flux_map_force_t) :: force
     real(dp), allocatable :: winding(:), least_step(:)
     real(dp) :: jump
@@ -74,6 +84,12 @@ program test_flux_map_qa
     if (vlen > 0) read (arg, *) pscale
     call get_environment_variable('MILCA_FM3_GRADING', arg, vlen)
     if (vlen > 0) read (arg, *) grading
+    call get_environment_variable('MILCA_FM3_START_AXIS', arg, vlen)
+    if (vlen > 0) read (arg, *) start_axis
+    call get_environment_variable('MILCA_FM3_START_ANGLE', arg, vlen)
+    if (vlen > 0) read (arg, *) start_angle
+    call get_environment_variable('MILCA_FM3_ORIGIN', arg, vlen)
+    if (vlen > 0) read (arg, *) origin_shift
     call get_environment_variable('MILCA_FM3_VMEC', vpath, vlen)
     if (vlen > 0) then
         call vmec_state_read(trim(vpath), vstate, st, vreason)
@@ -137,6 +153,7 @@ program test_flux_map_qa
             call fm3_mesh_quality(c, quality)
             if (istage == 1) then
                 call fm3_start(c)
+                call perturb_start()
             else
                 call fm3_prolong(previous, c, st)
                 if (st /= 0) error stop 'prolongation'
@@ -157,6 +174,8 @@ program test_flux_map_qa
             call flux_map3d_force(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z, 10, force, st)
             if (st /= 0) error stop 'force balance'
             call flux_map_force_print(force, 'CEMV')
+            call force_dump()
+            call wall_misfit()
             allocate (winding(nt), least_step(nt))
             call fm3_wall_winding(c, profiles, winding, least_step, st)
             if (st /= 0) error stop 'wall winding'
@@ -352,6 +371,119 @@ contains
         print '(a,6es10.2)', '   plane mean', mean/max(cnt, 1)
     end subroutine write_currents
 
+    subroutine force_dump()
+        !! diagnostic: MILCA_FM3_FORCE_DUMP=prefix writes, per quadrature
+        !! point of the section and 2 nt values of t, block, xi, t, R, Z, s,
+        !! the volume weight, B, J, F and grad(B^2/2) to
+        !! prefix_<degree>_<cells>_<planes>.txt.
+        character(512) :: prefix, path
+        integer :: length, v, p, m, stp
+        real(dp) :: rz(2), b(3), jc(3), f(3), sl, gb(3), vol, t
+
+        call get_environment_variable('MILCA_FM3_FORCE_DUMP', prefix, length)
+        if (length == 0) return
+        write (path, '(a,a,i0,a,i0,a,i0,a)') trim(prefix), '_', c%degree, '_', c%cells, '_', &
+            c%nt, '.txt'
+        open (newunit=v, file=trim(path), status='replace')
+        write (v, '(a)') '# block xi1 xi2 t R Z s weight B(3) J(3) F(3) gradB2(3)'
+        do p = 1, c%quad%point_count
+            do m = 1, 2*c%nt
+                t = (m - 1)/real(2*c%nt, dp)
+                call flux_map3d_force_point(c%fm, c%derham, profiles, c%base, c%fm%z, &
+                    c%quad%block(p), c%quad%xi(:, p), t, rz, b, jc, f, stp, sl, gb, vol)
+                if (stp /= 0) error stop 'force dump'
+                write (v, '(i3,19es16.8)') c%quad%block(p), c%quad%xi(:, p), t, rz, sl, &
+                    c%quad%weight(p)*vol/(2*c%nt), b, jc, f, gb
+            end do
+        end do
+        close (v)
+    end subroutine force_dump
+
+    subroutine perturb_start()
+        !! The start of the first stage moved off u = G (see start_axis,
+        !! start_angle).
+        integer :: i, kk, ix, iy
+        real(dp) :: x, y, th, da
+
+        if (start_axis == 0 .and. start_angle == 0) return
+        do kk = 1, c%nt
+            do i = 1, c%n0
+                ix = (kk - 1)*c%n0 + i
+                iy = c%n0*c%nt + ix
+                if (c%fm%is_wall(i)) then
+                    c%fm%z(ix) = c%fm%z(ix) + start_angle*sin(c%fm%z(ix))
+                else
+                    x = c%fm%z(ix)
+                    y = c%fm%z(iy)
+                    th = atan2(y, x)
+                    da = start_angle*sin(th)
+                    c%fm%z(ix) = cos(da)*x - sin(da)*y + start_axis*(1 - x**2 - y**2)
+                    c%fm%z(iy) = sin(da)*x + cos(da)*y
+                end if
+            end do
+        end do
+    end subroutine perturb_start
+
+    subroutine wall_misfit()
+        !! diagnostic: MILCA_FM3_MISFIT=prefix writes per plane, outer block
+        !! and wall cell the largest and the signed mean distance of the mesh
+        !! wall from the wall curve (8 points per cell) to
+        !! prefix_<degree>_<cells>_<planes>.txt.
+        integer, parameter :: nd = 4096
+        character(512) :: prefix, path
+        integer :: length, v, k, b, e, q, i, ib
+        real(dp) :: dense(2, nd), pos(2), d, best, dmax, a(2), ab(2), tt, th0, sense, phi, pr(2)
+
+        call get_environment_variable('MILCA_FM3_MISFIT', prefix, length)
+        if (length == 0) return
+        write (path, '(a,a,i0,a,i0,a,i0,a)') trim(prefix), '_', c%degree, '_', c%cells, '_', &
+            c%nt, '.txt'
+        open (newunit=v, file=trim(path), status='replace')
+        write (v, '(a)') '# plane block cell max_distance R Z'
+        do k = 1, c%nt
+            phi = 2*pi*(k - 1)/(c%nt*eq%nfp)
+            call exact_origin(phi, th0, sense)
+            do i = 1, nd
+                call wall_point(2*pi*(i - 1)/nd, phi, dense(:, i))
+            end do
+            do b = 2, 5
+                do e = 1, c%cells
+                    dmax = 0
+                    do q = 1, 8
+                        call wpoint(b, (e - 1 + (q - 0.5_dp)/8)/c%cells, k, pos)
+                        best = huge(1.0_dp)
+                        do i = 1, nd
+                            ib = mod(i, nd) + 1
+                            a = dense(:, i)
+                            ab = dense(:, ib) - a
+                            tt = max(0.0_dp, min(1.0_dp, dot_product(pos - a, ab)/dot_product(ab, ab)))
+                            d = norm2(pos - a - tt*ab)
+                            best = min(best, d)
+                        end do
+                        dmax = max(dmax, best)
+                        if (q == 4) pr = pos
+                    end do
+                    write (v, '(3i5,3es16.8)') k, b, e, dmax, pr
+                end do
+            end do
+        end do
+        close (v)
+    end subroutine wall_misfit
+
+    subroutine wpoint(b, x, kk, pos)
+        !! Point of the mesh wall of plane kk: outer block b, wall parameter x.
+        integer, intent(in) :: b, kk
+        real(dp), intent(in) :: x
+        real(dp), intent(out) :: pos(2)
+        integer, allocatable :: rowptr(:), colidx(:)
+        real(dp), allocatable :: val(:)
+        integer :: st2
+        call spline_point_matrix(c%derham%space, [b], reshape([x, 0.0_dp], [2, 1]), 0, rowptr, &
+                                 colidx, val, st2)
+        if (st2 /= 0) error stop 'wall point'
+        pos = matmul(c%base(:, colidx, kk), val)
+    end subroutine wpoint
+
     subroutine vmec_force()
         !! Force balance of the VMEC state itself (no mesh; the same measure
         !! as for the flux-map state), in the orientation of theta* with the
@@ -445,6 +577,7 @@ contains
 
         ns = size(curve, 2)
         call exact_origin(phi, th0, sense)
+        th0 = th0 + sense*2*pi*origin_shift
         do ii = 1, ns
             call wall_point(th0 + sense*2*pi*(ii - 1)/ns, phi, curve(:, ii))
         end do
