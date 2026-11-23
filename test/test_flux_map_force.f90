@@ -32,7 +32,7 @@ program test_flux_map_force
     use milca_flux_map_force, only: flux_map_jet_to_cylindrical, flux_map3d_force_point
     use flux_map_sections
     use flux_map_vmec, only: fm3_vmec_force
-    use milca_vmec_state, only: vmec_state_t, vmec_state_set
+    use milca_vmec_state, only: vmec_state_t, vmec_state_set, vmec_state_jet
     use milca_flux_map_force, only: flux_map_force_t, flux_map_force_norm, FORCE_J, FORCE_B, &
         FORCE_F, FORCE_GRAD_B2
     use landreman_sections, only: section_oracle, section_axis, section_boundary_radius, &
@@ -47,6 +47,7 @@ program test_flux_map_force
     call change_of_variables()
     call discrete_state()
     call vmec_route()
+    call vmec_four_surfaces()
     if (failures > 0) error stop 'flux map force balance test failed'
     print '(a)', 'PASS flux map force balance'
 
@@ -215,6 +216,34 @@ contains
         call check(log(res(1)/res(2))/log(2.0_dp) > 3.0_dp, &
                    'VMEC route: order above 3 in the radial grid', log(res(1)/res(2))/log(2.0_dp))
     end subroutine vmec_route
+
+    subroutine vmec_four_surfaces()
+        ! m = 1 coefficients rho*(1 + s + s**2) on the full and half grids.
+        integer, parameter :: ns = 4
+        real(dp), parameter :: rho = 0.1_dp
+        type(vmec_state_t) :: st
+        real(dp) :: rmnc(2, ns), zmns(2, ns), lmns(2, ns), s, exact(3)
+        real(dp) :: rj(10), zj(10), lj(10), err
+        integer :: i
+
+        rmnc = 0
+        zmns = 0
+        lmns = 0
+        rmnc(1, :) = 3
+        do i = 2, ns
+            s = real(i - 1, dp)/(ns - 1)
+            rmnc(2, i) = sqrt(s)*(1 + s + s**2)
+            zmns(2, i) = rmnc(2, i)
+            s = (i - 1.5_dp)/(ns - 1)
+            lmns(2, i) = sqrt(s)*(1 + s + s**2)
+        end do
+        call vmec_state_set(st, 1, [0.0_dp, 1.0_dp], [0.0_dp, 0.0_dp], rmnc, zmns, lmns, 1.0_dp)
+        call vmec_state_jet(st, rho, 0.0_dp, 0.0_dp, rj, zj, lj)
+        exact = [rho + rho**3 + rho**5, 1 + 3*rho**2 + 5*rho**4, 6*rho + 20*rho**3]
+        err = maxval(abs([rj(1) - 3, rj(2), rj(5)] - exact))
+        err = max(err, abs(zj(3) - exact(1)), abs(lj(3) - exact(1)), abs(lj(6) - exact(2)))
+        call check(err < 1e-13_dp, 'four-surface VMEC state: radial jets near the axis', err)
+    end subroutine vmec_four_surfaces
 
     real(dp) function sum_inverse_r2(a, r0) result(v)
         !! Volume mean of 1/R^2 over the torus of circular section:

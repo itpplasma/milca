@@ -119,7 +119,7 @@ contains
         type(vmec_state_t), intent(inout) :: st
         integer, intent(in) :: nfp
         real(dp), intent(in) :: xm(:), xn(:), rmnc(:, :), zmns(:, :), lmns(:, :), phiedge
-        integer :: j, k
+        integer :: j, k, last
 
         st%ns = size(rmnc, 2)
         st%mnmax = size(rmnc, 1)
@@ -152,6 +152,8 @@ contains
         allocate (st%mr(st%mnmax, st%ns), st%mz(st%mnmax, st%ns), st%ml(st%mnmax, st%ns), &
                   st%hr(st%mnmax, st%ns), st%hz(st%mnmax, st%ns), st%hl(st%mnmax, st%ns))
         st%parity = mod(st%m, 2)
+        ! A four-surface state has only three positive-radius samples.
+        last = min(5, st%ns)
         do k = 1, st%mnmax
             do j = 2, st%ns
                 st%hr(k, j) = rmnc(k, j)/sqrt(st%sf(j))**st%parity(k)
@@ -162,10 +164,10 @@ contains
                 st%hr(k, 1) = rmnc(k, 1)
                 st%hz(k, 1) = zmns(k, 1)
             else
-                st%hr(k, 1) = end_value(st%sf(2:5), st%hr(k, 2:5))
-                st%hz(k, 1) = end_value(st%sf(2:5), st%hz(k, 2:5))
+                st%hr(k, 1) = end_value(st%sf(2:last), st%hr(k, 2:last))
+                st%hz(k, 1) = end_value(st%sf(2:last), st%hz(k, 2:last))
             end if
-            st%hl(k, 1) = end_value(st%sh(2:5), st%hl(k, 2:5))
+            st%hl(k, 1) = end_value(st%sh(2:last), st%hl(k, 2:last))
             call spline_moments(st%sf, st%hr(k, :), st%mr(k, :))
             call spline_moments(st%sf, st%hz(k, :), st%mz(k, :))
             call spline_moments(st%sh, st%hl(k, :), st%ml(k, :))
@@ -197,15 +199,15 @@ contains
     end subroutine radial
 
     pure real(dp) function end_value(x, y) result(v)
-        !! The cubic through four points at 0.
-        real(dp), intent(in) :: x(4), y(4)
+        !! Value at the axis of the interpolant through the supplied samples.
+        real(dp), intent(in) :: x(:), y(:)
         real(dp) :: w
         integer :: i, j
 
         v = 0
-        do i = 1, 4
+        do i = 1, size(x)
             w = y(i)
-            do j = 1, 4
+            do j = 1, size(x)
                 if (j /= i) w = w*(0 - x(j))/(x(i) - x(j))
             end do
             v = v + w
