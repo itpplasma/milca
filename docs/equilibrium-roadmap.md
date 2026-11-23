@@ -147,6 +147,37 @@ and P2: the map with the better robustness and time at matched error on
 H1–H3 becomes the core; the other is kept as cross-check with parity
 fixes. Until then neither is "reference only".
 
+**Later, not scheduled: both directions as modes of one stack** (recorded
+2026-11-23 so it is not lost). Direction (VMEC mode X: flux disc → space,
+the Lagrangian map; CEMV mode u: space → flux disc, the flux map) and
+section discretisation (splines on the harmonic disc O-grid, curved
+triangles P_k) are independent axes; today two of the four combinations
+exist, in separate code. Target layering with duplication only where the
+physics differs:
+- one FortSym energy leaf per direction (the pointwise density of the
+  map's jet with its generated derivatives): w(u, ∇u, R) for CEMV,
+  |DX b|²/(2J) − pJ for the VMEC mode;
+- basis jets per space from FortFEM (spline O-grid or triangles, times a
+  trigonometric nodal or Fourier toroidal basis), which exist;
+- one assembly over cells and quadrature points, one Newton with LDLᵀ and
+  inertia, gauge by constraints and continuation (P0c);
+- shared geometry and checks: charts (cylindrical, curve chart), harmonic
+  meshes with their certificate, wall condition, free boundary through the
+  exterior operator, VMEC import and state check, the inverse check of P2.
+Features of either lane are wanted in both: curve chart, 3D free boundary
+and matrix-free preconditioners of the Lagrangian map; harmonic meshes,
+LDLᵀ inertia, exact wall condition and VMEC state check of CEMV. Not
+measured, to be settled before any code: whether CEMV on C0 triangles
+locks at a strong guide field (as C0 Lagrange quadrilaterals did, section
+3 of flux-map.md), whether the VMEC mode keeps its orders on the spline
+O-grid, how much of the free boundary depends on triangles, and whether
+one assembly generic over spaces stays as fast as the specialised paths.
+Working rule until then: when one lane hits a problem, look at how the
+other solves it and unify that piece instead of writing a second
+solution. A standing benchmark CEMV vs VMEC (both converged below their
+difference, same independent force-balance residual, time at matched
+accuracy including setup) belongs with P1.
+
 **P4. Region coupling where the answer is known (gates R1).** Two kinds
 of interface, to be kept apart:
 - numerical: two descriptions of the same ideal equilibrium meet at a good
