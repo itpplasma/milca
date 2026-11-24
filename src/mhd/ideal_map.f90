@@ -2598,10 +2598,10 @@ contains
     end subroutine
 
     subroutine ideal_map_solve(map, tolerance, max_iterations, report, status, verbose, &
-                               reference_gradient, stationary)
+                               reference_gradient, stationary, model_agreement_damping)
         ! Damped Newton on the reduced (nu, omega) coefficients: Levenberg-Marquardt
-        ! with the Hessian diagonal as metric, shrinking the damping after every
-        ! accepted step. Steps keep J > 0 and do not raise W beyond roundoff.
+        ! with the Hessian diagonal as metric. Steps keep J > 0 and do not raise
+        ! W beyond roundoff. Model agreement can retain damping after a full step.
         ! Converged when the free reduced-gradient norm is below tolerance times
         ! its initial value. The energy minimizer also accepts a step stalled at roundoff.
         ! With map%omega_elimination the iteration is Newton on W_red(nu) =
@@ -2621,7 +2621,7 @@ contains
         ! Absolute gradient the tolerance refers to (default: the initial one),
         ! e.g. the first-phase gradient for a polishing solve.
         real(dp), intent(in), optional :: reference_gradient
-        logical, intent(in), optional :: stationary
+        logical, intent(in), optional :: stationary, model_agreement_damping
         type(csr_matrix_t) :: matrix, omatrix, pmatrix
         type(sparse_solver_t) :: solver, osolver, lsolver
         type(fortsparse_status_t) :: sstatus
@@ -2629,7 +2629,7 @@ contains
         real(dp), allocatable :: trial(:, :, :), rhs(:), shift(:), trial_angle(:)
         logical, allocatable :: omask(:), damped(:)
         real(dp) :: energy, trial_energy, g0, gnorm, mu, minjac, scale, alpha
-        real(dp) :: cap_x, cap_w, t0, trial_minjac
+        real(dp) :: cap_x, cap_w, t0, trial_minjac, prediction, damping_divisor
         integer :: it, i, k, tries, estatus
         logical :: talk, accepted, factored, ofactored, lfactored, use_lu, nested
         logical :: retained, direct, pc_failed, spd
@@ -2639,7 +2639,7 @@ contains
         ! qrho, qcount valid ones, the newest at qhead.
         real(dp), allocatable :: qs(:, :), qy(:, :), qrho(:), gprev(:)
         integer :: qn_slot, qcount, qhead
-        logical :: quasi, seek_stationary
+        logical :: quasi, seek_stationary, agreement_damping, reduce_damping
         talk = .false.
         retained = .false.
         factored = .false.; ofactored = .false.; lfactored = .false.
@@ -2648,6 +2648,9 @@ contains
         status = IDEAL_MAP_BAD_INPUT
         seek_stationary = .false.
         if (present(stationary)) seek_stationary = stationary
+        agreement_damping = .false.
+        if (present(model_agreement_damping)) agreement_damping = model_agreement_damping
+        damping_divisor = merge(10.0_dp, 100.0_dp, agreement_damping)
         if (seek_stationary) then
             if (.not. map%position_gauge .or. map%parallel_damping /= 0 &
                 .or. map%krylov_step .or. map%lagged_hessian) return
@@ -2701,6 +2704,7 @@ contains
                 status = IDEAL_MAP_OK; exit
             end if
             report%iterations = it
+            reduce_damping = .true.
             quasi = .false.
             if (qn_slot > 0) call quasi_newton_step(quasi)
             if (.not. quasi) then
@@ -2795,7 +2799,9 @@ contains
                         ! quadratic model g.s + s.H s/2 predicts.
                         if (estatus == IDEAL_MAP_OK .and. trial_energy < energy &
                             - 1024*epsilon(1.0_dp)*abs(energy)) then
-                            if (energy - trial_energy >= 0.1_dp*predicted_reduction()) then
+                            prediction = predicted_reduction()
+                            if (energy - trial_energy >= 0.1_dp*prediction) then
+                                if (agreement_damping) reduce_damping = energy - trial_energy >= 0.75_dp*prediction
                                 accepted = .true.; exit
                             end if
                         end if
@@ -2844,7 +2850,8 @@ contains
                 energy, gnorm/g0, maxval(abs(step(1::2))), maxval(abs(step(2::2))), mu, &
                 tries, alpha, norm2(gred(2:2*map%nodes:2))/gnorm, &
                 norm2(step(2:2*map%nodes:2))/norm2(step)
-            if (alpha >= 1 .and. .not. quasi .and. .not. seek_stationary) mu = max(mu/100, 1.0e-14_dp)
+            if (alpha >= 1 .and. .not. quasi .and. .not. seek_stationary .and. reduce_damping) &
+                mu = max(mu/damping_divisor, 1.0e-14_dp)
             if (report%step <= 1.0e-13_dp*maxval(abs(map%reference))) then
                 if (.not. seek_stationary) status = IDEAL_MAP_OK
                 exit
