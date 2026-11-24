@@ -19,13 +19,15 @@
 !! conservation laws and a manufactured solution:
 !!   test_ntv_orbit_geometry [factor]       thin limit of one kernel
 !!   test_ntv_orbit_geometry thin_negative  the same for charge -e
+!!   test_ntv_orbit_geometry liouville      finite-width phase-space measure
 !!   test_ntv_orbit_geometry energy_<name>  width, lorentz, conservation,
 !!                                          manufactured, electrons
 
 program test_ntv_orbit_geometry
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_boozer_file, only: boozer_file_t, load_boozer_file, BOOZER_OK
-    use milca_boozer_orbit, only: orbit_particle_t, orbit_state
+    use milca_boozer_orbit, only: orbit_particle_t, orbit_point_t, orbit_pitch_point, &
+        orbit_state, ORBIT_OK
     use milca_dk_hp, only: hp_field_t, hp_field, hp_mesh_t, hp_default_mesh, hp_operator_t, &
         hp_ntv_kernel, HP_OK
     use milca_ntv_orbit_geometry, only: hp_orbit_geometry_t, hp_orbit_geometry, &
@@ -53,16 +55,12 @@ program test_ntv_orbit_geometry
     real(dp), parameter :: pi = 4*atan(1.0_dp), e = 1.602176634e-19_dp
     real(dp), parameter :: md = 3.3435837768e-27_dp, me = 9.1093837015e-31_dp, &
         s_star = 0.45_dp, b_ref = 2.3_dp, kev = 1.602176634e-16_dp
-    character(*), parameter :: file = 'ntv_orbit_geometry.bc'
     type(boozer_file_t), target :: bf
-    character(32) :: check
+    character(32) :: check, file
     real(dp) :: factor
     integer :: status
     logical :: ok
 
-    call write_file(file)
-    call load_boozer_file(file, bf, status)
-    if (status /= BOOZER_OK) error stop 'cannot read the test file'
     check = 'thin'
     factor = 1e-3_dp
     if (command_argument_count() > 0) then
@@ -71,9 +69,15 @@ program test_ntv_orbit_geometry
         if (status == 0) check = 'thin'
         if (status /= 0) factor = 1e-3_dp
     end if
+    file = 'ntv_orbit_geometry.bc'
+    if (trim(check) == 'liouville') file = 'ntv_orbit_liouville.bc'
+    call write_file(trim(file), trim(check) == 'liouville')
+    call load_boozer_file(trim(file), bf, status)
+    if (status /= BOOZER_OK) error stop 'cannot read the test file'
     select case (trim(check))
     case ('thin'); ok = thin(factor, 1.0_dp)
     case ('thin_negative'); ok = thin(1e-3_dp, -1.0_dp)
+    case ('liouville'); ok = liouville()
     case ('energy_width'); ok = energy_width()
     case ('energy_mixed'); ok = energy_mixed()
     case ('energy_lorentz'); ok = energy_lorentz()
@@ -86,6 +90,41 @@ program test_ntv_orbit_geometry
     if (.not. ok) error stop 1
 
 contains
+
+    logical function liouville() result(ok)
+        real(dp), parameter :: pitches(*) = [-0.8_dp, -0.5_dp, -0.2_dp, 0.2_dp, 0.5_dp, 0.8_dp]
+        type(orbit_particle_t) :: p
+        type(orbit_point_t) :: pt
+        type(hp_orbit_geometry_t) :: g
+        type(hp_operator_t) :: op
+        real(dp) :: th, xi, expected, measure_error
+        integer :: z, j, k, status
+
+        p%mass = md
+        p%energy = 10*kev
+        p%s_ref = s_star
+        p%omega_e = 5000
+        op%k_power = 1
+        measure_error = 0
+        do z = -1, 1, 2
+            p%charge = z*e
+            call hp_orbit_geometry(bf, p, s_star, b_ref, g, status)
+            if (status /= ORBIT_OK) error stop 'orbit geometry failed'
+            op%k = g%kappa
+            do j = 0, 3
+                th = j*pi/2
+                do k = 1, size(pitches)
+                    xi = pitches(k)
+                    call orbit_pitch_point(bf, p, s_star, th, xi, pt, status)
+                    if (status /= ORBIT_OK) error stop 'pitch point failed'
+                    expected = -pt%mu_xi*b_ref*g%v_star/(2*g%e_star*pt%theta_dot)
+                    measure_error = max(measure_error, abs(g%measure(th, xi, op)/expected - 1))
+                end do
+            end do
+        end do
+        print '(a,es12.4)', 'Liouville measure relative error ', measure_error
+        ok = measure_error < 1e-10_dp
+    end function liouville
 
     !> The monoenergetic kernel on the orbit geometry against the thin field
     !> at mass factor factor (header).
@@ -739,8 +778,9 @@ contains
         close (unit)
     end subroutine write_pert
 
-    subroutine write_file(name)
+    subroutine write_file(name, vary_currents)
         character(*), intent(in) :: name
+        logical, intent(in) :: vary_currents
         integer :: unit, k
         real(dp) :: s
         open (newunit=unit, file=name, status='replace', action='write')
@@ -752,7 +792,12 @@ contains
             write (unit, '(a)') ' s iota curr_pol/nper curr_tor pprime sqrt g(0,0)'
             write (unit, '(a)') ' [A] [A] dp/ds,[Pa] (dV/ds)/nper'
             ! iota = +0.765 in the right-handed chart of this left-handed file
-            write (unit, '(6es24.16)') s, -0.765_dp, -1.2e7_dp, 0.0_dp, 0.0_dp, 0.0_dp
+            if (vary_currents) then
+                write (unit, '(6es24.16)') s, -0.765_dp - 0.06_dp*s, &
+                    -1.2e7_dp*(1 + 0.15_dp*s), 5e5_dp*s, 0.0_dp, 0.0_dp
+            else
+                write (unit, '(6es24.16)') s, -0.765_dp, -1.2e7_dp, 0.0_dp, 0.0_dp, 0.0_dp
+            end if
             write (unit, '(a)') ' m n r/[m] z/[m] (phib-phi)*nper/twopi bmn/[T]'
             write (unit, '(2i5,4es24.16)') 0, 0, 1.7_dp, 0.0_dp, 0.0_dp, 2.3_dp
             write (unit, '(2i5,4es24.16)') 1, 0, 0.5_dp*sqrt(s), 0.5_dp*sqrt(s), 0.0_dp, &

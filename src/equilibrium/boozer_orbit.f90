@@ -51,6 +51,7 @@ module milca_boozer_orbit
     !> the point (set by orbit_pitch_point).
     type :: orbit_point_t
         real(dp) :: s = 0, rho = 0, v_par = 0, b = 0, theta_dot = 0, zeta_dot = 0, mu = 0
+        real(dp) :: symplectic_factor = 0
         ! dmu/dxi along the ray and ds/ds* at fixed (theta, xi, H).
         real(dp) :: mu_xi = 0, s_star_s = 0
     end type
@@ -308,6 +309,7 @@ contains
         h_psi = (p%charge*rho**2*b/p%mass + mu/p%charge)*b_s/psi_prime + phi_s/psi_prime
         h_rho = p%charge*rho*b**2/p%mass
         d = g + iota*i + rho*(g*i_s - i*g_s)/psi_prime
+        q%symplectic_factor = d
         q%theta_dot = (h_psi*g - h_rho*(rho*g_s/psi_prime - iota))/d
         q%zeta_dot = (h_rho*(1 + rho*i_s/psi_prime) - h_psi*i)/d
     end subroutine evaluate_at

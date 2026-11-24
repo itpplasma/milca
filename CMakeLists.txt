@@ -2222,6 +2222,8 @@ milca_test_labels(ntv_orbit_geometry_thin fast CLASSES apps TARGETS test_ntv_orb
 add_test(NAME ntv_orbit_geometry_thin_negative COMMAND test_ntv_orbit_geometry thin_negative)
 milca_test_labels(ntv_orbit_geometry_thin_negative fast CLASSES apps
     TARGETS test_ntv_orbit_geometry)
+add_test(NAME ntv_orbit_geometry_liouville COMMAND test_ntv_orbit_geometry liouville)
+milca_test_labels(ntv_orbit_geometry_liouville fast CLASSES apps TARGETS test_ntv_orbit_geometry)
 # The energy-coupled kernel on orbit geometries: a geometry and mesh per
 # speed node, seconds to minutes each.
 foreach(check energy_lorentz energy_manufactured energy_floor energy_width energy_mixed
