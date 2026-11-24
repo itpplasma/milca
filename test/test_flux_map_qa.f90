@@ -55,7 +55,7 @@ program test_flux_map_qa
     integer, allocatable :: axis_status(:)
     logical :: pres_hermite = .false.
     real(dp) :: bmin, bmax
-    logical :: verbose
+    logical :: verbose, match_sample_angle
     integer :: skipped = 0
     type(vmec_state_t) :: vstate
     character(512) :: vpath, vreason
@@ -90,6 +90,10 @@ program test_flux_map_qa
     if (vlen > 0) read (arg, *) pscale
     call get_environment_variable('MILCA_FM3_GRADING', arg, vlen)
     if (vlen > 0) read (arg, *) grading
+    call get_environment_variable('MILCA_FM3_SAMPLE_ANGLE', length=vlen)
+    match_sample_angle = vlen > 0
+    if (match_sample_angle .and. grading > 0) error stop 'sample angle excludes curvature grading'
+    if (match_sample_angle) print '(a)', 'Section wall angles follow the input samples'
     call get_environment_variable('MILCA_FM3_START_AXIS', arg, vlen)
     if (vlen > 0) read (arg, *) start_axis
     call get_environment_variable('MILCA_FM3_START_ANGLE', arg, vlen)
@@ -160,7 +164,7 @@ program test_flux_map_qa
                     call plane_curve(2*pi*(k - 1)/(nt*eq%nfp), samples(:, :, k))
                 end do
                 call fm3_build(c, samples, cells, deg, 4, st, preserve_area=keep_area(), &
-                               grading=grading)
+                               grading=grading, match_sample_angle=match_sample_angle)
                 if (st == 0 .and. c%map_residual < 1e-9_dp) exit
                 if (st /= 0 .and. st /= 13) exit
                 if (nsamples >= 2048) exit

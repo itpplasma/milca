@@ -823,6 +823,21 @@ against 14.5 mm, 29 planes 18 against 15.3 mm, energy +2.8e-4 against
   grading helps, c = 0.5 most in the residual; prediction (band s > 0.9
   at least halved) not met.
 
+### Fourier wall sample angles
+
+For a boundary supplied as a Fourier series, uniformly spaced poloidal
+samples give a periodic boundary correspondence directly. Set
+`MILCA_FM3_SAMPLE_ANGLE=1` to map them to uniform angles on the unit disc,
+starting at the outboard anchor of each plane. Arc-length reparameterization
+can introduce higher harmonics before the wall is interpolated on the mesh.
+
+On the quasi-axisymmetric vacuum deck with degree four, six cells and
+21 planes in the final stage, changing from curvature grading with $c=1$
+to the input sample angles reduced the maximum wall distance from
+710 to 0.86 µm and the volume-integrated force ratio fell from 0.145 to
+0.00351. The half-flux surface distance from stock VMEC fell from 342 to
+100 µm RMS. This run used the prescribed wall and profiles in both fits.
+
 ### Gauge constraint, one solver loop and continuation (P0c, 2026-11-23)
 
 What changed. `flux_map_solve` and `flux_map3d_solve` were two copies of one
