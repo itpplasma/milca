@@ -22,7 +22,7 @@ module milca_flux_map_force
     !! 2-jets are stored as (f, f_1, f_2, f_3, f_11, f_12, f_13, f_22, f_23,
     !! f_33) in three parameters.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use fortfem_spline_eval, only: spline_quadrature_t, spline_point_matrix, spline_cell_xi_basis
+    use fortfem_spline_eval, only: spline_quadrature_t, spline_point_jet_matrix, spline_cell_xi_basis
     use fortfem_spline_space, only: spline_cell_broken
     use fortfem_spline_derham, only: spline_derham_t
     use milca_eulerian_clebsch, only: clebsch_nfp
@@ -365,25 +365,12 @@ contains
         !! optional: the label s, grad(B^2/2) and the volume element per unit
         !! of the reference plane coordinates and of t
         real(dp), intent(out), optional :: label, grad_b2(3), volume
-        integer, allocatable :: rowptr(:), colidx(:), d0(:)
-        real(dp), allocatable :: v(:), nj(:, :)
+        integer, allocatable :: rowptr(:), d0(:)
+        real(dp), allocatable :: nj(:, :)
         real(dp) :: l(fm%nt, 3), rj(10), zj(10), xc(10), yc(10), tau(3), gp(3), pr(3), m(3), jac
-        integer :: c
 
-        do c = 0, 5
-            call spline_point_matrix(derham%space, [block], reshape(xi, [2, 1]), c, rowptr, &
-                                     colidx, v, status)
-            if (status /= 0) return
-            if (c == 0) then
-                d0 = colidx
-                allocate (nj(6, size(d0)))
-            else
-                status = 1
-                if (size(colidx) /= size(d0)) return
-            end if
-            nj(c + 1, :) = v
-        end do
-        status = 0
+        call spline_point_jet_matrix(derham%space, [block], reshape(xi, [2, 1]), 2, rowptr, d0, nj, status)
+        if (status /= 0) return
         call toroidal_jet(fm%nt, t, l)
         call state_jets(fm, plane_nodes, z, d0, nj, l, rj, zj, xc, yc)
         rz = [rj(1), zj(1)]
