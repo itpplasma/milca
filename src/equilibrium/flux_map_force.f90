@@ -22,7 +22,8 @@ module milca_flux_map_force
     !! 2-jets are stored as (f, f_1, f_2, f_3, f_11, f_12, f_13, f_22, f_23,
     !! f_33) in three parameters.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use fortfem_spline_eval, only: spline_quadrature_t, spline_point_matrix
+    use fortfem_spline_eval, only: spline_quadrature_t, spline_point_matrix, spline_cell_xi_basis
+    use fortfem_spline_space, only: spline_cell_broken
     use fortfem_spline_derham, only: spline_derham_t
     use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map, only: flux_map_profiles
@@ -311,14 +312,10 @@ contains
         cy = 0
         cw = 0
         cs = 0
-        wall = .false.
+        i = minloc(d0, dim=1, mask=fm%is_wall(d0))
+        wall = i /= 0
         ref = 0
-        do i = 1, size(d0)
-            if (fm%is_wall(d0(i)) .and. .not. wall) then
-                ref = z(d0(i))
-                wall = .true.
-            end if
-        end do
+        if (wall) ref = z(d0(i))
         do i = 1, size(d0)
             cr(i, :) = plane_nodes(1, d0(i), :)
             cz(i, :) = plane_nodes(2, d0(i), :)
@@ -366,7 +363,7 @@ contains
         real(dp), intent(out) :: rz(2), b(3), j(3), f(3)
         integer, intent(out) :: status
         !! optional: the label s, grad(B^2/2) and the volume element per unit
-        !! of the block parameters and of t
+        !! of the reference plane coordinates and of t
         real(dp), intent(out), optional :: label, grad_b2(3), volume
         integer, allocatable :: rowptr(:), colidx(:), d0(:)
         real(dp), allocatable :: v(:), nj(:, :)
@@ -403,7 +400,6 @@ contains
     subroutine flux_map3d_force(fm, derham, quad, profiles, plane_nodes, z, bands, acc, status)
         !! The force balance of the state z over the quadrature points of
         !! quad and the toroidal quadrature of flux_map3d_system.
-        !! Status 1: the section jets could not be evaluated.
         type(flux_map3d_t), intent(in) :: fm
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
@@ -413,46 +409,42 @@ contains
         type(flux_map_force_t), intent(out) :: acc
         integer, intent(out) :: status
         type(flux_map_force_t) :: part
-        integer, allocatable :: rowptr(:), colidx(:), rp(:), ci(:)
-        real(dp), allocatable :: val(:, :), v(:), ltab(:, :, :)
+        real(dp), allocatable :: ltab(:, :, :), jets(:, :, :), basis(:, :)
+        integer, allocatable :: d0(:), broken(:)
         real(dp) :: rj(10), zj(10), xc(10), yc(10)
-        integer :: nt, nqt, p, m, c
+        integer :: nt, nqt, nloc, nq, cell, a, p, q, m
 
         nt = fm%nt
         nqt = fm%toroidal_quadrature_count()
+        nq = quad%points_per_cell
+        nloc = (derham%degree + 1)**2
         call flux_map_force_reset(acc, bands)
-        do c = 0, 5
-            call spline_point_matrix(derham%space, quad%block, quad%xi, c, rp, ci, v, status)
-            if (status /= 0) then
-                status = 1
-                return
-            end if
-            if (c == 0) then
-                rowptr = rp
-                colidx = ci
-                allocate (val(6, size(v)))
-            else
-                status = 1
-                if (size(ci) /= size(colidx)) return
-                if (any(ci /= colidx)) return
-            end if
-            val(c + 1, :) = v
-        end do
         status = 0
         allocate (ltab(nt, 3, nqt))
         do m = 1, nqt
             call toroidal_jet(nt, (m - 1)/real(nqt, dp), ltab(:, :, m))
         end do
-        !$omp parallel default(private) shared(fm, quad, plane_nodes, z, acc, rowptr, colidx, &
-        !$omp     val, ltab, nqt, bands)
+        !$omp parallel default(private) shared(fm, derham, quad, plane_nodes, z, acc, ltab, nqt, bands, nloc, nq)
         call flux_map_force_reset(part, bands)
-        !$omp do schedule(dynamic, 16)
-        do p = 1, quad%point_count
-            do m = 1, nqt
-                call state_jets(fm, plane_nodes, z, colidx(rowptr(p):rowptr(p + 1) - 1), &
-                                val(:, rowptr(p):rowptr(p + 1) - 1), ltab(:, :, m), rj, zj, xc, yc)
-                call flux_map_force_add(part, quad%weight(p)*abs(rj(2)*zj(3) - rj(3)*zj(2)) &
-                                        *two_pi/nqt*rj(1), rj(1), xc, yc, profiles)
+        allocate (d0(nloc), broken(nloc), jets(nloc, 6, nq), basis(6, nloc))
+        !$omp do schedule(dynamic, 1)
+        do cell = 1, size(quad%point_offset)
+            call spline_cell_broken(derham%space, cell, broken)
+            ! The section de Rham space has one signed degree of freedom per broken function.
+            broken = derham%space%broken_ptr(broken)
+            d0 = derham%space%broken_dof(broken)
+            call spline_cell_xi_basis(derham%space, quad, cell, jets)
+            do a = 1, nloc
+                jets(a, :, :) = derham%space%broken_weight(broken(a))*jets(a, :, :)
+            end do
+            do q = 1, nq
+                p = quad%point_offset(cell) + q - 1
+                basis = matmul(quad%chain(:, :, p), transpose(jets(:, :, q)))
+                do m = 1, nqt
+                    call state_jets(fm, plane_nodes, z, d0, basis, ltab(:, :, m), rj, zj, xc, yc)
+                    call flux_map_force_add(part, quad%weight(p)*abs(rj(2)*zj(3) - rj(3)*zj(2)) &
+                                            *two_pi/nqt*rj(1), rj(1), xc, yc, profiles)
+                end do
             end do
         end do
         !$omp end do
