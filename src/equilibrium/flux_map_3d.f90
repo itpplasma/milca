@@ -309,7 +309,8 @@ contains
         real(dp), allocatable :: gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :), &
                                  products(:, :, :), gloc(:), blocks(:, :, :), vals(:), zx(:, :), zy(:, :), &
                                  ax(:), ay(:), bx(:), by(:), lam(:), mw(:, :), gsec(:, :), &
-                                 hs(:, :), lm(:), ltab(:, :, :), mloc(:), turn(:)
+                                 hs(:, :), lm(:), ltab(:, :, :), mloc(:), turn(:), &
+                                 trial_jets(:, :), weighted_jets(:, :)
         integer, allocatable :: ix(:), iy(:), idx(:), rows(:), cols(:)
         logical, allocatable :: is_w(:)
         real(dp) :: lt(fm%nt, 2), ht(fm%nt, 2), sk(2, fm%nt), gk(2, 2, fm%nt), sm(2), f(2, 2), &
@@ -426,6 +427,10 @@ contains
                 if (allocated(am)) deallocate (am, blocks)
                 allocate (am(nsec, nsec, nqt, 4), blocks(nsec, nsec, nb))
                 am = 0
+                if (cached_section .and. .not. allocated(trial_jets)) then
+                    allocate (trial_jets(8*quad%points_per_cell, 2*nloc), &
+                              weighted_jets(8*quad%points_per_cell, 2*nloc))
+                end if
             end if
             gloc = 0
             if (ng > 0) then
@@ -546,8 +551,13 @@ contains
                     end do
                     ! blocks (1,1), (1,2), (2,2); (2,1) is the transpose of (1,2)
                     hs = matmul(h8, sx(:, :, 1))
-                    call dgemm('T', 'N', nsec, nsec, 8, wt, sx(1, 1, 1), 8, &
-                               hs, 8, 1.0_dp, am(1, 1, m, 1), nsec)
+                    if (cached_section) then
+                        trial_jets(8*q - 7:8*q, :nsec) = sx(:, :, 1)
+                        weighted_jets(8*q - 7:8*q, :nsec) = wt*hs
+                    else
+                        call dgemm('T', 'N', nsec, nsec, 8, wt, sx(1, 1, 1), 8, &
+                                   hs, 8, 1.0_dp, am(1, 1, m, 1), nsec)
+                    end if
                     ! The zero Fourier mode has no toroidal derivatives.
                     if (nt > 1) then
                         hs = matmul(h8, sx(:, :, 2))
@@ -592,7 +602,13 @@ contains
                 gradient(idx(i)) = gradient(idx(i)) + gloc(i)
             end do
             if (.not. present(hessian)) cycle
-            if (nt == 1) then
+            if (cached_section) then
+                ! Stack the point jets to assemble the cell with one matrix product.
+                blocks(:, :, 1) = am(:, :, 1, 1)
+                call dgemm('T', 'N', nsec, nsec, size(trial_jets, 1), 1.0_dp, &
+                           trial_jets, size(trial_jets, 1), weighted_jets, size(weighted_jets, 1), &
+                           1.0_dp, blocks(1, 1, 1), nsec)
+            else if (nt == 1) then
                 blocks(:, :, 1) = sum(am(:, :, :, 1), dim=3)
             else
                 ! Batch the contractions over section and upper-triangular plane pairs.
