@@ -1136,6 +1136,7 @@ foreach(entry
         "flux_map_3d_gate_f2b test_flux_map_3d"
         "equilibrium_map_inverse_solovev test_equilibrium_map_inverse"
         "flux_map_force_balance test_flux_map_force"
+        "flux_map_benchmark_wall_toroidal_interpolation test_flux_map_qa"
         "label_ale_axisym_gate_a1 test_label_ale_axisym"
         "label_ale_3d_gate_a1 test_label_ale_3d"
         "label_ale_doublet_gate_a2a test_label_ale_doublet"
