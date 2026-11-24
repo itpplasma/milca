@@ -2610,8 +2610,8 @@ contains
         ! solve with right-hand side -g is the Schur-complement step
         ! (H_tt - H_to H_oo^-1 H_ot) d nu = -g_t; damping acts on the
         ! transversal block only and the trust region on nu only.
-        ! Stationary Newton for the position gauge uses the undamped
-        ! Hessian and measures trial gradients in its inverse.
+        ! Stationary Newton for the position gauge measures trial gradients in
+        ! the inverse Hessian. A diagonal shift can rescue a stalled search.
         type(ideal_map_t), intent(inout) :: map
         real(dp), intent(in) :: tolerance
         integer, intent(in) :: max_iterations
@@ -2634,6 +2634,7 @@ contains
         logical :: talk, accepted, factored, ofactored, lfactored, use_lu, nested
         logical :: retained, direct, pc_failed, spd
         real(dp) :: eta, ginit
+        real(dp), parameter :: stationary_min_fraction = 1.0e-3_dp, armijo = 1.0e-4_dp
         ! Quasi-Newton state (map%lagged_hessian): qn_slot 1/2: solver/lsolver
         ! holds the last factor (0: none); secant pairs qs, qy with 1/(s.y) in
         ! qrho, qcount valid ones, the newest at qhead.
@@ -2863,7 +2864,7 @@ contains
         subroutine stationary_line_search()
             ! Use the same pivoted Hessian factor for the Newton direction
             ! and every trial correction. A root can have negative curvature.
-            real(dp) :: correction(map%nred), step_norm
+            real(dp) :: correction(map%nred), step_norm, fallback_alpha
 
             t0 = wall_seconds()
             shift = 0
@@ -2889,16 +2890,10 @@ contains
             end if
             call ideal_map_expand(map, step, full)
             call trust_region()
+            fallback_alpha = 0
             do tries = 1, 24
-                report%trials = report%trials + 1
-                trial = map%x + alpha*reshape(full, shape(map%x))
-                if (map%nangle > 0) trial_angle = map%angle + alpha*full(3*map%nmode*map%nodes + 1:)
-                t0 = wall_seconds()
-                call ideal_map_energy(map, trial, trial_energy, estatus, grad, trial_minjac, trial_angle)
-                report%energy_s = report%energy_s + wall_seconds() - t0
+                call stationary_trial()
                 if (estatus == IDEAL_MAP_OK) then
-                    call ideal_map_reduce(map, grad, rhs)
-                    where (map%fixed) rhs = 0
                     t0 = wall_seconds()
                     call sparse_solve(solver, rhs, correction, sstatus)
                     report%factor_s = report%factor_s + wall_seconds() - t0
@@ -2907,7 +2902,11 @@ contains
                         return
                     end if
                     where (map%fixed) correction = 0
-                    if (norm2(correction) <= (1 - 1.0e-4_dp*alpha)*step_norm) then
+                    if (norm2(correction) <= (1 - armijo*alpha)*step_norm) then
+                        if (alpha < stationary_min_fraction) then
+                            fallback_alpha = alpha
+                            exit
+                        end if
                         step = alpha*step
                         accepted = .true.
                         return
@@ -2915,6 +2914,78 @@ contains
                 end if
                 alpha = alpha/2
             end do
+            call stationary_shifted_trial()
+            if (accepted .or. fallback_alpha <= 0) return
+            alpha = fallback_alpha
+            call ideal_map_expand(map, step, full)
+            call stationary_trial()
+            if (estatus /= IDEAL_MAP_OK) return
+            step = alpha*step
+            accepted = .true.
+        end subroutine
+
+        subroutine stationary_shifted_trial()
+            real(dp), parameter :: relative_shift = 1.0e-6_dp
+            real(dp) :: direction(map%nred), diagonal_scale, merit, slope, row_product
+            integer :: row, entry
+
+            diag = 0
+            do row = 1, map%nred
+                if (map%fixed(row)) cycle
+                do entry = matrix%rowptr(row), matrix%rowptr(row + 1) - 1
+                    if (matrix%colidx(entry) == row) diag(row) = abs(matrix%val(entry))
+                end do
+            end do
+            diagonal_scale = maxval(diag)
+            if (.not. ieee_is_finite(diagonal_scale) .or. diagonal_scale <= 0) return
+            diag = max(diag, 1.0e-12_dp*diagonal_scale)
+            shift = relative_shift*diag
+            t0 = wall_seconds()
+            call factor_masked(map, matrix, .not. map%fixed, shift, solver, factored, estatus, report)
+            if (estatus == 0) call sparse_solve(solver, -gred, direction, sstatus)
+            report%factor_s = report%factor_s + wall_seconds() - t0
+            if (estatus /= 0) return
+            if (.not. status_ok(sstatus)) return
+            where (map%fixed) direction = 0
+
+            ! Check descent in 1/2 g^T D^{-1} g with the unshifted Hessian.
+            merit = 0.5_dp*dot_product(gred, gred/diag)
+            slope = 0
+            do row = 1, map%nred
+                if (map%fixed(row)) cycle
+                row_product = 0
+                do entry = matrix%rowptr(row), matrix%rowptr(row + 1) - 1
+                    row_product = row_product + matrix%val(entry)*direction(matrix%colidx(entry))
+                end do
+                slope = slope + (gred(row)/diag(row))*row_product
+            end do
+            if (.not. ieee_is_finite(slope) .or. slope >= 0) return
+            call ideal_map_expand(map, direction, full)
+            call trust_region()
+            do tries = 1, 8
+                if (alpha < stationary_min_fraction) exit
+                call stationary_trial()
+                if (estatus == IDEAL_MAP_OK) then
+                    if (0.5_dp*dot_product(rhs, rhs/diag) <= merit + armijo*alpha*slope) then
+                        step = alpha*direction
+                        accepted = .true.
+                        return
+                    end if
+                end if
+                alpha = alpha/2
+            end do
+        end subroutine
+
+        subroutine stationary_trial()
+            report%trials = report%trials + 1
+            trial = map%x + alpha*reshape(full, shape(map%x))
+            if (map%nangle > 0) trial_angle = map%angle + alpha*full(3*map%nmode*map%nodes + 1:)
+            t0 = wall_seconds()
+            call ideal_map_energy(map, trial, trial_energy, estatus, grad, trial_minjac, trial_angle)
+            report%energy_s = report%energy_s + wall_seconds() - t0
+            if (estatus /= IDEAL_MAP_OK) return
+            call ideal_map_reduce(map, grad, rhs)
+            where (map%fixed) rhs = 0
         end subroutine
 
         subroutine add_parallel()

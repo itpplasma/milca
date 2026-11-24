@@ -94,7 +94,7 @@ contains
         type(gs_state_t) :: mesh
         real(dp), allocatable :: wall(:, :, :), gradient(:), reduced(:)
         real(dp) :: flux, fit, energy, reference, initial_error(2), final_error(2)
-        integer :: status
+        integer :: status, nodes
 
         call nested_seed_boundary(oracle, 8, 8, wall, status)
         if (status /= NESTED_SEED_OK) error stop 'sheared boundary'
@@ -109,29 +109,33 @@ contains
         if (status /= IDEAL_MAP_OK) error stop 'sheared initial stationary solve'
         call sheared_field_errors(first, first_seed, initial_error)
 
-        call ideal_seed_disk_mesh(mesh, 16, 4, status)
-        if (status /= 0) error stop 'sheared refined mesh'
-        call ideal_seed_3d_init(final, final_seed, mesh, wall, NESTED_SEED_NFP, flux, profile, &
-            status, angle_mpol=6, winslow=.true.)
-        if (status /= IDEAL_MAP_OK) error stop 'sheared refined seed'
-        allocate (gradient(final%ndof), reduced(final%nred))
-        call ideal_map_energy(final, final%x, energy, status, gradient)
-        if (status /= IDEAL_MAP_OK) error stop 'sheared refined seed gradient'
-        call ideal_map_reduce(final, gradient, reduced)
-        where (final%fixed) reduced = 0
-        reference = norm2(reduced)
-        call ideal_map_prolong(final, first, status)
-        if (status /= IDEAL_MAP_OK) error stop 'sheared stationary transfer'
-        call ideal_map_solve(final, 1e-5_dp, 48, report, status, &
-            reference_gradient=reference, stationary=.true.)
-        print '(a,i0,a,i0,a,es14.6)', 'sheared refined status ', status, &
-            ' iterations ', report%iterations, ' relative gradient ', report%gradient
-        if (status /= IDEAL_MAP_OK) error stop 'sheared refined stationary solve'
-        call sheared_field_errors(final, final_seed, final_error)
+        do nodes = 16, 20, 4
+            call ideal_seed_disk_mesh(mesh, nodes, 4, status)
+            if (status /= 0) error stop 'sheared refined mesh'
+            call ideal_seed_3d_init(final, final_seed, mesh, wall, NESTED_SEED_NFP, flux, profile, &
+                status, angle_mpol=6, winslow=.true.)
+            if (status /= IDEAL_MAP_OK) error stop 'sheared refined seed'
+            allocate (gradient(final%ndof), reduced(final%nred))
+            call ideal_map_energy(final, final%x, energy, status, gradient)
+            if (status /= IDEAL_MAP_OK) error stop 'sheared refined seed gradient'
+            call ideal_map_reduce(final, gradient, reduced)
+            where (final%fixed) reduced = 0
+            reference = norm2(reduced)
+            deallocate (gradient, reduced)
+            call ideal_map_prolong(final, first, status)
+            if (status /= IDEAL_MAP_OK) error stop 'sheared stationary transfer'
+            call ideal_map_solve(final, 1e-5_dp, 48, report, status, &
+                reference_gradient=reference, stationary=.true.)
+            print '(a,i0,a,i0,a,i0,a,es14.6)', 'sheared nodes ', nodes, ' status ', status, &
+                ' iterations ', report%iterations, ' relative gradient ', report%gradient
+            if (status /= IDEAL_MAP_OK) error stop 'sheared refined stationary solve'
+            call sheared_field_errors(final, final_seed, final_error)
+            if (any(final_error >= initial_error)) error stop 'sheared sampled errors did not decrease'
+            if (any(final_error > 5e-4_dp)) error stop 'sheared sampled error above 0.05 percent'
+            first = final
+        end do
         print '(a,2es14.6)', 'sheared initial sampled relative B, p errors ', initial_error
         print '(a,2es14.6)', 'sheared refined sampled relative B, p errors ', final_error
-        if (any(final_error >= initial_error)) error stop 'sheared sampled errors did not decrease'
-        if (any(final_error > 5e-4_dp)) error stop 'sheared sampled error above 0.05 percent'
     end subroutine
 
     subroutine sheared_field_errors(map, seed, errors)
