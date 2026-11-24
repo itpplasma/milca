@@ -23,7 +23,7 @@ program test_flux_map_force
     !!    with q = (R0 - sqrt(R0^2 - r^2))/r). J = 0, and the residual must
     !!    fall with the radial grid at the order of the cubic splines.
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use fortfem_spline_eval, only: spline_point_matrix
+    use fortfem_spline_eval, only: spline_geometry_at, spline_point_matrix
     use fortsparse_csr, only: csr_t
     use milca_nested_oracles, only: NESTED_SHEARED
     use milca_eulerian_clebsch, only: clebsch_nfp
@@ -293,7 +293,8 @@ contains
         real(dp) :: samples(2, nsamples, nt), a(2), tk, phi, rz(2), b(3), j(3), f(3), &
                     bp(3), bm(3), rp(2), rm(2), db(3, 3), amat(3, 3), ainv(3, 3), gb(3, 3), &
                     jfd(3), ffd(3), u(8), gs(3), tau(3), gp(3), pr(3), q(3), worst_j, worst_f, &
-                    scale_j
+                    scale_j, reference_jet(2, 6), label_jacobian(2, 2), label_derivative(2, 2), &
+                    up(8), um(8), worst_label, scale_label
         integer :: st, k, i, block, ip, d, wall_points
 
         clebsch_nfp = 1
@@ -316,6 +317,8 @@ contains
         worst_j = 0
         worst_f = 0
         scale_j = 0
+        worst_label = 0
+        scale_label = 0
         wall_points = 0
         do block = 1, c%space%layout_block_count
             do ip = 1, 3
@@ -325,19 +328,25 @@ contains
                 q = [points(:, ip), t0]
                 do d = 1, 3
                     q(d) = q(d) + h
-                    call field(block, q, rp, bp, u)
+                    call field(block, q, rp, bp, up)
                     q(d) = q(d) - 2*h
-                    call field(block, q, rm, bm, u)
+                    call field(block, q, rm, bm, um)
                     q(d) = q(d) + h
                     db(:, d) = (bp - bm)/(2*h)
                     amat(1, d) = (rp(1) - rm(1))/(2*h)
                     amat(3, d) = (rp(2) - rm(2))/(2*h)
+                    if (d <= 2) label_derivative(:, d) = (up(1:2) - um(1:2))/(2*h)
                 end do
                 amat(2, :) = [0.0_dp, 0.0_dp, 2*pi/clebsch_nfp]
                 call invert(amat, ainv)
                 ! gb(c, m) = d B_c/d(R, phi, Z)_m
                 gb = matmul(db, ainv)
-                call field(block, q, rp, bp, u)
+                call field(block, q, rp, bp, u, label_jacobian)
+                call spline_geometry_at(c%space, block, q(1:2), reference_jet, st)
+                if (st /= 0) error stop 'reference geometry'
+                worst_label = max(worst_label, norm2(reshape( &
+                    matmul(label_jacobian, reference_jet(:, 2:3)) - label_derivative, [4])))
+                scale_label = max(scale_label, norm2(reshape(label_derivative, [4])))
                 if (any(c%fm%is_wall(wall_functions(block, points(:, ip))))) &
                     wall_points = wall_points + 1
                 jfd = [gb(3, 2)/rz(1) - gb(2, 3), gb(1, 3) - gb(3, 1), &
@@ -358,6 +367,8 @@ contains
                    worst_j/scale_j)
         call check(worst_f < 1e-6_dp*scale_j, 'F = J X B - grad p against the same', &
                    worst_f/scale_j)
+        call check(worst_label < 1e-7_dp*scale_label, 'reference-plane label Jacobian against central differences', &
+                   worst_label/scale_label)
         call discrete_energy_derivatives()
     end subroutine discrete_state
 
@@ -403,10 +414,11 @@ contains
         if (s /= 0) error stop 'point'
     end function wall_functions
 
-    subroutine field(blk, qq, pos, bb, uu)
+    subroutine field(blk, qq, pos, bb, uu, label_jacobian)
         integer, intent(in) :: blk
         real(dp), intent(in) :: qq(3)
         real(dp), intent(out) :: pos(2), bb(3), uu(8)
+        real(dp), intent(out), optional :: label_jacobian(2, 2)
         integer, allocatable :: rowptr(:), colidx(:), d0(:)
         real(dp), allocatable :: val(:), nv(:), gn(:, :)
         integer :: comp, s
@@ -423,7 +435,7 @@ contains
                 gn(comp, :) = val
             end if
         end do
-        call flux_map3d_point(c%fm, c%base, d0, nv, gn, qq(3), profiles, pos, uu, bb)
+        call flux_map3d_point(c%fm, c%base, d0, nv, gn, qq(3), profiles, pos, uu, bb, label_jacobian)
     end subroutine field
 
     subroutine invert(m, mi)

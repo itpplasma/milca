@@ -310,7 +310,7 @@ contains
         end do
     end subroutine fm3_locate
 
-    subroutine fm3_state(c, x0, block, t, profiles, rz, u, b, status)
+    subroutine fm3_state(c, x0, block, t, profiles, rz, u, b, status, label_jacobian)
         !! Position, u and B at the point with reference-plane coordinates x0
         !! and toroidal parameter t.
         type(fm3_case_t), intent(in) :: c
@@ -319,12 +319,13 @@ contains
         procedure(flux_map_profiles) :: profiles
         real(dp), intent(out) :: rz(2), u(8), b(3)
         integer, intent(out) :: status
+        real(dp), intent(out), optional :: label_jacobian(2, 2)
         integer, allocatable :: d0(:)
         real(dp), allocatable :: nv(:), gn(:, :)
 
         call fm3_locate(c, x0, block, d0, nv, gn, status)
         if (status /= 0) return
-        call flux_map3d_point(c%fm, c%base, d0, nv, gn, t, profiles, rz, u, b)
+        call flux_map3d_point(c%fm, c%base, d0, nv, gn, t, profiles, rz, u, b, label_jacobian)
     end subroutine fm3_state
 
     subroutine fm3_axis(c, t, profiles, axis, status, x0)
@@ -373,7 +374,7 @@ contains
 
     subroutine fm3_preimage(c, t, profiles, target, x, rz, b, status)
         !! The point of the plane t that u_h maps to target: Newton in the
-        !! coordinates x of the reference plane (difference Jacobian) from
+        !! coordinates x of the reference plane from
         !! the guess x. Returns its position rz and B.
         type(fm3_case_t), intent(in) :: c
         real(dp), intent(in) :: t, target(2)
@@ -381,26 +382,19 @@ contains
         real(dp), intent(inout) :: x(2)
         real(dp), intent(out) :: rz(2), b(3)
         integer, intent(out) :: status
-        real(dp), parameter :: h = 1e-6_dp
-        real(dp) :: u(8), u1(8), u2(8), r(2), jac(2, 2), det, dx(2), q(2), bb(3), lim
+        real(dp) :: u(8), r(2), jac(2, 2), det, dx(2), lim
         integer :: it, block
 
         block = 1
+        lim = 0.05_dp*(maxval(c%samples(1, :, 1)) - minval(c%samples(1, :, 1)))
         do it = 1, 60
-            call fm3_state(c, x, block, t, profiles, rz, u, b, status)
+            call fm3_state(c, x, block, t, profiles, rz, u, b, status, jac)
             if (status /= 0) return
             r = u(1:2) - target
             if (norm2(r) < 1e-11_dp) return
-            call fm3_state(c, x + [h, 0.0_dp], block, t, profiles, q, u1, bb, status)
-            if (status /= 0) return
-            call fm3_state(c, x + [0.0_dp, h], block, t, profiles, q, u2, bb, status)
-            if (status /= 0) return
-            jac(:, 1) = (u1(1:2) - u(1:2))/h
-            jac(:, 2) = (u2(1:2) - u(1:2))/h
             det = jac(1, 1)*jac(2, 2) - jac(1, 2)*jac(2, 1)
             dx = -[jac(2, 2)*r(1) - jac(1, 2)*r(2), jac(1, 1)*r(2) - jac(2, 1)*r(1)]/det
             ! steps limited to a tenth of the section size
-            lim = 0.05_dp*(maxval(c%samples(1, :, 1)) - minval(c%samples(1, :, 1)))
             if (norm2(dx) > lim) dx = dx*lim/norm2(dx)
             x = x + dx
         end do
