@@ -2598,18 +2598,20 @@ contains
     end subroutine
 
     subroutine ideal_map_solve(map, tolerance, max_iterations, report, status, verbose, &
-                               reference_gradient)
+                               reference_gradient, stationary)
         ! Damped Newton on the reduced (nu, omega) coefficients: Levenberg-Marquardt
         ! with the Hessian diagonal as metric, shrinking the damping after every
         ! accepted step. Steps keep J > 0 and do not raise W beyond roundoff.
         ! Converged when the free reduced-gradient norm is below tolerance times
-        ! its initial value or the step stalls at roundoff.
+        ! its initial value. The energy minimizer also accepts a step stalled at roundoff.
         ! With map%omega_elimination the iteration is Newton on W_red(nu) =
         ! min_omega W(nu, omega): omega is eliminated exactly at the start and
         ! at every trial point, so its gradient vanishes and the full-system
         ! solve with right-hand side -g is the Schur-complement step
         ! (H_tt - H_to H_oo^-1 H_ot) d nu = -g_t; damping acts on the
         ! transversal block only and the trust region on nu only.
+        ! Stationary Newton for the position gauge uses the undamped
+        ! Hessian and measures trial gradients in its inverse.
         type(ideal_map_t), intent(inout) :: map
         real(dp), intent(in) :: tolerance
         integer, intent(in) :: max_iterations
@@ -2619,6 +2621,7 @@ contains
         ! Absolute gradient the tolerance refers to (default: the initial one),
         ! e.g. the first-phase gradient for a polishing solve.
         real(dp), intent(in), optional :: reference_gradient
+        logical, intent(in), optional :: stationary
         type(csr_matrix_t) :: matrix, omatrix, pmatrix
         type(sparse_solver_t) :: solver, osolver, lsolver
         type(fortsparse_status_t) :: sstatus
@@ -2636,13 +2639,19 @@ contains
         ! qrho, qcount valid ones, the newest at qhead.
         real(dp), allocatable :: qs(:, :), qy(:, :), qrho(:), gprev(:)
         integer :: qn_slot, qcount, qhead
-        logical :: quasi
+        logical :: quasi, seek_stationary
         talk = .false.
         retained = .false.
         factored = .false.; ofactored = .false.; lfactored = .false.
         if (present(verbose)) talk = verbose
         nested = map%omega_elimination .and. .not. map%position_gauge
         status = IDEAL_MAP_BAD_INPUT
+        seek_stationary = .false.
+        if (present(stationary)) seek_stationary = stationary
+        if (seek_stationary) then
+            if (.not. map%position_gauge .or. map%parallel_damping /= 0 &
+                .or. map%krylov_step .or. map%lagged_hessian) return
+        end if
         if (map%parallel_damping < 0 .or. (map%parallel_damping > 0 .and. nested)) &
             return
         allocate (grad(map%ndof), full(map%ndof), gred(map%nred), step(map%nred), &
@@ -2688,7 +2697,7 @@ contains
         status = IDEAL_MAP_NOT_CONVERGED
         report%energy = energy; report%gradient = gnorm
         do it = 1, max_iterations
-            if (.not. gnorm > tolerance*g0) then
+            if (gnorm <= tolerance*g0) then
                 status = IDEAL_MAP_OK; exit
             end if
             report%iterations = it
@@ -2699,23 +2708,26 @@ contains
                 call ideal_map_hessian(map, map%x, matrix)
                 report%hessian_s = report%hessian_s + wall_seconds() - t0
                 report%hessians = report%hessians + 1
-                !$omp parallel do default(shared) private(i, k) schedule(static)
-                do i = 1, map%nred
-                    do k = matrix%rowptr(i), matrix%rowptr(i + 1) - 1
-                        if (matrix%colidx(k) == i) diag(i) = matrix%val(k)
+                if (.not. seek_stationary) then
+                    !$omp parallel do default(shared) private(i, k) schedule(static)
+                    do i = 1, map%nred
+                        do k = matrix%rowptr(i), matrix%rowptr(i + 1) - 1
+                            if (matrix%colidx(k) == i) diag(i) = matrix%val(k)
+                        end do
                     end do
-                end do
-                !$omp end parallel do
-                scale = maxval(abs(diag), mask=.not. map%fixed)
-                if (map%parallel_damping > 0) call add_parallel()
+                    !$omp end parallel do
+                    scale = maxval(abs(diag), mask=.not. map%fixed)
+                    if (map%parallel_damping > 0) call add_parallel()
+                end if
                 accepted = .false.
-                if (nested) then
+                if (seek_stationary) then
+                    call stationary_line_search()
+                else if (nested) then
                     call nested_line_search()
                     if (status == IDEAL_MAP_SOLVE_FAILED) then
                         call cleanup(); return
                     end if
-                end if
-                if (.not. nested) then
+                else
                     eta = min(0.5_dp, sqrt(gnorm/max(ginit, tiny(1.0_dp))))
                     do tries = 1, 30
                         t0 = wall_seconds()
@@ -2815,7 +2827,7 @@ contains
                     maxval(abs(trial_angle - map%angle)))
                 map%angle = trial_angle
             end if
-            if (nested) then
+            if (nested .or. seek_stationary) then
                 energy = trial_energy; gred = rhs; minjac = trial_minjac
             else
                 t0 = wall_seconds()
@@ -2832,14 +2844,72 @@ contains
                 energy, gnorm/g0, maxval(abs(step(1::2))), maxval(abs(step(2::2))), mu, &
                 tries, alpha, norm2(gred(2:2*map%nodes:2))/gnorm, &
                 norm2(step(2:2*map%nodes:2))/norm2(step)
-            if (.not. alpha < 1 .and. .not. quasi) mu = max(mu/100, 1.0e-14_dp)
+            if (alpha >= 1 .and. .not. quasi .and. .not. seek_stationary) mu = max(mu/100, 1.0e-14_dp)
             if (report%step <= 1.0e-13_dp*maxval(abs(map%reference))) then
-                status = IDEAL_MAP_OK; exit
+                if (.not. seek_stationary) status = IDEAL_MAP_OK
+                exit
             end if
         end do
-        if (.not. gnorm > tolerance*g0) status = IDEAL_MAP_OK
+        if (gnorm <= tolerance*g0) status = IDEAL_MAP_OK
         call cleanup()
     contains
+        subroutine stationary_line_search()
+            ! Use the same pivoted Hessian factor for the Newton direction
+            ! and every trial correction. A root can have negative curvature.
+            real(dp) :: correction(map%nred), step_norm
+
+            t0 = wall_seconds()
+            shift = 0
+            call factor_masked(map, matrix, .not. map%fixed, shift, solver, factored, estatus, report)
+            if (estatus == 0) then
+                rhs = -gred
+                call sparse_solve(solver, rhs, step, sstatus)
+            end if
+            report%factor_s = report%factor_s + wall_seconds() - t0
+            if (estatus /= 0) then
+                status = IDEAL_MAP_SOLVE_FAILED
+                return
+            end if
+            if (.not. status_ok(sstatus)) then
+                status = IDEAL_MAP_SOLVE_FAILED
+                return
+            end if
+            where (map%fixed) step = 0
+            step_norm = norm2(step)
+            if (.not. ieee_is_finite(step_norm) .or. step_norm <= 0) then
+                status = IDEAL_MAP_SOLVE_FAILED
+                return
+            end if
+            call ideal_map_expand(map, step, full)
+            call trust_region()
+            do tries = 1, 24
+                report%trials = report%trials + 1
+                trial = map%x + alpha*reshape(full, shape(map%x))
+                if (map%nangle > 0) trial_angle = map%angle + alpha*full(3*map%nmode*map%nodes + 1:)
+                t0 = wall_seconds()
+                call ideal_map_energy(map, trial, trial_energy, estatus, grad, trial_minjac, trial_angle)
+                report%energy_s = report%energy_s + wall_seconds() - t0
+                if (estatus == IDEAL_MAP_OK) then
+                    call ideal_map_reduce(map, grad, rhs)
+                    where (map%fixed) rhs = 0
+                    t0 = wall_seconds()
+                    call sparse_solve(solver, rhs, correction, sstatus)
+                    report%factor_s = report%factor_s + wall_seconds() - t0
+                    if (.not. status_ok(sstatus)) then
+                        status = IDEAL_MAP_SOLVE_FAILED
+                        return
+                    end if
+                    where (map%fixed) correction = 0
+                    if (norm2(correction) <= (1 - 1.0e-4_dp*alpha)*step_norm) then
+                        step = alpha*step
+                        accepted = .true.
+                        return
+                    end if
+                end if
+                alpha = alpha/2
+            end do
+        end subroutine
+
         subroutine add_parallel()
             ! matrix += kappa_k M_par on the identical Hessian pattern; the
             ! diagonal LM metric (diag) stays that of H.

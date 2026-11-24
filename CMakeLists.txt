@@ -542,7 +542,7 @@ target_sources(milca_mhd PRIVATE src/generated/milca_ideal_map_leaves.f90
     src/generated/milca_ideal_field_angle_leaves.f90
     src/generated/milca_ideal_seed_3d_leaves.f90
     src/generated/milca_winslow_seed_leaves.f90 src/mhd/winslow_seed.f90 src/mhd/ideal_seed_3d.f90
-    src/mhd/map_3d_loop.f90 src/mhd/nested_seed_input.f90
+    src/mhd/map_3d_loop.f90 src/mhd/map_3d_force.f90 src/mhd/nested_seed_input.f90
     src/equilibrium/spline_ale.f90 src/equilibrium/label_ale.f90 src/equilibrium/label_ale_3d.f90
     src/equilibrium/label_ale_multi.f90)
 set_source_files_properties(src/generated/milca_ideal_map_leaves.f90
@@ -695,6 +695,9 @@ foreach(degree RANGE 4 6)
 endforeach()
 add_executable(test_equilibrium_3d test/test_equilibrium_3d.f90)
 target_link_libraries(test_equilibrium_3d PRIVATE milca)
+add_test(NAME equilibrium_forward_landreman_sheared COMMAND test_equilibrium_3d sheared-forward)
+set_tests_properties(equilibrium_forward_landreman_sheared PROPERTIES PROCESSORS 8 TIMEOUT 120
+    ENVIRONMENT "OMP_NUM_THREADS=8;OPENBLAS_NUM_THREADS=1;OMP_WAIT_POLICY=passive")
 # Arguments: TAU MPOL NTOR NODES DEGREE and B/p/label gates at about twice the
 # observed sampled errors recorded in docs/ideal-seed-3d.md; the P3 case also
 # solves the coarse P2 level and requires every error to decrease.

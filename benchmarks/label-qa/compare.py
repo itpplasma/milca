@@ -68,8 +68,19 @@ def curve_distance(ref, pts, nsub=16):
     return np.hypot(*(x[:, :2] - pts[:, :2]).T), x[:, 2]
 
 
+def read_summary(directory):
+    path = directory / "summary.json"
+    if not path.exists():
+        return {}
+    result = json.loads(path.read_text())
+    if result.get("converged") is False:
+        raise SystemExit(f"{directory}: equilibrium solve did not converge")
+    return result
+
+
 def main(out):
     out = pathlib.Path(out)
+    summary, reference = read_summary(out), read_summary(REF)
     ref_axis, axis = np.loadtxt(REF / "axis.txt"), np.loadtxt(out / "axis.txt")
     ra = {p: (r, z) for p, r, z in ref_axis}
     dr = max(abs(r - plane_of(ra, p)[0]) for p, r, z in axis)
@@ -91,11 +102,9 @@ def main(out):
     if (out / "iota.txt").exists():
         mi, ri = np.loadtxt(out / "iota.txt"), np.loadtxt(REF / "iota.txt")
         print(f"iota: max |diff| {np.max(np.abs(mi[:, 1] - np.interp(mi[:, 0], *ri.T))):.3e}")
-    if (out / "summary.json").exists():
-        w = json.loads((out / "summary.json").read_text()).get("energy_T2m3")
-        wr = json.loads((REF / "summary.json").read_text())["energy_T2m3"]
-        if w is not None:
-            print(f"energy: {w:.10e} T^2 m^3, relative difference {(w - wr) / wr:.3e}")
+    w, wr = summary.get("energy_T2m3"), reference.get("energy_T2m3")
+    if w is not None and wr is not None:
+        print(f"energy: {w:.10e} T^2 m^3, relative difference {(w - wr) / wr:.3e}")
 
 
 if __name__ == "__main__":

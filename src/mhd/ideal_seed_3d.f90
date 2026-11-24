@@ -17,9 +17,9 @@ module milca_ideal_seed_3d
     use milca_grad_shafranov, only: gs_state_t, initialize_gs
     use milca_winslow_seed, only: winslow_seed, WINSLOW_OK, WINSLOW_NOT_SIMPLE
     use milca_ideal_seed_3d_leaves, only: seed_complex_product, seed_boundary_mode, &
-        seed_horner, seed_toroidal_form, seed_disk_coordinates, seed_disk_boundary, &
+        seed_horner, seed_horner_jvp, seed_toroidal_form, seed_disk_coordinates, seed_disk_boundary, &
         seed_primitive_coefficient, seed_primitive_finish, seed_hermite_profile, &
-        seed_disc_coordinates, seed_disc_pullback
+        seed_disc_coordinates, seed_disc_pullback, seed_hermite_profile_jvp
     implicit none
     private
     public :: toroidal_profile_t, toroidal_seed_t, ideal_seed_3d_init, ideal_seed_angle_tables
@@ -51,28 +51,39 @@ module milca_ideal_seed_3d
         procedure :: evaluate => frozen_evaluate
     end type
 contains
-    pure subroutine profile_evaluate(profile, s, iota, pressure, integral)
+    pure subroutine profile_evaluate(profile, s, iota, pressure, integral, iota_slope, pressure_slope)
         class(toroidal_profile_t), intent(in) :: profile
         real(dp), intent(in) :: s
         real(dp), intent(out) :: iota, pressure, integral
-        real(dp) :: next, coefficient
+        real(dp), optional, intent(out) :: iota_slope, pressure_slope
+        real(dp) :: next, coefficient, slope
         integer :: k
+        if (present(iota_slope)) iota_slope = 0
+        if (present(pressure_slope)) pressure_slope = 0
         iota = 0; pressure = 0; integral = 0
         if (allocated(profile%pressure_values)) then
             call hermite_profile_evaluate(profile%pressure_knots, profile%pressure_values, &
-                profile%pressure_slopes, s, pressure, next)
+                profile%pressure_slopes, s, pressure, next, slope=pressure_slope)
         else
             do k = size(profile%pressure), 1, -1
+                if (present(pressure_slope)) then
+                    call seed_horner_jvp(s, profile%pressure(k), pressure, 1.0_dp, 0.0_dp, pressure_slope, slope)
+                    pressure_slope = slope
+                end if
                 call seed_horner(s, profile%pressure(k), pressure, next)
                 pressure = next
             end do
         end if
         if (allocated(profile%iota_values)) then
             call hermite_profile_evaluate(profile%iota_knots, profile%iota_values, &
-                profile%iota_slopes, s, iota, integral, profile%iota_primitive)
+                profile%iota_slopes, s, iota, integral, profile%iota_primitive, slope=iota_slope)
             return
         end if
         do k = size(profile%iota), 1, -1
+            if (present(iota_slope)) then
+                call seed_horner_jvp(s, profile%iota(k), iota, 1.0_dp, 0.0_dp, iota_slope, slope)
+                iota_slope = slope
+            end if
             call seed_horner(s, profile%iota(k), iota, next)
             iota = next
             call seed_primitive_coefficient(profile%iota(k), real(k, dp), coefficient)
@@ -84,13 +95,14 @@ contains
     end subroutine
 
     pure subroutine hermite_profile_evaluate(knots, values, slopes, s, value, primitive, &
-            cumulative)
+            cumulative, slope)
         ! Value and integral from 0 of the piecewise cubic Hermite profile at s;
         ! cumulative(k) is the integral up to knots(k) when known. Outside
         ! [knots(1), knots(K)] the end pieces continue as cubics.
         real(dp), intent(in) :: knots(:), values(:), slopes(:), s
         real(dp), intent(out) :: value, primitive
         real(dp), intent(in), optional :: cumulative(:)
+        real(dp), intent(out), optional :: slope
         real(dp) :: h, piece, unused
         integer :: low, high, mid, k
         low = 1; high = size(knots)
@@ -105,6 +117,10 @@ contains
         h = knots(low + 1) - knots(low)
         call seed_hermite_profile((s - knots(low))/h, h, values(low), slopes(low), &
             values(low + 1), slopes(low + 1), value, piece)
+        if (present(slope)) then
+            call seed_hermite_profile_jvp((s - knots(low))/h, h, values(low), slopes(low), &
+                values(low + 1), slopes(low + 1), 1/h, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, slope, unused)
+        end if
         if (present(cumulative)) then
             primitive = cumulative(low) + piece
             return

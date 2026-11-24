@@ -379,18 +379,27 @@ contains
         jac(2, 2) = sum(pm*vz*st%xm*c)
     end subroutine vmec_state_eval
 
-    subroutine vmec_state_invert(st, rz, zeta, rho, theta, status)
+    subroutine vmec_state_invert(st, rz, zeta, rho, theta, status, rho_max)
         !! (rho, theta) with (R, Z)(rho, theta, zeta) = rz by damped Newton
         !! from the given (rho, theta); rho may exceed 1 slightly (the last
-        !! surface extrapolated). status 0, or 1 when Newton fails.
+        !! surface extrapolated). rho_max, when supplied, limits extrapolation
+        !! to the intended radial branch. status 0, or 1 when Newton fails.
         type(vmec_state_t), intent(in) :: st
         real(dp), intent(in) :: rz(2), zeta
         real(dp), intent(inout) :: rho, theta
         integer, intent(out) :: status
+        real(dp), intent(in), optional :: rho_max
         real(dp) :: r, z, lam, jac(2, 2), f(2), d(2), det, a, fn, rt, tt, gn, scale
+        real(dp) :: limit
         integer :: it, k
 
         status = 1
+        limit = huge(1.0_dp)
+        if (present(rho_max)) then
+            limit = rho_max
+            if (.not. limit > 0) return
+            rho = min(max(rho, 0.0_dp), limit)
+        end if
         call vmec_state_eval(st, rho, theta, zeta, r, z, lam, jac)
         f = [r, z] - rz
         fn = norm2(f)
@@ -410,6 +419,10 @@ contains
                 if (rt < 0) then
                     rt = -rt
                     tt = tt + acos(-1.0_dp)
+                end if
+                if (rt > limit) then
+                    a = a/2
+                    cycle
                 end if
                 call vmec_state_eval(st, rt, tt, zeta, r, z, lam, jac)
                 gn = norm2([r, z] - rz)

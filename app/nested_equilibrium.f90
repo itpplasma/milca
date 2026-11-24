@@ -11,9 +11,11 @@ program nested_equilibrium
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
         ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate
     use milca_ideal_map, only: ideal_map_t, ideal_map_solve, ideal_map_solve_report_t, &
-        ideal_map_energy, ideal_map_reduce, ideal_map_prolong_correction, ideal_map_freeze, &
-        ideal_map_sensitivity
+        ideal_map_energy, ideal_map_reduce, ideal_map_prolong, ideal_map_prolong_correction, &
+        ideal_map_freeze, ideal_map_sensitivity, IDEAL_MAP_OK
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
+    use milca_map_3d_force, only: map_3d_force, map_3d_force_field
+    use milca_flux_map_force, only: flux_map_force_t, flux_map_force_print
     use milca_equilibrium_state, only: EQ_VALUES, EQ_BR, EQ_BZ, EQ_BPHI, EQ_P
     use milca_grad_shafranov, only: gs_state_t
     use milca_curved_triangle, only: triangle_locate
@@ -53,7 +55,7 @@ program nested_equilibrium
     integer, parameter :: store_knots = 129, iota_nodes_max = 32
     integer, parameter :: mesh_nodes(7) = [16, 24, 32, 48, 64, 96, 128]
     logical :: automatic_ntor, automatic_mesh, automatic_iota
-    logical :: mesh_confirmed, modes_confirmed, iota_confirmed
+    logical :: mesh_confirmed, modes_confirmed, iota_confirmed, converged
     logical :: iota_vanishes = .false.
     ! the solved map of the level folds at the volume-integral points
     logical :: level_folded = .false.
@@ -81,7 +83,7 @@ program nested_equilibrium
     real(dp) :: profile_knots(knot_max), iota_values(knot_max), iota_slopes(knot_max)
     real(dp) :: pressure_values(knot_max), pressure_slopes(knot_max)
     real(dp) :: current_values(knot_max), current_slopes(knot_max)
-    logical :: prescribe_current
+    logical :: prescribe_current, stationary
     integer :: max_current_iterations
     real(dp) :: current_tolerance, current_error, solve_tolerance
     integer :: current_iterations
@@ -95,6 +97,7 @@ program nested_equilibrium
     type(toroidal_seed_t) :: seed
     type(toroidal_profile_t) :: profile
     type(ideal_map_solve_report_t) :: report
+    integer :: newton_total = 0 ! Newton steps of all fixed-boundary solves
     character(256) :: message
     ! Free boundary: coil groups of mgrid_file scaled by extcur, mgrid
     ! interpolation degree in (R, Z), and the clearance of the coupling
@@ -125,7 +128,7 @@ program nested_equilibrium
     real(dp) :: bem_f_vac, bem_f_spread
     namelist /nested_input/ nfp, mpol, ntor, rbc, rbs, zbc, zbs, phiedge, &
         iota, pressure, boundary_nodes, degree, tolerance, max_iterations, angle_mpol, &
-        ladder_nodes, ladder_degree, prescribe_current, current, max_current_iterations, &
+        ladder_nodes, ladder_degree, stationary, prescribe_current, current, max_current_iterations, &
         current_tolerance, iota_type, pressure_type, &
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
@@ -136,6 +139,7 @@ program nested_equilibrium
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
     boundary_nodes = -1; degree = 3; tolerance = 1e-8_dp; max_iterations = 200
     angle_mpol = -1; ladder_nodes = 0; ladder_degree = 0
+    stationary = .false.
     prescribe_current = .false.; current = 0; max_current_iterations = 30
     current_tolerance = 1e-5_dp
     map_ntor = -1; fourier_tolerance = 1e-4_dp
@@ -168,6 +172,8 @@ program nested_equilibrium
     if (.not. iota_tolerance > 0) error stop 'nested_equilibrium: iota_tolerance'
     if (iota_nodes > iota_nodes_max .or. (iota_nodes >= 0 .and. iota_nodes < 2)) &
         error stop 'nested_equilibrium: iota_nodes from 2 to 32, or -1'
+    if (stationary .and. (free_boundary .or. prescribe_current)) &
+        error stop 'nested_equilibrium: stationary requires a fixed boundary and prescribed iota'
     if (free_boundary .and. len_trim(mgrid_file) == 0) &
         error stop 'nested_equilibrium: free_boundary needs mgrid_file'
     if (free_boundary .and. .not. coupling_margin > 0) &
@@ -275,12 +281,12 @@ program nested_equilibrium
     call result%create(run)
     call result%attribute('physical_model', merge('free-boundary ', 'fixed-boundary', &
         free_boundary)//' nested ideal MHD, prescribed iota')
-    call result%attribute('converged', merge('true ', 'false', &
-        solve_status == 0 .and. residual <= tolerance .and. current_error <= current_tolerance &
+    converged = solve_status == 0 .and. residual <= tolerance .and. current_error <= current_tolerance &
         .and. .not. iota_vanishes &
         .and. (.not. automatic_ntor .or. fourier_error <= fourier_tolerance) &
         .and. (.not. automatic_mesh .or. mesh_error <= mesh_tolerance) &
-        .and. (.not. automatic_iota .or. iota_error <= iota_tolerance)))
+        .and. (.not. automatic_iota .or. iota_error <= iota_tolerance)
+    call result%attribute('converged', merge('true ', 'false', converged))
     call result%write('volume_p', volume, 'm^3', 'plasma volume')
     call result%write('aminor_p', sqrt(area/pi), 'm', 'sqrt of mean cross-section area / pi')
     call result%write('rmajor_p', volume/(2*pi*area), 'm', 'volume / (2 pi mean area)')
@@ -341,6 +347,7 @@ program nested_equilibrium
         'final solve: Cholesky failures refactored by pivoted LU')
     call result%write('analyses', real(report%analyses, dp), '1', 'final solve: symbolic analyses')
     call result%close()
+    if (.not. free_boundary) call benchmark_export()
 
     block
         integer :: venv
@@ -365,6 +372,158 @@ contains
         stop
     end subroutine
 
+    subroutine benchmark_export()
+        ! Diagnostic for cross-code benchmarks (benchmarks/cemv-vs-vmec): with
+        ! MILCA_NESTED_EXPORT=DIR the sizes, the force balance J X B - grad p
+        ! on the measure of the flux map (milca_map_3d_force) are printed and
+        ! axis.txt, surface_s0.25.txt, surface_s0.50.txt, summary.json are
+        ! written to DIR in the layout of benchmarks/label-qa/compare.py (64
+        ! cylindrical planes of one period, 128 reference angles).
+        integer, parameter :: nout = 64, nray = 128
+        character(512) :: dir
+        type(flux_map_force_t) :: force
+        real(dp) :: centre(2), y(2), xi(2), point(3), values(EQ_VALUES), level, orientation
+        real(dp) :: rays(2, nray)
+        integer :: cells(nray)
+        integer :: length, u, j, q, l, local, cell
+        call get_environment_variable('MILCA_NESTED_EXPORT', dir, length)
+        if (length == 0) return
+        print '(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,f5.1,a,i0,a,i0)', 'benchmark: degree ', degree, &
+            '  boundary_nodes ', boundary_nodes, '  map_ntor ', ntor_level, '  cells ', &
+            map%cells, '  coefficients ', map%ndof, '  unknowns ', count(.not. map%fixed), &
+            '  sigma', map%sigma, '  Newton (first ladder) ', newton_total, &
+            '  Newton (final solve) ', report%iterations
+        orientation = benchmark_field_orientation()
+        call map_3d_force(map, seed, cemv_profiles, orientation, 10, force, local)
+        if (local /= 0) call fail('benchmark: invalid map sample in force diagnostic')
+        call flux_map_force_print(force, 'Lagrangian map')
+        print '(a,5f10.3)', 'benchmark seconds: energy, Hessian, linear, symbolic, numeric ', &
+            report%energy_s, report%hessian_s, report%factor_s, report%analysis_s, report%numeric_s
+        print '(a,5i8)', 'benchmark counts: Hessians, factorizations, analyses, Krylov solves and steps ', &
+            report%hessians, report%factorizations, report%analyses, report%krylov_solves, report%krylov_iterations
+        call execute_command_line('mkdir -p '//trim(dir))
+        centre = seed%centre
+        open (newunit=u, file=trim(dir)//'/axis.txt', status='replace')
+        write (u, '(a)') '# phi R Z'
+        call locate(centre, cell, xi)
+        if (cell == 0) error stop 'benchmark export: axis'
+        do j = 0, nout - 1
+            call map_3d_sample(map, seed, cell, xi, 2*pi*j/(nfp*nout), point, values, local)
+            write (u, '(3es24.16)') point(3), point(1), point(2)
+        end do
+        close (u)
+        do l = 1, 2
+            level = 0.25_dp*l
+            open (newunit=u, file=trim(dir)//merge('/surface_s0.25.txt', '/surface_s0.50.txt', &
+                l == 1), status='replace')
+            write (u, '(a)') '# phi angle R Z |B|'
+            do q = 1, nray
+                y = centre + sqrt(level)*seed%axes*[cos(2*pi*(q - 1)/nray), sin(2*pi*(q - 1)/nray)]
+                call locate(y, cells(q), rays(:, q))
+                if (cells(q) == 0) error stop 'benchmark export: surface point'
+            end do
+            do j = 0, nout - 1
+                do q = 1, nray
+                    call map_3d_sample(map, seed, cells(q), rays(:, q), 2*pi*j/(nfp*nout), &
+                        point, values, local)
+                    if (local /= 0) cycle
+                    write (u, '(5es24.16)') point(3), 2*pi*(q - 1)/nray, point(1), point(2), &
+                        norm2(values([EQ_BR, EQ_BZ, EQ_BPHI]))
+                end do
+            end do
+            close (u)
+        end do
+        open (newunit=u, file=trim(dir)//'/summary.json', status='replace')
+        ! the energy of the flux map and of the references: int (B^2/2 - mu0 p) dV
+        write (u, '(a,es24.16,a,i0,a,i0,3a)') '{"energy_T2m3": ', magnetic - kinetic, &
+            ', "unknowns": ', count(.not. map%fixed), ', "newton_steps": ', &
+            max(newton_total, report%iterations), ', "converged": ', trim(merge('true ', 'false', converged)), '}'
+        close (u)
+    end subroutine
+
+    real(dp) function benchmark_field_orientation() result(orientation)
+        ! Match the frozen-in field independently of force balance.
+        real(dp), parameter :: xi(2) = [0.3_dp, 0.2_dp], signs(2) = [1.0_dp, -1.0_dp]
+        real(dp) :: b(3), j(3), f(3), point(3), values(EQ_VALUES), reference(3)
+        real(dp) :: error(2), polarity(2), phi
+        integer :: e, k, o, local
+
+        error = 0
+        do e = 1, map%cells, max(1, map%cells/50)
+            do k = 0, 2
+                phi = 2*pi*k/(nfp*3.7_dp)
+                call map_3d_sample(map, seed, e, xi, phi, point, values, local)
+                if (local /= 0) call fail('benchmark: cannot sample the frozen-in field')
+                reference = values([EQ_BR, EQ_BPHI, EQ_BZ])
+                do o = 1, 2
+                    call map_3d_force_field(map, seed, cemv_profiles, signs(o), e, xi, phi, b, j, f, local)
+                    if (local /= 0) call fail('benchmark: force diagnostic requires a cylindrical chart')
+                    if (e == 1 .and. k == 0) polarity(o) = sign(1.0_dp, b(2)*reference(2))
+                    error(o) = max(error(o), norm2(polarity(o)*b - reference)/norm2(reference))
+                end do
+            end do
+        end do
+        print '(a,2es11.3)', 'benchmark field errors for the two orientations ', error
+        o = minloc(error, dim=1)
+        if (.not. error(o) < 1e-10_dp) call fail('benchmark: inconsistent magnetic field')
+        orientation = signs(o)
+    end function benchmark_field_orientation
+
+    subroutine perturb_start()
+        ! Diagnostic for convergence basins (benchmarks/cemv-vs-vmec):
+        ! MILCA_NESTED_START_SHIFT=d moves the interior of the start by
+        ! d (1 - s) in R (the axis by d metres, the wall stays);
+        ! MILCA_NESTED_START_ANGLE=a starts the boundary field-line angle with
+        ! eta = a sin(theta) at the wall (the m = 1, n = 0 mode).
+        character(64) :: value
+        real(dp) :: shift, angle, s
+        integer :: length, a, i
+        call get_environment_variable('MILCA_NESTED_START_SHIFT', value, length)
+        if (length > 0) then
+            read (value, *) shift
+            do a = 1, map%nodes
+                if (map%boundary(a)) cycle
+                s = sum(((map%reference(:, a) - seed%centre)/seed%axes)**2)
+                map%x(1, 1, a) = map%x(1, 1, a) + shift*(1 - s)
+            end do
+        end if
+        call get_environment_variable('MILCA_NESTED_START_ANGLE', value, length)
+        if (length > 0 .and. map%nangle > 0) then
+            read (value, *) angle
+            do i = 1, size(map%angle_m)
+                if (map%angle_m(i) == 1 .and. map%angle_n(i) == 0) map%angle(2*i) = angle
+            end do
+        end if
+    end subroutine
+
+    subroutine locate(y, cell, xi)
+        ! cell and local coordinates of a reference point (0: not found)
+        real(dp), intent(in) :: y(2)
+        integer, intent(out) :: cell
+        real(dp), intent(out) :: xi(2)
+        integer :: e, local
+        cell = 0
+        do e = 1, map%cells
+            call triangle_locate(map%reference(:, map%conn(:, e)), y, xi, local)
+            if (local /= 0) cycle
+            if (minval([xi, 1 - sum(xi)]) < -1e-10_dp) cycle
+            cell = e
+            return
+        end do
+    end subroutine
+
+    subroutine cemv_profiles(s, tau, gp, p)
+        ! This force diagnostic needs only the first derivatives in s.
+        real(dp), intent(in) :: s
+        real(dp), intent(out) :: tau(3), gp(3), p(3)
+        real(dp) :: iota_value, pressure_value, integral, iota_slope, pressure_slope
+
+        call profile%evaluate(s, iota_value, pressure_value, integral, iota_slope, pressure_slope)
+        tau = [phiedge/pi, 0.0_dp, 0.0_dp]
+        gp = phiedge/(2*pi)*[iota_value, iota_slope, 0.0_dp]
+        p = [pressure_value, pressure_slope, 0.0_dp]
+    end subroutine
+
     subroutine mesh_ladder()
         ! Resolution ladder (docs/equilibrium-harness.md): each level starts from
         ! its own seed plus the correction of the solved coarser level and stops
@@ -381,14 +540,31 @@ contains
             if (status /= 0) call fail('the seed is not admitted (folded or invalid input)')
             reference = free_gradient()
             seed_x = map%x
+            call perturb_start()
             if (step > 1) then
-                call ideal_map_prolong_correction(map, coarse, coarse_seed, status)
-                if (status /= 0) call fail('the resolution ladder correction failed')
+                call continue_fixed_level(coarse, coarse_seed)
             end if
             call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-                reference_gradient=reference)
+                reference_gradient=reference, stationary=stationary)
+            if (stationary .and. step <= steps .and. solve_status /= IDEAL_MAP_OK) &
+                call fail('the coarse stationary solve did not converge')
+            newton_total = newton_total + report%iterations
             coarse = map; coarse_seed = seed_x
         end do
+    end subroutine
+
+    subroutine continue_fixed_level(start_map, start_seed)
+        type(ideal_map_t), intent(in) :: start_map
+        real(dp), intent(in) :: start_seed(:, :, :)
+        integer :: local
+
+        if (stationary) then
+            ! A branch start needs both the solved geometry and the field angle.
+            call ideal_map_prolong(map, start_map, local)
+        else
+            call ideal_map_prolong_correction(map, start_map, start_seed, local)
+        end if
+        if (local /= IDEAL_MAP_OK) call fail('the resolution level transfer failed')
     end subroutine
 
     subroutine free_boundary_setup()
@@ -1054,11 +1230,10 @@ contains
         reference = free_gradient()
         seed_x = map%x
         if (continued) then
-            call ideal_map_prolong_correction(map, previous_map, previous_seed, status)
-            if (status /= 0) call fail('the resolution level correction failed')
+            call continue_fixed_level(previous_map, previous_seed)
         end if
         call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-            reference_gradient=reference)
+            reference_gradient=reference, stationary=stationary)
         call finish_level()
         ! The energy sees the map only at its quadrature points, and the
         ! continued start can reach a stationary point that folds between
@@ -1072,7 +1247,7 @@ contains
             reference = free_gradient()
             seed_x = map%x
             call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-                reference_gradient=reference)
+                reference_gradient=reference, stationary=stationary)
             call finish_level()
         end if
     end subroutine
@@ -1586,6 +1761,9 @@ contains
 
     subroutine init_seed(status)
         integer, intent(out) :: status
+        character(8) :: lagged
+        integer :: length
+
         ! every plane from the Winslow map of its cross-section
         if (angle_mpol >= 0) then
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
@@ -1594,6 +1772,8 @@ contains
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
                 status, winslow=.true.)
         end if
+        call get_environment_variable('MILCA_NESTED_BENCHMARK_LAGGED', lagged, length)
+        if (status == 0 .and. length > 0) map%lagged_hessian = lagged == '1'
     end subroutine
 
     subroutine resolve(local)
