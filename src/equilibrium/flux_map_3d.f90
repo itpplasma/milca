@@ -331,7 +331,7 @@ contains
             end do
             nl = nsec*nt
             if (allocated(sx)) deallocate (sx, gsec, hs, idx, gloc)
-            allocate (sx(8, nsec, 2), gsec(nsec, 2), hs(nsec, nsec), idx(nl), gloc(nl))
+            allocate (sx(8, nsec, 2), gsec(nsec, 2), hs(8, nsec), idx(nl), gloc(nl))
             if (present(hessian)) then
                 if (allocated(am)) deallocate (am, blocks)
                 allocate (am(nsec, nsec, nqt, 4), blocks(nsec, nsec, nb))
@@ -433,12 +433,17 @@ contains
                         end do
                     end do
                     ! blocks (1,1), (1,2), (2,2); (2,1) is the transpose of (1,2)
-                    am(:, :, m, 1) = am(:, :, m, 1) + &
-                        wt*matmul(transpose(sx(:, :, 1)), matmul(h8, sx(:, :, 1)))
-                    am(:, :, m, 2) = am(:, :, m, 2) + &
-                        wt*matmul(transpose(sx(:, :, 1)), matmul(h8, sx(:, :, 2)))
-                    am(:, :, m, 4) = am(:, :, m, 4) + &
-                        wt*matmul(transpose(sx(:, :, 2)), matmul(h8, sx(:, :, 2)))
+                    hs = matmul(h8, sx(:, :, 1))
+                    call dgemm('T', 'N', nsec, nsec, 8, wt, sx(1, 1, 1), 8, &
+                               hs, 8, 1.0_dp, am(1, 1, m, 1), nsec)
+                    ! The zero Fourier mode has no toroidal derivatives.
+                    if (nt > 1) then
+                        hs = matmul(h8, sx(:, :, 2))
+                        call dgemm('T', 'N', nsec, nsec, 8, wt, sx(1, 1, 1), 8, &
+                                   hs, 8, 1.0_dp, am(1, 1, m, 2), nsec)
+                        call dgemm('T', 'N', nsec, nsec, 8, wt, sx(1, 1, 2), 8, &
+                                   hs, 8, 1.0_dp, am(1, 1, m, 4), nsec)
+                    end if
                     if (sig > 0) then
                         ! second derivatives of the wall part, contracted with wg
                         sn = sin(th)
@@ -458,7 +463,7 @@ contains
                                 a = ix(i)
                                 am(a, b, m, 1) = am(a, b, m, 1) + wt*(k11*lam(i)*lam(j) &
                                                  + lam(i)*lm(j) + lam(j)*lm(i))
-                                am(a, b, m, 2) = am(a, b, m, 2) + wt*k12*lam(i)*lam(j)
+                                if (nt > 1) am(a, b, m, 2) = am(a, b, m, 2) + wt*k12*lam(i)*lam(j)
                             end do
                         end do
                     end if
@@ -475,13 +480,16 @@ contains
                 gradient(idx(i)) = gradient(idx(i)) + gloc(i)
             end do
             if (.not. present(hessian)) cycle
-            ! Batch the four toroidal contractions over all section pairs
-            ! and upper-triangular plane pairs.
-            do m = 1, nqt
-                am(:, :, m, 3) = transpose(am(:, :, m, 2))
-            end do
-            call dgemm('N', 'N', nsec**2, nb, 4*nqt, 1.0_dp, am(1, 1, 1, 1), nsec**2, &
-                       products(1, 1, 1), 4*nqt, 0.0_dp, blocks(1, 1, 1), nsec**2)
+            if (nt == 1) then
+                blocks(:, :, 1) = sum(am(:, :, :, 1), dim=3)
+            else
+                ! Batch the contractions over section and upper-triangular plane pairs.
+                do m = 1, nqt
+                    am(:, :, m, 3) = transpose(am(:, :, m, 2))
+                end do
+                call dgemm('N', 'N', nsec**2, nb, 4*nqt, 1.0_dp, am(1, 1, 1, 1), nsec**2, &
+                           products(1, 1, 1), 4*nqt, 0.0_dp, blocks(1, 1, 1), nsec**2)
+            end if
             ! local entries (ia, ib), ia <= ib (a pair once; the diagonal blocks
             ! hold both orders, only ia <= ib is taken), to global (min, max)
             nz = (cell - 1)*blk
