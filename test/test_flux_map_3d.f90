@@ -266,10 +266,12 @@ contains
         call check(st == 0, 'Newton converges')
         print '(a,i0,a,i0,a,l1)', '  Hessian inertia: negative ', c%fm%negative_eigenvalues, &
             ', zero ', c%fm%zero_eigenvalues, '  reliable ', c%fm%inertia_reliable
-        ! the Solovev states are saddles of W too: negative eigenvalues of the
-        ! dense spectrum of the dumped Hessian (hessian_spectrum.py): 2, 2, 4
-        ! at 2, 4, 8 cells
-        if (degree == 2) &
+        ! hessian_spectrum.py gives different inertia for one and three planes.
+        if (degree == 2 .and. nt == 1) &
+            call check(c%fm%inertia_reliable .and. c%fm%zero_eigenvalues == 0 .and. &
+                   c%fm%negative_eigenvalues == 0, &
+                   'One-plane Hessian is positive definite after the rotation constraint')
+        if (degree == 2 .and. nt == 3) &
             call check(c%fm%inertia_reliable .and. c%fm%zero_eigenvalues == 0 .and. &
                    (n /= 2 .or. c%fm%negative_eigenvalues == 2) .and. &
                    (n /= 4 .or. c%fm%negative_eigenvalues == 2) .and. &

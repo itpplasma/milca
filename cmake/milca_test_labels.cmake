@@ -1133,6 +1133,7 @@ foreach(entry
         "gauge_moments_rigid_motions test_gauge_moments"
         "flux_map_axisym_gate_f1 test_flux_map_axisym"
         "flux_map_3d_gate_f2a test_flux_map_3d"
+        "flux_map_3d_axisymmetric_gate_f2a test_flux_map_3d"
         "flux_map_3d_gate_f2b test_flux_map_3d"
         "equilibrium_map_inverse_solovev test_equilibrium_map_inverse"
         "flux_map_force_balance test_flux_map_force"
