@@ -25,8 +25,9 @@ module milca_flux_map_3d
     use fortfem_spline_eval, only: spline_quadrature_t
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_t_basis
     use fortsparse_csr, only: csr_t
-    use fortsparse_csc, only: csc_t, csc_from_triplet
-    use fortsparse_status, only: fortsparse_status_t
+    use fortsparse_csc, only: csc_t, csc_from_triplet, csc_triplet_plan_t, &
+        csc_triplet_plan_build, csc_triplet_plan_apply
+    use fortsparse_status, only: fortsparse_status_t, status_ok
     use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp, clebsch_exact_field
     use fortfem_constrained_newton, only: newton_constraints_t, newton_report_t, &
         newton_constraints_init
@@ -34,6 +35,11 @@ module milca_flux_map_3d
     use milca_flux_map_leaves, only: flux_map_energy_3d, flux_map_gauge_moment
     implicit none
     private
+
+    type :: flux_map3d_hessian_plan_t
+        type(csc_triplet_plan_t) :: triplets
+        logical :: ready = .false.
+    end type flux_map3d_hessian_plan_t
 
     type, public :: flux_map3d_t
         integer :: n0 = 0, nt = 0
@@ -186,7 +192,7 @@ contains
     end subroutine locals
 
     subroutine flux_map3d_system(fm, derham, quad, profiles, plane_nodes, z, energy, gradient, &
-                                 hessian, exact_field, field_error, gauge_moment)
+                                 hessian, exact_field, field_error, gauge_moment, hessian_plan)
         !! Energy at z; with gradient and hessian also the derivatives. The
         !! Hessian is symmetric and only its UPPER triangle (columns >= row,
         !! diagonal included) is assembled, by rows (CSR): symmetric by
@@ -210,6 +216,7 @@ contains
         type(csr_t), intent(out), optional :: hessian
         procedure(clebsch_exact_field), optional :: exact_field
         real(dp), intent(out), optional :: field_error(2), gauge_moment(:)
+        type(flux_map3d_hessian_plan_t), intent(inout), optional :: hessian_plan
         real(dp), allocatable :: v0(:, :, :), gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :), &
                                  products(:, :, :), gloc(:), blocks(:, :, :), vals(:), zx(:, :), zy(:, :), &
                                  ax(:), ay(:), bx(:), by(:), lam(:), mw(:, :), gsec(:, :), &
@@ -222,7 +229,7 @@ contains
                     vm(3), et(3), c3(3), gs(3), bv(3), bx3(3), ferr(2), sn, cs
         integer :: n0, nt, ntot, nqt, cell, q, p, m, i, j, k, a, b, c1, nloc, nsec, nl, &
                    nz, blk, la, lb, nlmax, ia, ib, ng, nb, pair
-        logical :: derivs
+        logical :: derivs, cached
         type(csc_t) :: mm
         type(fortsparse_status_t) :: info
         interface
@@ -241,6 +248,8 @@ contains
         nqt = fm%toroidal_points*nt + 2
         nb = nt*(nt + 1)/2
         derivs = present(gradient)
+        cached = .false.
+        if (present(hessian_plan)) cached = hessian_plan%ready
         energy = 0
         ferr = 0
         nlmax = 2*(derham%degree + 1)**2*nt
@@ -263,10 +272,12 @@ contains
             allocate (gradient(2*ntot), source=0.0_dp)
             if (present(hessian)) then
                 nz = size(quad%point_offset)*blk
-                allocate (rows(nz + size(fm%fixed)), cols(nz + size(fm%fixed)), &
-                          vals(nz + size(fm%fixed)))
-                rows = 1
-                cols = 1
+                allocate (vals(nz + size(fm%fixed)))
+                if (.not. cached) then
+                    allocate (rows(size(vals)), cols(size(vals)))
+                    rows = 1
+                    cols = 1
+                end if
                 vals = 0
                 allocate (products(nqt, 4, nb))
                 pair = 0
@@ -284,7 +295,7 @@ contains
         !$omp parallel do schedule(dynamic) default(private) &
         !$omp shared(fm, derham, quad, plane_nodes, z, gradient, rows, cols, vals, n0, nt, &
         !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error, ltab, ng, &
-        !$omp        gauge_moment, nb, products) &
+        !$omp        gauge_moment, nb, products, cached) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
             call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
@@ -467,8 +478,10 @@ contains
                         do i = 1, merge(j, nsec, la == lb)
                             ia = (la - 1)*nsec + i
                             nz = nz + 1
-                            rows(nz) = min(idx(ia), idx(ib))
-                            cols(nz) = max(idx(ia), idx(ib))
+                            if (.not. cached) then
+                                rows(nz) = min(idx(ia), idx(ib))
+                                cols(nz) = max(idx(ia), idx(ib))
+                            end if
                             vals(nz) = blocks(i, j, pair)
                         end do
                     end do
@@ -482,17 +495,29 @@ contains
         shift = maxval(abs(vals(:nz)))
         do k = 1, size(fm%fixed)
             nz = nz + 1
-            rows(nz) = fm%fixed(k)
-            cols(nz) = fm%fixed(k)
+            if (.not. cached) then
+                rows(nz) = fm%fixed(k)
+                cols(nz) = fm%fixed(k)
+            end if
             vals(nz) = shift
         end do
-        call csc_from_triplet(2*ntot, 2*ntot, cols(:nz), rows(:nz), vals(:nz), mm, info)
-        if (info%code /= 0) error stop 'flux map 3D Hessian triplets'
+        if (present(hessian_plan)) then
+            if (.not. cached) then
+                call csc_triplet_plan_build(2*ntot, 2*ntot, cols, rows, hessian_plan%triplets, info)
+                if (.not. status_ok(info)) error stop 'flux map 3D Hessian pattern'
+                deallocate (rows, cols)
+                hessian_plan%ready = .true.
+            end if
+            call csc_triplet_plan_apply(hessian_plan%triplets, vals, mm, info)
+        else
+            call csc_from_triplet(2*ntot, 2*ntot, cols, rows, vals, mm, info)
+        end if
+        if (.not. status_ok(info)) error stop 'flux map 3D Hessian triplets'
         hessian%nrow = 2*ntot
         hessian%ncol = 2*ntot
-        hessian%row_ptr = mm%col_ptr
-        hessian%col = mm%row_idx
-        hessian%val = mm%val
+        call move_alloc(mm%col_ptr, hessian%row_ptr)
+        call move_alloc(mm%row_idx, hessian%col)
+        call move_alloc(mm%val, hessian%val)
     end subroutine flux_map3d_system
 
     subroutine flux_map3d_point(fm, plane_nodes, d0, nv, gn, t, profiles, rz, u, b)
@@ -574,6 +599,7 @@ contains
         integer, intent(in) :: max_steps
         integer, intent(out) :: status
         type(newton_report_t) :: report
+        type(flux_map3d_hessian_plan_t) :: hessian_plan
         real(dp), allocatable :: z(:)
 
         call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, fm%z, fm%gauge)
@@ -607,7 +633,7 @@ contains
 
             if (present(hessian)) then
                 call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g, &
-                                       hessian)
+                                       hessian, hessian_plan=hessian_plan)
             else if (present(gradient)) then
                 call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g)
             else
