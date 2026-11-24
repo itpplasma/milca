@@ -8,6 +8,8 @@
 !!                   2 pi/oint G dtheta/(v_par iota B) at s* as the mass goes
 !!                   to zero at fixed speed; the correction is quadratic in the
 !!                   mass (orbit width) because the field is up-down symmetric;
+!!   finite_bounce   radial quadrature of a full trapped return, including the
+!!                   poloidal reversal beyond the mirror angle;
 !!   invariants      every orbit point carries the energy of the orbit;
 !!   shear           the precession of a trapped orbit with magnetic shear is the
 !!                   thin bounce average of the binormal drift with the
@@ -47,6 +49,7 @@ program test_boozer_orbit
     select case (trim(check))
     case ('deeply_trapped'); ok = deeply_trapped()
     case ('thin_bounce'); ok = thin_bounce()
+    case ('finite_bounce'); ok = finite_bounce()
     case ('invariants'); ok = invariants()
     case ('pitch_map'); ok = pitch_map()
     case ('shear'); ok = shear()
@@ -115,6 +118,29 @@ contains
             .and. close('second-order convergence', (ob(1) - ob(2))/(ob(2) - ob(3)), 4.0_dp, &
             5e-2_dp)
     end function thin_bounce
+
+    logical function finite_bounce() result(ok)
+        type(orbit_particle_t) :: p
+        real(dp) :: ob, oz
+        logical :: trapped
+        integer :: st, sign_q
+
+        p = particle(1.0_dp, 0.97_dp, 0.0_dp)
+        ! At fixed P_zeta, solve E = (q rho B)^2/(2 m) + mu B for B(s).
+        ! The endpoints solve B(s) = B(s, 0). For I=0, the independently
+        ! integrated half period uses |dt/ds| = |q psi'/dE_dtheta|.
+        ok = .true.
+        do sign_q = 1, -1, -2
+            p%charge = sign_q*e
+            call orbit_frequencies(bf, p, s_star, 1.0_dp, 96, ob, oz, trapped, st)
+            if (st /= ORBIT_OK .or. .not. trapped) then
+                ok = .false.
+                return
+            end if
+            ok = close('finite-width bounce', ob, 119670.94712_dp, 2e-5_dp) .and. ok
+            ok = close('signed precession', oz, sign_q*4677.45568_dp, 2e-5_dp) .and. ok
+        end do
+    end function finite_bounce
 
     !> 2 pi/oint G dtheta/(v_par iota B) at s*, both legs, by the substitution
     !> theta = Theta sin(u) between the turning points +-Theta (B even in theta).

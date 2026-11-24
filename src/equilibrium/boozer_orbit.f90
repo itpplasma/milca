@@ -22,6 +22,8 @@
 module milca_boozer_orbit
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortnum_quadrature, only: gauss_legendre
+    use fortnum_ode_vode, only: vode_state_t, vode_init, vode_integrate_to
+    use fortnum_status, only: fortnum_status_t, status_ok
     use fortnum_cubic_spline, only: cubic_spline_t, cubic_spline_init
     use milca_boozer_file, only: boozer_file_t, boozer_field_eval, boozer_iota, &
         boozer_iota_integral, boozer_harmonics, spline_value, BOOZER_OK
@@ -54,6 +56,13 @@ module milca_boozer_orbit
         real(dp) :: symplectic_factor = 0
         ! dmu/dxi along the ray and ds/ds* at fixed (theta, xi, H).
         real(dp) :: mu_xi = 0, s_star_s = 0
+    end type
+
+    ! Scale the return coordinates by the width and speed at the section.
+    type :: bounce_context_t
+        type(boozer_file_t), pointer :: bf
+        type(orbit_particle_t), pointer :: p
+        real(dp) :: s_star, theta_mid, radial_scale, time_scale
     end type
 
 contains
@@ -294,10 +303,11 @@ contains
     !> orbit_evaluate from the field state at s and psi_p(s) - psi_p(s*), with
     !> the magnetic moment mu in place of p%mu.
     pure subroutine evaluate_at(p, mu, s, b, b_s, g, i, g_s, i_s, iota, psi_prime, dpsi_p, &
-            phi_s, q)
+            phi_s, q, dp_theta_ds)
         type(orbit_particle_t), intent(in) :: p
         real(dp), intent(in) :: mu, s, b, b_s, g, i, g_s, i_s, iota, psi_prime, dpsi_p, phi_s
         type(orbit_point_t), intent(out) :: q
+        real(dp), intent(out), optional :: dp_theta_ds
         real(dp) :: h_psi, h_rho, d, rho
         rho = dpsi_p/g
         q%s = s
@@ -312,6 +322,7 @@ contains
         q%symplectic_factor = d
         q%theta_dot = (h_psi*g - h_rho*(rho*g_s/psi_prime - iota))/d
         q%zeta_dot = (h_rho*(1 + rho*i_s/psi_prime) - h_psi*i)/d
+        if (present(dp_theta_ds)) dp_theta_ds = psi_prime*d/g
     end subroutine evaluate_at
 
     !> The point at theta with local pitch xi = v_par/v of the orbit family
@@ -430,14 +441,11 @@ contains
         end subroutine residual
     end subroutine orbit_pitch_point
 
-    !> Poloidal and toroidal frequencies of the orbit with surface s_star and
-    !> the energy and magnetic moment of p. A trapped
-    !> orbit bounces between the turning points theta_1 < theta_2 where
-    !> mu B(s*, theta) + Z e Phi(s*) = H; omega_b = 2 pi/tau_b and the
-    !> precession is the toroidal advance per bounce over tau_b. A passing
-    !> orbit (sigma given) transits theta over 2 pi. Gauss-Legendre in u with
-    !> theta = theta_m + Delta sin(u) removes the inverse square root at the
-    !> turning points. trapped is set from the field at s*.
+    !> Poloidal and toroidal frequencies at fixed energy, mu and P_zeta.
+    !> Mirror points on s* identify the trapped well. The trapped period
+    !> follows the complete Hamiltonian return, including the portion beyond
+    !> the mirror angles where the poloidal magnetic drift still acts.
+    !> The passing period is a quadrature over one poloidal transit.
     subroutine orbit_frequencies(bf, p, s_star, sigma, n_quad, omega_b, omega_zeta, trapped, &
             status)
         type(boozer_file_t), intent(in) :: bf
@@ -447,28 +455,18 @@ contains
         real(dp), intent(out) :: omega_b, omega_zeta
         logical, intent(out) :: trapped
         integer, intent(out) :: status
-        real(dp) :: x(n_quad), w(n_quad), t1, t2, tau, dzeta, u, theta, jac, sg
+        real(dp) :: x(n_quad), w(n_quad), t1, t2, tau, dzeta, theta
         type(orbit_point_t) :: pt
-        integer :: k, leg
-        call gauss_legendre(n_quad, x, w)
+        integer :: k
         call turning_points(t1, t2, trapped, status)
         if (status /= ORBIT_OK) return
-        tau = 0
-        dzeta = 0
         if (trapped) then
-            do leg = 1, 2
-                sg = merge(1.0_dp, -1.0_dp, leg == 1)
-                do k = 1, n_quad
-                    u = 0.5_dp*pi*x(k)
-                    theta = 0.5_dp*(t1 + t2) + 0.5_dp*(t2 - t1)*sin(u)
-                    jac = 0.5_dp*(t2 - t1)*cos(u)*0.5_dp*pi
-                    call orbit_point(bf, p, s_star, theta, sg, pt, status)
-                    if (status /= ORBIT_OK) return
-                    tau = tau + w(k)*jac/abs(pt%theta_dot)
-                    dzeta = dzeta + w(k)*jac*pt%zeta_dot/abs(pt%theta_dot)
-                end do
-            end do
+            call trapped_return(bf, p, s_star, t1, t2, n_quad, tau, dzeta, status)
+            if (status /= ORBIT_OK) return
         else
+            call gauss_legendre(n_quad, x, w)
+            tau = 0
+            dzeta = 0
             do k = 1, n_quad
                 theta = pi*(x(k) + 1)
                 call orbit_point(bf, p, s_star, theta, sigma, pt, status)
@@ -554,5 +552,95 @@ contains
             root = mid
         end function root
     end subroutine orbit_frequencies
+
+    subroutine trapped_return(bf, p, s_star, t1, t2, n_quad, tau, dzeta, status)
+        type(boozer_file_t), intent(in), target :: bf
+        type(orbit_particle_t), intent(in), target :: p
+        real(dp), intent(in) :: s_star, t1, t2
+        integer, intent(in) :: n_quad
+        real(dp), intent(out) :: tau, dzeta
+        integer, intent(out) :: status
+        type(bounce_context_t) :: bounce
+        type(orbit_point_t) :: leg(2)
+        type(vode_state_t) :: integrator(2)
+        type(fortnum_status_t) :: ode_status
+        real(dp), allocatable :: y(:)
+        real(dp) :: width, t_event, y_start(2), sigma
+        integer :: k, direction
+        logical :: found
+
+        bounce%bf => bf
+        bounce%p => p
+        bounce%s_star = s_star
+        bounce%theta_mid = 0.5_dp*(t1 + t2)
+        width = 0.5_dp*(t2 - t1)
+        do k = 1, 2
+            sigma = merge(1.0_dp, -1.0_dp, k == 1)
+            call orbit_point(bf, p, s_star, bounce%theta_mid, sigma, leg(k), status)
+            if (status /= ORBIT_OK) return
+        end do
+        status = ORBIT_NO_ROOT
+        if (width <= 0 .or. leg(1)%theta_dot*leg(2)%theta_dot >= 0) return
+        bounce%radial_scale = abs(leg(1)%s - leg(2)%s)
+        if (bounce%radial_scale <= epsilon(1.0_dp)) return
+        bounce%time_scale = 2/sum(abs(leg%theta_dot))
+        y_start = (leg%s - s_star)/bounce%radial_scale
+        tau = 0
+        dzeta = 0
+        ! Check each return against the independently located opposite branch.
+        do k = 1, 2
+            direction = -nint(sign(1.0_dp, leg(k)%theta_dot))
+            call vode_init(integrator(k), 3, 0.0_dp, [y_start(k), 0.0_dp, 0.0_dp])
+            integrator(k)%hmax = width/max(n_quad/4, 8)
+            call vode_integrate_to(bounce_rhs, integrator(k), 512*width, 1e-11_dp, [1e-13_dp], &
+                y, ode_status, event=bounce_section, event_dir=direction, &
+                t_root=t_event, root_found=found, ctx=bounce)
+            if (.not. status_ok(ode_status) .or. .not. found) return
+            if (t_event <= 0 .or. abs(y(1) - y_start(3 - k)) > 1e-7_dp) return
+            tau = tau + t_event*bounce%time_scale
+            dzeta = dzeta + y(3)
+        end do
+        status = ORBIT_OK
+    end subroutine trapped_return
+
+    subroutine bounce_rhs(t, y, dydt, ctx)
+        real(dp), intent(in) :: t, y(:)
+        real(dp), intent(out) :: dydt(:)
+        class(*), intent(in), optional :: ctx
+        type(orbit_point_t) :: pt
+        real(dp) :: s, b, b_s, b_t, g, i, g_s, i_s, iota, psi_prime, phi, phi_s, &
+            dpsi_p, dh_theta, dp_theta_ds
+        integer :: status
+
+        associate (unused_time => t)
+        end associate
+        dydt = 0
+        select type (ctx)
+        type is (bounce_context_t)
+            s = ctx%s_star + ctx%radial_scale*y(1)
+            call orbit_state(ctx%bf, s, ctx%theta_mid + y(2), b, b_s, g, i, g_s, i_s, &
+                iota, psi_prime, status, b_t=b_t)
+            if (status /= ORBIT_OK) return
+            call orbit_potential(ctx%bf, ctx%p, s, phi, phi_s)
+            dpsi_p = orbit_flux_p(ctx%bf, ctx%s_star, s)
+            call evaluate_at(ctx%p, ctx%p%mu, s, b, b_s, g, i, g_s, i_s, iota, psi_prime, &
+                dpsi_p, phi_s, pt, dp_theta_ds)
+            call orbit_energy_residual_jvp(dpsi_p, g, b, ctx%p%mass, ctx%p%charge, &
+                ctx%p%mu, phi, ctx%p%energy, 0.0_dp, 0.0_dp, b_t, 0.0_dp, 0.0_dp, &
+                0.0_dp, 0.0_dp, 0.0_dp, dh_theta)
+            ! Hamilton's equation for P_theta at fixed P_zeta.
+            dydt(1) = -ctx%time_scale*dh_theta/(ctx%p%charge*dp_theta_ds*ctx%radial_scale)
+            dydt(2) = ctx%time_scale*pt%theta_dot
+            dydt(3) = ctx%time_scale*pt%zeta_dot
+        end select
+    end subroutine bounce_rhs
+
+    real(dp) function bounce_section(t, y, ctx) result(distance)
+        real(dp), intent(in) :: t, y(:)
+        class(*), intent(in), optional :: ctx
+        associate (unused_time => t, has_context => present(ctx))
+        end associate
+        distance = y(2)
+    end function bounce_section
 
 end module milca_boozer_orbit

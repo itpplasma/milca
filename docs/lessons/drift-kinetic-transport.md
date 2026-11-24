@@ -183,6 +183,12 @@ limit, three were input data and six were implementation defects.
   Newton steps on generated residuals with exact tangents (#323), as the
   differentiability principle of [DESIGN.md](../../DESIGN.md) requires.
 
+- At finite orbit width, parallel velocity vanishes at the mirror while
+  poloidal magnetic drift continues. Splitting the diagnostic bounce
+  quadrature there missed the poloidal reversals and overestimated the
+  frequency by 1.2% on the synthetic 10 keV trapped case. Follow the complete
+  return at fixed energy, magnetic moment and toroidal momentum.
+
 - SFINCS 8df5453 sets the MUMPS pivoting threshold CNTL(1) to 1e-6. Its
   direct solves are then inaccurate without a warning: the single linear step
   of `RHSMode=1` left a relative residual of 1.8e-3 on the 11 x 7 x 24 x 16
