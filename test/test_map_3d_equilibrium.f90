@@ -65,6 +65,8 @@ program test_map_3d_equilibrium
         map%x(2, 3, j) = -0.01_dp*map%axis_t(j)
         map%x(3, 3, j) = 0.03_dp*map%axis_t(j)
     end do
+    call map_3d_force(map, seed, force_profiles, 1.0_dp, 2, force, status)
+    if (status == 0 .or. force%points /= 0) error stop 'force diagnostic admitted toroidal displacement'
     do j = 1, 31
         cell = 1 + mod(j - 1, map%cells); xi = [0.21_dp, 0.37_dp]; phi = 0.17_dp*j
         call map_3d_sample(map, seed, cell, xi, phi, points(:, j), expected(:, j), status)
