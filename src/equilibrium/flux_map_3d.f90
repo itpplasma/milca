@@ -22,13 +22,14 @@ module milca_flux_map_3d
     !! generated leaf flux_map_energy_3d. B enters pointwise: every per-cell
     !! projection tried in 3D was unstable (docs/flux-map.md).
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use fortfem_spline_eval, only: spline_quadrature_t
+    use fortfem_spline_eval, only: spline_quadrature_t, spline_cell_xi_basis
+    use fortfem_spline_space, only: spline_cell_broken
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_t_basis
     use fortsparse_csr, only: csr_t
     use fortsparse_csc, only: csc_t, csc_from_triplet, csc_triplet_plan_t, &
         csc_triplet_plan_build, csc_triplet_plan_apply
     use fortsparse_status, only: fortsparse_status_t, status_ok
-    use milca_eulerian_clebsch, only: clebsch_node_gradients, clebsch_nfp, clebsch_exact_field
+    use milca_eulerian_clebsch, only: clebsch_nfp, clebsch_exact_field
     use fortfem_constrained_newton, only: newton_constraints_t, newton_report_t, &
         newton_constraints_init
     use milca_flux_map, only: flux_map_profiles, flux_map_newton, flux_map_gauge_row
@@ -205,6 +206,29 @@ contains
         end do
     end subroutine locals
 
+    subroutine section_node_gradients(derham, quad, cell, v0, d0, gn)
+        type(spline_derham_t), intent(in) :: derham
+        type(spline_quadrature_t), intent(in) :: quad
+        integer, intent(in) :: cell
+        real(dp), allocatable, intent(out) :: v0(:, :, :), gn(:, :, :)
+        integer, allocatable, intent(out) :: d0(:)
+
+        real(dp), allocatable :: jets(:, :, :)
+        integer :: nloc, nq, q, p
+
+        nloc = (derham%degree + 1)**2
+        nq = quad%points_per_cell
+        allocate (d0(nloc), v0(1, nloc, nq), gn(2, nloc, nq), jets(nloc, 6, nq))
+        call spline_cell_broken(derham%space, cell, d0)
+        d0 = derham%space%broken_dof(derham%space%broken_ptr(d0))
+        call spline_cell_xi_basis(derham%space, quad, cell, jets)
+        v0(1, :, :) = jets(:, 1, :)
+        do q = 1, nq
+            p = quad%point_offset(cell) + q - 1
+            gn(:, :, q) = matmul(quad%chain(2:3, 2:3, p), transpose(jets(:, 2:3, q)))
+        end do
+    end subroutine section_node_gradients
+
     subroutine flux_map3d_system(fm, derham, quad, profiles, plane_nodes, z, energy, gradient, &
                                  hessian, exact_field, field_error, gauge_moment, hessian_plan)
         !! Energy at z; with gradient and hessian also the derivatives. The
@@ -213,8 +237,8 @@ contains
         !! construction, a third of the work of the full matrix.
         !! flux_map3d_expand_symmetric mirrors it where a full matrix is
         !! needed. derham and quad belong to the section
-        !! geometry the gradients of clebsch_node_gradients refer to (plane 1
-        !! of the callers here); plane_nodes(2, n0, nt) are the (R, Z) node
+        !! geometry (plane 1 of the callers here).
+        !! plane_nodes(2, n0, nt) are the (R, Z) node
         !! coordinates of every plane. field_error: sum of w |B - B_exact|^2
         !! and of w |B_exact|^2 over the quadrature. gauge_moment: per wall
         !! function b of plane 1 the moment int (-y, x) . du/dTheta_b1 dV of
@@ -313,7 +337,7 @@ contains
         !$omp        gauge_moment, nb, products, cached) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
-            call clebsch_node_gradients(derham, quad, cell, v0, d0, gn)
+            call section_node_gradients(derham, quad, cell, v0, d0, gn)
             nloc = size(d0)
             if (allocated(ix)) deallocate (ix, iy, is_w, zx, zy, ax, ay, bx, by, lam, mw, gx, lm)
             allocate (ix(nloc), iy(nloc), is_w(nloc), zx(nloc, nt), zy(nloc, nt), ax(nloc), &
