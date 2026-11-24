@@ -45,7 +45,7 @@ program test_flux_map_qa
     type(fm3_case_t), target :: c, previous, axis_seed
     character(512) :: deck = '../benchmarks/label-qa/input.landreman-paul-qa-iota', &
                       outdir = 'flux-map-qa-out', stages = '2:2:9', arg
-    integer :: stage_spec(3, max_stages), nstages, istage, k, st, u, newton_total, j, solve_status
+    integer :: eval_planes, stage_spec(3, max_stages), nstages, istage, k, st, u, newton_total, j, solve_status
     real(dp) :: phiedge, kappa = 1, t0, t1, ts, energy, phi, axis(2), x0(2)
     real(dp) :: deck_angle_sense, deck_angle_origin
     real(dp), allocatable :: iota_c(:), pres_c(:), samples(:, :, :), quality(:), flux(:)
@@ -228,12 +228,13 @@ program test_flux_map_qa
     call wall_time(t1)
 
     call execute_command_line('mkdir -p '//trim(outdir))
-    ! axis and the surfaces s = 0.25, 0.5 of every output plane (independent
-    ! planes in parallel), then written in plane order
-    allocate (axes(2, 0:nout - 1), rings(2, nray, 2, 0:nout - 1), bring(3, nray, 2, 0:nout - 1), &
-              fring(nray, 2, 0:nout - 1), axis_status(0:nout - 1))
+    ! The one-plane map has the same section at every output angle.
+    eval_planes = merge(1, nout, c%nt == 1)
+    allocate (axes(2, 0:eval_planes - 1), rings(2, nray, 2, 0:eval_planes - 1), &
+              bring(3, nray, 2, 0:eval_planes - 1), fring(nray, 2, 0:eval_planes - 1), &
+              axis_status(0:eval_planes - 1))
     !$omp parallel do schedule(dynamic) private(x0, st)
-    do j = 0, nout - 1
+    do j = 0, eval_planes - 1
         call fm3_axis(c, j/real(nout, dp), profiles, axes(:, j), axis_status(j), x0)
         if (axis_status(j) /= 0) cycle
         call ring(0.25_dp, j/real(nout, dp), x0, rings(:, :, 1, j), bring(:, :, 1, j), fring(:, 1, j))
@@ -241,11 +242,11 @@ program test_flux_map_qa
     end do
     !$omp end parallel do
     if (any(axis_status /= 0)) error stop 'axis'
-    skipped = count(.not. fring)
+    skipped = count(.not. fring)*(nout/eval_planes)
     open (newunit=u, file=trim(outdir)//'/axis.txt', status='replace')
     write (u, '(a)') '# phi R Z'
     do j = 0, nout - 1
-        write (u, '(3es24.16)') 2*pi*j/(nout*eq%nfp), axes(:, j)
+        write (u, '(3es24.16)') 2*pi*j/(nout*eq%nfp), axes(:, min(j, eval_planes - 1))
     end do
     close (u)
     call write_surface('0.25', 1)
@@ -328,14 +329,15 @@ contains
         !! surface_s<tag>.txt from the rings of level index l, with |B|.
         character(*), intent(in) :: tag
         integer, intent(in) :: l
-        integer :: v, q, jj
+        integer :: v, q, jj, plane
 
         open (newunit=v, file=trim(outdir)//'/surface_s'//tag//'.txt', status='replace')
         write (v, '(a)') '# phi angle R Z |B|'
         do jj = 0, nout - 1
+            plane = min(jj, eval_planes - 1)
             do q = 1, nray
-                if (fring(q, l, jj)) write (v, '(5es24.16)') 2*pi*jj/(nout*eq%nfp), &
-                    2*pi*(q - 1)/nray, rings(:, q, l, jj), norm2(bring(:, q, l, jj))
+                if (fring(q, l, plane)) write (v, '(5es24.16)') 2*pi*jj/(nout*eq%nfp), &
+                    2*pi*(q - 1)/nray, rings(:, q, l, plane), norm2(bring(:, q, l, plane))
             end do
         end do
         close (v)
@@ -383,22 +385,28 @@ contains
         !! circulation of B and its ratio to the integral of |B.dl|; the
         !! plane means are printed.
         real(dp), parameter :: levels(6) = [0.05_dp, 0.1_dp, 0.25_dp, 0.5_dp, 0.75_dp, 0.9_dp]
-        real(dp) :: circ, ref, mean(6), ax(2), xx(2)
+        real(dp) :: circ(6), ref(6), mean(6), ax(2), xx(2)
         integer :: v, jj, l, stc, cnt(6)
-        logical :: ok
+        logical :: ok(6)
 
         open (newunit=v, file=trim(outdir)//'/current.txt', status='replace')
         write (v, '(a)') '# phi s circulation_of_B[Tm] ratio_to_integral_of_|B.dl|'
         mean = 0
         cnt = 0
         do jj = 0, nout - 1, nout/4
-            call fm3_axis(c, jj/real(nout, dp), profiles, ax, stc, xx)
-            if (stc /= 0) cycle
+            if (jj == 0 .or. c%nt > 1) then
+                call fm3_axis(c, jj/real(nout, dp), profiles, ax, stc, xx)
+                ok = .false.
+                if (stc == 0) then
+                    do l = 1, 6
+                        call enclosed_current(levels(l), jj/real(nout, dp), xx, circ(l), ref(l), ok(l))
+                    end do
+                end if
+            end if
             do l = 1, 6
-                call enclosed_current(levels(l), jj/real(nout, dp), xx, circ, ref, ok)
-                if (.not. ok) cycle
-                write (v, '(4es24.16)') 2*pi*jj/(nout*eq%nfp), levels(l), circ, circ/ref
-                mean(l) = mean(l) + circ/ref
+                if (.not. ok(l)) cycle
+                write (v, '(4es24.16)') 2*pi*jj/(nout*eq%nfp), levels(l), circ(l), circ(l)/ref(l)
+                mean(l) = mean(l) + circ(l)/ref(l)
                 cnt(l) = cnt(l) + 1
             end do
         end do
