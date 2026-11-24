@@ -33,7 +33,8 @@ module milca_flux_map_3d
     use fortfem_constrained_newton, only: newton_constraints_t, newton_report_t, &
         newton_constraints_init
     use milca_flux_map, only: flux_map_profiles, flux_map_newton, flux_map_gauge_row
-    use milca_flux_map_leaves, only: flux_map_energy_3d, flux_map_gauge_moment
+    use milca_flux_map_leaves, only: flux_map_energy_3d, flux_map_energy_3d_value, &
+        flux_map_energy_3d_gradient, flux_map_gauge_moment
     implicit none
     private
 
@@ -142,15 +143,16 @@ contains
         !! derivative of slot a. For the second derivatives of the wall part:
         !! sig, th, gsig, gth (3 components) and per function lam, mw.
         logical, intent(in) :: is_w(:)
-        integer, intent(in) :: ix(:), iy(:)
+        integer, intent(in), optional :: ix(:), iy(:)
         real(dp), intent(in) :: nv(:), gx(:, :), vel(2), rr, ax(:), ay(:), bx(:), by(:)
-        real(dp), intent(out) :: u(8), sx(:, :, :), sig, th, gsig(3), gth(3), lam(:), mw(:, :)
+        real(dp), intent(out) :: u(8), sig, th, gsig(3), gth(3)
+        real(dp), intent(out), optional :: sx(:, :, :), lam(:), mw(:, :)
         real(dp) :: c, g3(3), acc, gacc(3), tacc, cs, sn
         integer :: i, a
 
         c = 1/(two_pi*rr)
         u = 0
-        sx = 0
+        if (present(sx)) sx = 0
         sig = 0
         gsig = 0
         acc = 0
@@ -158,8 +160,8 @@ contains
         tacc = 0
         th = 0
         gth = 0
-        lam = 0
-        mw = 0
+        if (present(lam)) lam = 0
+        if (present(mw)) mw = 0
         do i = 1, size(nv)
             g3 = [gx(1, i), -c*dot_product(vel, gx(:, i)), gx(2, i)]
             if (is_w(i)) then
@@ -173,12 +175,14 @@ contains
                 u(2) = u(2) + nv(i)*ay(i)
                 u(3:5) = u(3:5) + g3*ax(i) + [0.0_dp, c*nv(i)*bx(i), 0.0_dp]
                 u(6:8) = u(6:8) + g3*ay(i) + [0.0_dp, c*nv(i)*by(i), 0.0_dp]
-                sx(1, ix(i), 1) = nv(i)
-                sx(3:5, ix(i), 1) = g3
-                sx(4, ix(i), 2) = c*nv(i)
-                sx(2, iy(i), 1) = nv(i)
-                sx(6:8, iy(i), 1) = g3
-                sx(7, iy(i), 2) = c*nv(i)
+                if (present(sx)) then
+                    sx(1, ix(i), 1) = nv(i)
+                    sx(3:5, ix(i), 1) = g3
+                    sx(4, ix(i), 2) = c*nv(i)
+                    sx(2, iy(i), 1) = nv(i)
+                    sx(6:8, iy(i), 1) = g3
+                    sx(7, iy(i), 2) = c*nv(i)
+                end if
             end if
         end do
         if (sig <= 0) return
@@ -191,6 +195,7 @@ contains
         u(2) = u(2) + sig*sn
         u(3:5) = u(3:5) + gsig*cs - sig*sn*gth
         u(6:8) = u(6:8) + gsig*sn + sig*cs*gth
+        if (.not. present(sx)) return
         do i = 1, size(nv)
             if (.not. is_w(i)) cycle
             g3 = [gx(1, i), -c*dot_product(vel, gx(:, i)), gx(2, i)]
@@ -408,18 +413,32 @@ contains
                     ay = matmul(zy, lt(:, 1))
                     bx = matmul(zx, lt(:, 2))
                     by = matmul(zy, lt(:, 2))
-                    call locals(is_w, ix, iy, v0(1, :, q), gx, vel, sm(1), ax, ay, bx, by, u, &
-                                sx, sig, th, gsig, gth, lam, mw)
+                    if (derivs .or. ng > 0) then
+                        call locals(is_w, ix, iy, v0(1, :, q), gx, vel, sm(1), ax, ay, bx, by, u, &
+                                    sx, sig, th, gsig, gth, lam, mw)
+                    else
+                        call locals(is_w, nv=v0(1, :, q), gx=gx, vel=vel, rr=sm(1), &
+                                    ax=ax, ay=ay, bx=bx, by=by, u=u, sig=sig, th=th, gsig=gsig, gth=gth)
+                    end if
                     s = u(1)**2 + u(2)**2
                     call profiles(s, tau, gp, pr)
-                    call flux_map_energy_3d(sm(1), u(1), u(2), u(3), u(4), u(5), u(6), u(7), &
-                        u(8), tau(1), tau(2), tau(3), gp(1), gp(2), gp(3), pr(1), pr(2), pr(3), &
-                        w, wg(1), wg(2), wg(3), wg(4), wg(5), wg(6), wg(7), wg(8), wh(1), &
-                        wh(2), wh(3), wh(4), wh(5), wh(6), wh(7), wh(8), wh(9), wh(10), &
-                        wh(11), wh(12), wh(13), wh(14), wh(15), wh(16), wh(17), wh(18), &
-                        wh(19), wh(20), wh(21), wh(22), wh(23), wh(24), wh(25), wh(26), &
-                        wh(27), wh(28), wh(29), wh(30), wh(31), wh(32), wh(33), wh(34), &
-                        wh(35), wh(36))
+                    if (present(hessian)) then
+                        call flux_map_energy_3d(sm(1), u(1), u(2), u(3), u(4), u(5), u(6), u(7), &
+                            u(8), tau(1), tau(2), tau(3), gp(1), gp(2), gp(3), pr(1), pr(2), pr(3), &
+                            w, wg(1), wg(2), wg(3), wg(4), wg(5), wg(6), wg(7), wg(8), wh(1), &
+                            wh(2), wh(3), wh(4), wh(5), wh(6), wh(7), wh(8), wh(9), wh(10), &
+                            wh(11), wh(12), wh(13), wh(14), wh(15), wh(16), wh(17), wh(18), &
+                            wh(19), wh(20), wh(21), wh(22), wh(23), wh(24), wh(25), wh(26), &
+                            wh(27), wh(28), wh(29), wh(30), wh(31), wh(32), wh(33), wh(34), &
+                            wh(35), wh(36))
+                    else if (derivs) then
+                        call flux_map_energy_3d_gradient(sm(1), u(1), u(2), u(3), u(4), &
+                            u(5), u(6), u(7), u(8), tau(1), tau(2), tau(3), gp(1), gp(2), gp(3), &
+                            pr(1), pr(2), pr(3), w, wg(1), wg(2), wg(3), wg(4), wg(5), wg(6), wg(7), wg(8))
+                    else
+                        call flux_map_energy_3d_value(sm(1), u(1), u(2), u(3), u(4), &
+                            u(5), u(6), u(7), u(8), tau(1), gp(1), pr(1), w)
+                    end if
                     wt = wq*abs(detf)*two_pi/nqt
                     energy = energy + wt*w
                     if (ng > 0) then
@@ -584,28 +603,20 @@ contains
         real(dp) :: lt(fm%nt, 2), ht(fm%nt, 2), f(2, 2), ft(2, 2), detf, vel(2), sig, th, &
                     gsig(3), gth(3), tau(3), gp(3), pr(3), c3(3), gs(3), ref, shift
         real(dp) :: gx(2, size(d0)), ax(size(d0)), ay(size(d0)), bx(size(d0)), by(size(d0)), &
-                    lam(size(d0)), mw(3, size(d0)), sx(8, 2*size(d0), 2), zx(size(d0), fm%nt), &
+                    zx(size(d0), fm%nt), &
                     zy(size(d0), fm%nt)
-        integer :: ix(size(d0)), iy(size(d0)), i, k, nsec, ntot
+        integer :: i, k, ntot
         logical :: is_w(size(d0))
 
         ntot = fm%n0*fm%nt
         call spline_derham_t_basis(fm%nt, t, lt, ht)
         lt(:, 2) = clebsch_nfp*lt(:, 2)
         is_w = fm%is_wall(d0)
-        nsec = 0
         ref = 0
         do i = size(d0), 1, -1
             if (is_w(i)) ref = fm%z(d0(i))
         end do
         do i = 1, size(d0)
-            nsec = nsec + 1
-            ix(i) = nsec
-            iy(i) = 0
-            if (.not. is_w(i)) then
-                nsec = nsec + 1
-                iy(i) = nsec
-            end if
             shift = 0
             if (is_w(i)) shift = two_pi*nint((ref - fm%z(d0(i)))/two_pi)
             do k = 1, fm%nt
@@ -628,8 +639,8 @@ contains
         ay = matmul(zy, lt(:, 1))
         bx = matmul(zx, lt(:, 2))
         by = matmul(zy, lt(:, 2))
-        call locals(is_w, ix, iy, nv, gx, vel, rz(1), ax, ay, bx, by, u, sx(:, :nsec, :), sig, &
-                    th, gsig, gth, lam, mw)
+        call locals(is_w, nv=nv, gx=gx, vel=vel, rr=rz(1), &
+                    ax=ax, ay=ay, bx=bx, by=by, u=u, sig=sig, th=th, gsig=gsig, gth=gth)
         if (present(label_jacobian)) then
             label_jacobian(1, :) = matmul(u([3, 5]), f)
             label_jacobian(2, :) = matmul(u([6, 8]), f)

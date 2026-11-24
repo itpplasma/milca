@@ -117,6 +117,13 @@ program gen_flux_map
         ['r    ', 'x    ', 'y    ', 'x_r  ', 'x_p  ', 'x_z  ', 'y_r  ', 'y_p  ', 'y_z  ', 'tau  ', &
         'taup ', 'taupp', 'gp   ', 'gpp  ', 'gppp ', 'pres ', 'pp   ', 'ppp  '], &
         ['w               ', gn8, hn8], [dens3, g8, h8])
+    call w%emit('flux_map_energy_3d_value', &
+        ['r   ', 'x   ', 'y   ', 'x_r ', 'x_p ', 'x_z ', 'y_r ', 'y_p ', 'y_z ', 'tau ', &
+        'gp  ', 'pres'], [character(16) :: 'w'], [dens3])
+    call w%emit('flux_map_energy_3d_gradient', &
+        ['r    ', 'x    ', 'y    ', 'x_r  ', 'x_p  ', 'x_z  ', 'y_r  ', 'y_p  ', 'y_z  ', 'tau  ', &
+        'taup ', 'taupp', 'gp   ', 'gpp  ', 'gppp ', 'pres ', 'pp   ', 'ppp  '], &
+        ['w               ', gn8], [dens3, g8])
     ! Force balance of the 3D field, independent of the energy: from the
     ! 2-jet of u = (x, y) in the cylindrical coordinates (R, phi, Z)
     ! (coordinate derivatives x_r, x_f = dx/dphi, x_z, x_rr, x_rf, ...),
