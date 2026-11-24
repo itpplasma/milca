@@ -44,6 +44,7 @@ module milca_ntv_orbit_geometry
         type(boozer_field_t) :: pert_field
         type(orbit_particle_t) :: p
         real(dp) :: s_star = 0, b_ref = 0, e_star = 0, v_star = 0
+        real(dp), private :: iota_star = 0
     contains
         procedure :: stream => orbit_stream
         procedure :: level => orbit_level
@@ -102,6 +103,7 @@ contains
                 psi_prime, status)
         end block
         g%lambda_c = b_ref/b_max
+        g%iota_star = iota
         g%kappa = iota*b_ref/(gg + iota*i)
         ! Kinetic energy at s*: H - Z e Phi(s*).
         call orbit_potential(bf, p, s_star, phi, phi_s)
@@ -218,7 +220,7 @@ contains
         else
             src = perturbation_at(g, th, op, pt)
         end if
-        call point_at(g, th, xi, op, pt, collide, drive_r, drive_e, density, phase, precess, &
+        call point_at(g, xi, op, pt, collide, drive_r, drive_e, density, phase, precess, &
             drive, torque)
     end subroutine orbit_point_source
 
@@ -244,11 +246,9 @@ contains
     end function mu_hat
 
     !> The measure at (theta, xi) as the phase-space Jacobian of (psi*,
-    !> theta, xi) at fixed H: the thin field's 1/(b k) at the orbit point
-    !> times dpsi/dpsi* at fixed (theta, xi) and v/v*, with ds/ds* from the
-    !> implicit function theorem on the generated pitch residual. By Liouville it equals
-    !> -(d mu_hat/d xi)/(2 theta_dot/v*), but stays regular where theta_dot
-    !> and d mu_hat/d xi vanish together.
+    !> theta, xi) at fixed H. At k_power=1 it equals
+    !> -(d mu_hat/d xi)/(2 theta_dot/v*), including the orbit-point
+    !> symplectic factor. Using ds/ds* keeps it regular at theta_dot=0.
     real(dp) function measure(g, th, xi, op) result(m)
         class(hp_orbit_geometry_t), intent(in) :: g
         real(dp), intent(in) :: th, xi
@@ -257,27 +257,20 @@ contains
         real(dp) :: b
         integer :: st
         b = g%mu_hat(th, xi, pt, st)
-        m = measure_at(g, th, xi, op, pt)
+        m = measure_at(g, xi, op, pt)
     end function measure
 
     !> The measure at the pitch point pt of (theta, xi).
-    real(dp) function measure_at(g, th, xi, op, pt) result(m)
+    real(dp) function measure_at(g, xi, op, pt) result(m)
         class(hp_orbit_geometry_t), intent(in) :: g
-        real(dp), intent(in) :: th, xi
+        real(dp), intent(in) :: xi
         type(hp_operator_t), intent(in) :: op
         type(orbit_point_t), intent(in) :: pt
-        real(dp) :: b, b_s, gg, i, g_s, i_s, iota, psi_prime, iota_star, k, v, ds
-        integer :: st
-        ds = pt%s_star_s
-        call orbit_state(g%bf, g%s_star, th, b, b_s, gg, i, g_s, i_s, iota_star, psi_prime, &
-            st)
-        call orbit_state(g%bf, pt%s, th, b, b_s, gg, i, g_s, i_s, iota, psi_prime, st)
-        b = b/g%b_ref
-        k = op%k*b**op%k_power*(iota*(g%kappa/op%k)/iota_star)
+        real(dp) :: b, v
+        b = pt%b/g%b_ref
         v = abs(pt%v_par)/max(abs(xi), tiny(1.0_dp))
         if (abs(xi) < 1e-12_dp) v = g%v_star
-        ! dpsi/dpsi* with psi = int iota psi' ds: iota ds/(iota* ds*).
-        m = 1/(b*k)*ds*iota/iota_star*v/g%v_star
+        m = pt%symplectic_factor*pt%s_star_s*v/(g%iota_star*g%b_ref*b**(1 + op%k_power)*g%v_star)
     end function measure_at
 
     real(dp) function orbit_stream(g, th, xi) result(psi)
@@ -381,21 +374,21 @@ contains
         real(dp) :: b
         integer :: st
         b = g%mu_hat(th, xi, pt, st)
-        call point_at(g, th, xi, op, pt, collide, drive_r, drive_e, density, phase, precess, &
+        call point_at(g, xi, op, pt, collide, drive_r, drive_e, density, phase, precess, &
             drive, torque)
     end subroutine orbit_point_coefficients
 
     !> The coefficients of orbit_point_coefficients at the pitch point pt.
-    subroutine point_at(g, th, xi, op, pt, collide, drive_r, drive_e, density, phase, &
+    subroutine point_at(g, xi, op, pt, collide, drive_r, drive_e, density, phase, &
             precess, drive, torque)
         class(hp_orbit_geometry_t), intent(in) :: g
-        real(dp), intent(in) :: th, xi
+        real(dp), intent(in) :: xi
         type(hp_operator_t), intent(in) :: op
         type(orbit_point_t), intent(in) :: pt
         real(dp), intent(out) :: collide, drive_r, drive_e, density, phase, precess, drive, &
             torque
         real(dp) :: m, b, k
-        m = measure_at(g, th, xi, op, pt)
+        m = measure_at(g, xi, op, pt)
         b = pt%b/g%b_ref
         k = op%k*b**op%k_power
         collide = m*op%nu*(1 - xi*xi)/2
