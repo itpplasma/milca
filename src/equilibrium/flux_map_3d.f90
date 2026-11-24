@@ -38,8 +38,15 @@ module milca_flux_map_3d
     implicit none
     private
 
+    type :: axis_section_cell_t
+        real(dp), allocatable :: basis(:, :, :), gradient(:, :, :), radius(:), weight(:)
+        integer, allocatable :: dofs(:)
+    end type axis_section_cell_t
+
     type :: flux_map3d_hessian_plan_t
         type(csc_triplet_plan_t) :: triplets
+        ! The section geometry stays fixed across Newton iterations.
+        type(axis_section_cell_t), allocatable :: section(:)
         logical :: ready = .false.
     end type flux_map3d_hessian_plan_t
 
@@ -112,7 +119,7 @@ contains
         call newton_constraints_init(fm%gauge)
     end subroutine flux_map3d_init
 
-    subroutine flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, z, gauge)
+    subroutine flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, z, gauge, hessian_plan)
         !! The gauge constraint at the state z, as flux_map_gauge, from the
         !! wall functions of plane 1.
         type(flux_map3d_t), intent(in) :: fm
@@ -121,6 +128,7 @@ contains
         procedure(flux_map_profiles) :: profiles
         real(dp), intent(in) :: plane_nodes(:, :, :), z(:)
         type(newton_constraints_t), intent(inout) :: gauge
+        type(flux_map3d_hessian_plan_t), intent(inout), optional :: hessian_plan
         real(dp) :: moment(2*fm%n0*fm%nt), energy
         integer :: i
 
@@ -129,7 +137,7 @@ contains
             return
         end if
         call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, z, energy, &
-                               gauge_moment=moment)
+                               gauge_moment=moment, hessian_plan=hessian_plan)
         call flux_map_gauge_row(moment, pack([(i, i=1, fm%n0)], fm%is_wall), z, gauge)
     end subroutine flux_map3d_gauge
 
@@ -234,6 +242,44 @@ contains
         end do
     end subroutine section_node_gradients
 
+    subroutine cache_axisymmetric_section(derham, quad, nodes, plan)
+        type(spline_derham_t), intent(in) :: derham
+        type(spline_quadrature_t), intent(in) :: quad
+        real(dp), intent(in) :: nodes(:, :)
+        type(flux_map3d_hessian_plan_t), intent(inout) :: plan
+        real(dp) :: f(2, 2), inverse_transpose(2, 2), determinant, position(2)
+        integer :: cell, q, nq, point
+
+        nq = quad%points_per_cell
+        allocate (plan%section(size(quad%point_offset)))
+        !$omp parallel do default(none) shared(plan, derham, quad, nodes, nq) &
+        !$omp private(q, point, f, inverse_transpose, determinant, position)
+        do cell = 1, size(plan%section)
+            associate (table => plan%section(cell))
+                call section_node_gradients(derham, quad, cell, table%basis, table%dofs, table%gradient)
+                allocate (table%radius(nq), table%weight(nq))
+                do q = 1, nq
+                    point = quad%point_offset(cell) + q - 1
+                    position = matmul(nodes(:, table%dofs), table%basis(1, :, q))
+                    table%radius(q) = position(1)
+                    f = matmul(nodes(:, table%dofs), transpose(table%gradient(:, :, q)))
+                    call section_inverse_transpose(f, inverse_transpose, determinant)
+                    table%gradient(:, :, q) = matmul(inverse_transpose, table%gradient(:, :, q))
+                    table%weight(q) = quad%weight(point)*abs(determinant)*two_pi
+                end do
+            end associate
+        end do
+        !$omp end parallel do
+    end subroutine cache_axisymmetric_section
+
+    pure subroutine section_inverse_transpose(f, inverse_transpose, determinant)
+        real(dp), intent(in) :: f(2, 2)
+        real(dp), intent(out) :: inverse_transpose(2, 2), determinant
+
+        determinant = f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1)
+        inverse_transpose = reshape([f(2, 2), -f(1, 2), -f(2, 1), f(1, 1)], [2, 2])/determinant
+    end subroutine section_inverse_transpose
+
     subroutine flux_map3d_system(fm, derham, quad, profiles, plane_nodes, z, energy, gradient, &
                                  hessian, exact_field, field_error, gauge_moment, hessian_plan)
         !! Energy at z; with gradient and hessian also the derivatives. The
@@ -259,12 +305,12 @@ contains
         type(csr_t), intent(out), optional :: hessian
         procedure(clebsch_exact_field), optional :: exact_field
         real(dp), intent(out), optional :: field_error(2), gauge_moment(:)
-        type(flux_map3d_hessian_plan_t), intent(inout), optional :: hessian_plan
-        real(dp), allocatable :: v0(:, :, :), gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :), &
+        type(flux_map3d_hessian_plan_t), target, intent(inout), optional :: hessian_plan
+        real(dp), allocatable :: gn(:, :, :), gx(:, :), sx(:, :, :), am(:, :, :, :), &
                                  products(:, :, :), gloc(:), blocks(:, :, :), vals(:), zx(:, :), zy(:, :), &
                                  ax(:), ay(:), bx(:), by(:), lam(:), mw(:, :), gsec(:, :), &
                                  hs(:, :), lm(:), ltab(:, :, :), mloc(:), turn(:)
-        integer, allocatable :: d0(:), ix(:), iy(:), idx(:), rows(:), cols(:)
+        integer, allocatable :: ix(:), iy(:), idx(:), rows(:), cols(:)
         logical, allocatable :: is_w(:)
         real(dp) :: lt(fm%nt, 2), ht(fm%nt, 2), sk(2, fm%nt), gk(2, 2, fm%nt), sm(2), f(2, 2), &
                     ft(2, 2), detf, vel(2), t, wq, wt, u(8), sig, th, gsig(3), gth(3), s, &
@@ -272,7 +318,11 @@ contains
                     vm(3), et(3), c3(3), gs(3), bv(3), bx3(3), ferr(2), sn, cs
         integer :: n0, nt, ntot, nqt, cell, q, p, m, i, j, k, a, b, c1, nloc, nsec, nl, &
                    nz, blk, la, lb, nlmax, ia, ib, ng, nb, pair
-        logical :: derivs, cached
+        real(dp), pointer, contiguous :: v0(:, :, :)
+        integer, pointer, contiguous :: d0(:)
+        real(dp), allocatable, target :: v_work(:, :, :)
+        integer, allocatable, target :: d_work(:)
+        logical :: derivs, cached, cached_section
         type(csc_t) :: mm
         type(fortsparse_status_t) :: info
         interface
@@ -293,7 +343,11 @@ contains
         nb = nt*(nt + 1)/2
         derivs = present(gradient)
         cached = .false.
-        if (present(hessian_plan)) cached = hessian_plan%ready
+        cached_section = .false.
+        if (present(hessian_plan)) then
+            cached = hessian_plan%ready
+            cached_section = nt == 1 .and. nqt == 1 .and. allocated(hessian_plan%section)
+        end if
         energy = 0
         ferr = 0
         nlmax = 2*(derham%degree + 1)**2*nt
@@ -339,10 +393,17 @@ contains
         !$omp parallel do schedule(dynamic) default(private) &
         !$omp shared(fm, derham, quad, plane_nodes, z, gradient, rows, cols, vals, n0, nt, &
         !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error, ltab, ng, &
-        !$omp        gauge_moment, nb, products, cached) &
+        !$omp        gauge_moment, nb, products, cached, cached_section, hessian_plan) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
-            call section_node_gradients(derham, quad, cell, v0, d0, gn)
+            if (cached_section) then
+                v0 => hessian_plan%section(cell)%basis
+                d0 => hessian_plan%section(cell)%dofs
+            else
+                call section_node_gradients(derham, quad, cell, v_work, d_work, gn)
+                v0 => v_work
+                d0 => d_work
+            end if
             nloc = size(d0)
             if (allocated(ix)) deallocate (ix, iy, is_w, zx, zy, ax, ay, bx, by, lam, mw, gx, lm)
             allocate (ix(nloc), iy(nloc), is_w(nloc), zx(nloc, nt), zy(nloc, nt), ax(nloc), &
@@ -391,24 +452,33 @@ contains
                 end do
             end do
             do q = 1, quad%points_per_cell
-                p = quad%point_offset(cell) + q - 1
-                wq = quad%weight(p)
-                do k = 1, nt
-                    sk(:, k) = matmul(plane_nodes(:, d0, k), v0(1, :, q))
-                    gk(:, :, k) = matmul(plane_nodes(:, d0, k), transpose(gn(:, :, q)))
-                end do
+                if (.not. cached_section) then
+                    p = quad%point_offset(cell) + q - 1
+                    wq = quad%weight(p)
+                    do k = 1, nt
+                        sk(:, k) = matmul(plane_nodes(:, d0, k), v0(1, :, q))
+                        gk(:, :, k) = matmul(plane_nodes(:, d0, k), transpose(gn(:, :, q)))
+                    end do
+                end if
                 do m = 1, nqt
                     t = (m - 1)/real(nqt, dp)
                     lt = ltab(:, :, m)
-                    sm = matmul(sk, lt(:, 1))
-                    vel = matmul(sk, lt(:, 2))
-                    f = 0
-                    do k = 1, nt
-                        f = f + lt(k, 1)*gk(:, :, k)
-                    end do
-                    detf = f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1)
-                    ft = reshape([f(2, 2), -f(1, 2), -f(2, 1), f(1, 1)], [2, 2])/detf
-                    gx = matmul(ft, gn(:, :, q))
+                    if (cached_section) then
+                        sm(1) = hessian_plan%section(cell)%radius(q)
+                        gx = hessian_plan%section(cell)%gradient(:, :, q)
+                        wt = hessian_plan%section(cell)%weight(q)
+                        vel = 0
+                    else
+                        sm = matmul(sk, lt(:, 1))
+                        vel = matmul(sk, lt(:, 2))
+                        f = 0
+                        do k = 1, nt
+                            f = f + lt(k, 1)*gk(:, :, k)
+                        end do
+                        call section_inverse_transpose(f, ft, detf)
+                        gx = matmul(ft, gn(:, :, q))
+                        wt = wq*abs(detf)*two_pi/nqt
+                    end if
                     ax = matmul(zx, lt(:, 1))
                     ay = matmul(zy, lt(:, 1))
                     bx = matmul(zx, lt(:, 2))
@@ -439,7 +509,6 @@ contains
                         call flux_map_energy_3d_value(sm(1), u(1), u(2), u(3), u(4), &
                             u(5), u(6), u(7), u(8), tau(1), gp(1), pr(1), w)
                     end if
-                    wt = wq*abs(detf)*two_pi/nqt
                     energy = energy + wt*w
                     if (ng > 0) then
                         ! the wall functions of plane 1
@@ -667,7 +736,8 @@ contains
         type(flux_map3d_hessian_plan_t) :: hessian_plan
         real(dp), allocatable :: z(:)
 
-        call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, fm%z, fm%gauge)
+        if (fm%nt == 1) call cache_axisymmetric_section(derham, quad, plane_nodes(:, :, 1), hessian_plan)
+        call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, fm%z, fm%gauge, hessian_plan)
         z = fm%z
         call flux_map_newton(energy_system, z, fm%fixed, fm%gauge, gauge_at, fm%stationary, &
                              fm%relaxed_steps, fm%verbose, tolerance, max_steps, report, status, &
@@ -687,7 +757,7 @@ contains
             real(dp), intent(in) :: zz(:)
             type(newton_constraints_t), intent(inout) :: gauge
 
-            call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, zz, gauge)
+            call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, zz, gauge, hessian_plan)
         end subroutine gauge_at
 
         subroutine energy_system(zz, energy, gradient, hessian)
@@ -701,9 +771,9 @@ contains
                 call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g, &
                                        hessian, hessian_plan=hessian_plan)
             else if (present(gradient)) then
-                call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g)
+                call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g, hessian_plan=hessian_plan)
             else
-                call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy)
+                call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, hessian_plan=hessian_plan)
             end if
             if (present(gradient)) gradient = g
         end subroutine energy_system
