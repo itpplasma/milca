@@ -750,11 +750,17 @@ contains
         integer, intent(out) :: status
         type(newton_report_t) :: report
         type(flux_map3d_hessian_plan_t) :: hessian_plan
-        real(dp), allocatable :: z(:)
+        real(dp), allocatable :: z(:), moment(:)
+        integer, allocatable :: wall(:)
+        integer :: i
 
         if (fm%nt == 1) call cache_axisymmetric_section(derham, quad, plane_nodes(:, :, 1), hessian_plan)
         call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, fm%z, fm%gauge, hessian_plan)
         z = fm%z
+        if (fm%gauge_constraint) then
+            allocate (moment(size(z)))
+            wall = pack([(i, i=1, fm%n0)], fm%is_wall)
+        end if
         call flux_map_newton(energy_system, z, fm%fixed, fm%gauge, gauge_at, fm%stationary, &
                              fm%relaxed_steps, fm%verbose, tolerance, max_steps, report, status, &
                              model_agreement_damping=.true., initial_damping=0.1_dp)
@@ -773,7 +779,8 @@ contains
             real(dp), intent(in) :: zz(:)
             type(newton_constraints_t), intent(inout) :: gauge
 
-            call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, zz, gauge, hessian_plan)
+            ! Newton updates the gauge after evaluating the Hessian at zz.
+            if (allocated(moment)) call flux_map_gauge_row(moment, wall, zz, gauge)
         end subroutine gauge_at
 
         subroutine energy_system(zz, energy, gradient, hessian)
@@ -785,7 +792,7 @@ contains
 
             if (present(hessian)) then
                 call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g, &
-                                       hessian, hessian_plan=hessian_plan)
+                                       hessian, gauge_moment=moment, hessian_plan=hessian_plan)
             else if (present(gradient)) then
                 call flux_map3d_system(fm, derham, quad, profiles, plane_nodes, zz, energy, g, hessian_plan=hessian_plan)
             else
