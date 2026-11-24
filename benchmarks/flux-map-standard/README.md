@@ -15,7 +15,10 @@ VMEC++ reference in `reference/` (axis, surfaces s = 0.25, 0.5, 1 with |B|,
 | `w7x` | `input.w7x` of vmecpp | W7-X standard, pressure, NFP 5; bean and triangle sections |
 | `li383` | `input.li383_low_res` of VMEC2000 | NCSX-like, pressure, current, NFP 3 |
 
-Run and compare (stages are `degree:cells:planes`, each from the previous):
+Each stage starts from the previous solution. Specify a stage as
+`degree:cells:planes[:radial]`. The central block has `cells` cells in each
+direction. Each outer block has `cells` along the wall and `radial` across
+it. Omit `radial` to use `cells` in both directions.
 
 ```sh
 cmake --build build --target test_flux_map_qa
@@ -42,6 +45,7 @@ meshes, 0 = arc length), `MILCA_FM3_BANDS` (bands of s of the VMEC report).
 harmonic-disc boundary angles. Omit curvature grading when using this
 option. For the quasi-axisymmetric vacuum deck, use stages
 `2:2:9,3:4:21,4:6:21` to compare this option with `MILCA_FM3_GRADING=1`.
+The finer 17-plane configuration uses `2:2:9,3:4:17,5:8:17:4`.
 
 With `MILCA_FM3_VMEC=<wout>` the force balance of the VMEC state is printed
 first, on the same measure and without a mesh; the stages argument `vmec`

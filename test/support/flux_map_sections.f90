@@ -60,7 +60,8 @@ module flux_map_sections
 
 contains
 
-    subroutine fm3_build(c, samples, cells, degree, extra_points, status, preserve_area, grading, match_sample_angle)
+    subroutine fm3_build(c, samples, cells, degree, extra_points, status, preserve_area, grading, match_sample_angle, &
+                         radial_cells)
         !! Meshes of all planes from the wall curves samples(2, m, nt):
         !! counter-clockwise, equally spaced in a smooth periodic parameter,
         !! the first sample (mapped to the disc angle 0) a smooth function of
@@ -68,6 +69,7 @@ contains
         !! area of the wall curve. grading (default 0): strength of the
         !! curvature weight of the boundary correspondence of the harmonic
         !! maps (more wall cells at tips). match_sample_angle preserves the sample angle.
+        !! radial_cells sets the radial count of the outer blocks.
         !! Status 10 + s: status s of the harmonic map
         !! of a plane (3: the samples do not resolve the curve), 20: a mesh is
         !! not certified valid.
@@ -78,6 +80,7 @@ contains
         logical, intent(in), optional :: preserve_area
         real(dp), intent(in), optional :: grading
         logical, intent(in), optional :: match_sample_angle
+        integer, intent(in), optional :: radial_cells
         type(block_layout_t) :: layout
         type(spline_space_options_t) :: options
         type(harmonic_disc_t) :: map
@@ -101,6 +104,7 @@ contains
         options%regularity = SPLINE_C0
         allocate (options%knots(2, layout%block_count))
         options%knots(:, :)%element_count = cells
+        if (present(radial_cells)) options%knots(2, 2:)%element_count = radial_cells
         call spline_space_build(layout, options, c%space, status)
         if (status /= 0) return
         call spline_geometry_dofs(c%space, c%disc, status)
