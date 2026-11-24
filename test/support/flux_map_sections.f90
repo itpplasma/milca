@@ -9,13 +9,14 @@ module flux_map_sections
     use fortsparse_csr, only: csr_t
     use fortfem_spline_layout, only: block_layout_t, layout_ogrid, LAYOUT_WALL
     use fortfem_spline_space, only: spline_space_t, spline_space_options_t, &
-        spline_space_build, SPLINE_C0
+        spline_cell_broken, spline_space_build, SPLINE_C0
     use fortfem_harmonic_disc, only: harmonic_disc_t, harmonic_disc_build, &
         harmonic_disc_inverse, harmonic_disc_pull_back, harmonic_disc_wall_error, &
         spline_jacobian_certificate
     use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build, &
-        spline_point_matrix, spline_locate, spline_boundary_nodes, spline_geometry_at, &
-        spline_side_quadrature_t, spline_interface_quadrature
+        spline_point_matrix, spline_locate, spline_boundary_nodes, &
+        spline_side_quadrature_t, spline_interface_quadrature, &
+        spline_cell_tables, spline_cell_xi_jets
     use fortfem_spline_layout, only: LAYOUT_INTERIOR
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_build, &
         spline_derham_boundary_dofs, spline_derham_project, spline_derham_t_basis
@@ -630,27 +631,38 @@ contains
         !! over the quadrature points; negative: folded.
         type(fm3_case_t), intent(in) :: c
         real(dp), intent(out) :: quality(:)
-        real(dp), allocatable :: v0(:, :, :), gn(:, :, :), dets(:, :)
-        integer, allocatable :: d0(:)
-        real(dp) :: jet(2, 6), det1, f(2, 2)
-        integer :: cell, q, p, k, st
+        real(dp) :: minimum(c%nt), maximum(c%nt), det, widths(2)
+        real(dp), allocatable :: table1(:, :, :), table2(:, :, :), jets(:, :, :)
+        integer, allocatable :: geometry_nodes(:)
+        integer :: cell, q, k, p, nquad
 
-        allocate (dets(c%quad%point_count, c%nt))
-        do cell = 1, size(c%quad%point_offset)
-            call clebsch_node_gradients(c%derham, c%quad, cell, v0, d0, gn)
-            do q = 1, c%quad%points_per_cell
-                p = c%quad%point_offset(cell) + q - 1
-                call spline_geometry_at(c%space, c%quad%block(p), c%quad%xi(:, p), jet, st)
-                det1 = jet(1, 2)*jet(2, 3) - jet(1, 3)*jet(2, 2)
-                do k = 1, c%nt
-                    f = matmul(c%base(:, d0, k), transpose(gn(:, :, q)))
-                    dets(p, k) = det1*(f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1))
+        p = c%degree
+        nquad = c%quad%points_per_direction
+        minimum = huge(1.0_dp)
+        maximum = -huge(1.0_dp)
+        !$omp parallel default(none) shared(c,p,nquad) &
+        !$omp private(geometry_nodes,table1,table2,jets,widths,cell,k,q,det) &
+        !$omp reduction(min:minimum) reduction(max:maximum)
+        allocate (geometry_nodes((p + 1)**2), table1(p + 1, nquad, 0:2), &
+                  table2(p + 1, nquad, 0:2), jets(2, 6, nquad**2))
+        !$omp do
+        do cell = 1, c%space%cell_count
+            call spline_cell_broken(c%space, cell, geometry_nodes)
+            geometry_nodes = c%space%broken_dof(c%space%broken_ptr(geometry_nodes))
+            call spline_cell_tables(c%space, c%quad, cell, table1, table2, widths)
+            do k = 1, c%nt
+                call spline_cell_xi_jets(table1, table2, c%base(:, geometry_nodes, k), jets)
+                do q = 1, nquad**2
+                    det = jets(1, 2, q)*jets(2, 3, q) - jets(1, 3, q)*jets(2, 2, q)
+                    minimum(k) = min(minimum(k), det)
+                    maximum(k) = max(maximum(k), det)
                 end do
             end do
         end do
-        do k = 1, c%nt
-            quality(k) = minval(dets(:, k))/maxval(dets(:, k))
-        end do
+        !$omp end do
+        deallocate (geometry_nodes, table1, table2, jets)
+        !$omp end parallel
+        quality = minimum/maximum
     end subroutine fm3_mesh_quality
 
     subroutine fm3_dump_hessian(c, profiles)
