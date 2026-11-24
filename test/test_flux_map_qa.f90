@@ -24,7 +24,8 @@ program test_flux_map_qa
     !! the force balance J X B - grad p of the VMEC state itself
     !! (milca_flux_map_force; with the stages argument "vmec" only this).
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use milca_equilibrium_import, only: imported_equilibrium_t, IMPORT_OK, profile_value
+    use milca_equilibrium_import, only: imported_equilibrium_t, IMPORT_OK
+    use milca_ideal_seed_3d, only: hermite_profile_evaluate
     use milca_import_vmec, only: import_vmec
     use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
@@ -743,15 +744,11 @@ contains
             end do
             p = 4e-7_dp*pi*p
         else if (pres_hermite) then
-            ! sampled profiles (e.g. two_power): p', p'' by central differences
-            block
-                real(dp), parameter :: h = 1e-4_dp
-                real(dp) :: pm, p0, pp
-                p0 = profile_value(eq%pressure, s)
-                pm = profile_value(eq%pressure, s - h)
-                pp = profile_value(eq%pressure, s + h)
-                p = 4e-7_dp*pi*[p0, (pp - pm)/(2*h), (pp - 2*p0 + pm)/h**2]
-            end block
+            associate (pressure => eq%pressure)
+                call hermite_profile_evaluate(pressure%knots, pressure%values, pressure%slopes, &
+                    s, p(1), slope=p(2), curvature=p(3))
+            end associate
+            p = 4e-7_dp*pi*p
         end if
         p = pscale*p
     end subroutine deck_profiles

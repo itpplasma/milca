@@ -1,7 +1,7 @@
 program test_ideal_seed_3d
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
-        ideal_seed_3d_init, ideal_seed_disk_mesh, ideal_seed_boundary_coefficients
+        ideal_seed_3d_init, ideal_seed_disk_mesh, ideal_seed_boundary_coefficients, hermite_profile_evaluate
     use milca_ideal_map, only: ideal_map_t, ideal_map_rdof, ideal_map_energy, &
         ideal_map_init, ideal_map_freeze, ideal_map_prolong, ideal_map_hessian, &
         ideal_map_expand, ideal_map_reduce
@@ -72,6 +72,7 @@ program test_ideal_seed_3d
         error stop 'iota polynomial'
     if (abs(integral - (0.4_dp*0.6_dp + 0.1_dp*0.6_dp**2 &
         - 0.05_dp*0.6_dp**3/3)) > 1e-15_dp) error stop 'iota primitive'
+    call hermite_profile_derivatives()
     call ideal_seed_disk_mesh(mesh, 8, 2, status)
     if (status /= 0) error stop 'reference mesh'
     call omp_set_num_threads(1)
@@ -161,6 +162,22 @@ program test_ideal_seed_3d
     print '(a)', '[V] flux, sheared profiles, fixed wall, derivatives and fold rejection pass'
     print '(a)', '[V] initializer candidate only; continuous bounds unavailable'
 contains
+
+    subroutine hermite_profile_derivatives()
+        real(dp), parameter :: knots(3) = [0.0_dp, 0.31_dp, 1.0_dp]
+        real(dp), parameter :: values(3) = 0.3_dp - 2*knots + knots**3, slopes(3) = -2 + 3*knots**2
+        real(dp), parameter :: points(5) = [-0.1_dp, 0.14_dp, 0.31_dp, 0.68_dp, 1.05_dp]
+        real(dp) :: s, value, slope, curvature, expected(3)
+        integer :: k
+
+        do k = 1, size(points)
+            s = points(k)
+            call hermite_profile_evaluate(knots, values, slopes, s, value, slope=slope, curvature=curvature)
+            expected = [0.3_dp - 2*s + s**3, -2 + 3*s**2, 6*s]
+            if (maxval(abs([value, slope, curvature] - expected)) > 2e-14_dp) &
+                error stop 'Hermite value and two derivatives agree with the cubic'
+        end do
+    end subroutine hermite_profile_derivatives
     subroutine increment_check(map)
         type(ideal_map_t), intent(in) :: map
         type(csr_matrix_t) :: hessian

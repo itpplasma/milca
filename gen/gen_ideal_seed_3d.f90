@@ -85,6 +85,8 @@ program gen_ideal_seed_3d
     call prove(subs(diff(hermite, t), t, 0*t + 1) - h*d1, 'Hermite right slope')
     call w%emit('seed_hermite_profile', [character(2) :: 't', 'h', 'f0', 'd0', 'f1', 'd1'], &
         ['value    ', 'primitive'], [hermite, primitive], ad=.true.)
+    call w%emit('seed_hermite_profile_curvature', [character(2) :: 't', 'h', 'f0', 'd0', 'f1', 'd1'], &
+        ['curvature'], [diff(diff(hermite, t), t)/h**2], ad=.true.)
     flux = sym('flux'); pi = sym('pi')
     integral = sym('integral'); edge = sym('edge')
     iota = sym('iota'); pressure = sym('pressure')
