@@ -605,7 +605,8 @@ contains
         call flux_map3d_gauge(fm, derham, quad, profiles, plane_nodes, fm%z, fm%gauge)
         z = fm%z
         call flux_map_newton(energy_system, z, fm%fixed, fm%gauge, gauge_at, fm%stationary, &
-                             fm%relaxed_steps, fm%verbose, tolerance, max_steps, report, status)
+                             fm%relaxed_steps, fm%verbose, tolerance, max_steps, report, status, &
+                             model_agreement_damping=.true.)
         fm%z = z
         fm%steps = report%steps
         fm%energy = report%energy
