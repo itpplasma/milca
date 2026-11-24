@@ -978,6 +978,8 @@ if(TARGET gen_map_3d_readback)
         TARGETS gen_map_3d_readback)
 endif()
 
+milca_test_labels(equilibrium_forward_landreman_sheared fast CLASSES mhd
+    TARGETS test_equilibrium_3d)
 milca_test_labels(equilibrium_d8_landreman_3d_integer fast CLASSES mhd
     TARGETS test_equilibrium_3d)
 milca_test_labels(equilibrium_d8_issan_3d_integer fast CLASSES mhd

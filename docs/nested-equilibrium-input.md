@@ -29,6 +29,7 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `ladder_nodes(:)`, `ladder_degree(:)` | coarser levels solved first; each corrects the next seed (`ideal_map_prolong_correction`) | none |
 | `angle_mpol` | poloidal modes of the boundary field-line angle; -1 pins the boundary angle | -1 |
 | `tolerance`, `max_iterations` | free reduced-gradient reduction and Newton limit per level | 1e-8, 200 |
+| `stationary` | solve for a stationary point at fixed boundary and prescribed rotational transform | false |
 | `prescribe_current` | match the enclosed toroidal current `current(k)` (A, coefficients of s^k) instead of keeping `iota` | false |
 | `max_current_iterations`, `current_tolerance` | Newton steps on iota and the largest iota increment of the last step; with automatic resolution at most a tenth of the active `fourier_tolerance`, `mesh_tolerance` and `iota_tolerance` | 30, 1e-5 |
 | `iota_nodes`, `iota_tolerance` | Chebyshev-Gauss surfaces of the matched iota polynomial, 2 to 32, or -1 to raise them from 6 under error control | -1, 1e-4 |
@@ -111,6 +112,14 @@ mesh ladder runs first at the boundary's modes, then the toroidal ladder and
 the iota-node ladder, and the active ladders alternate until each is met by
 its first refinement. Axisymmetric data
 (`ntor = 0`) keep `map_ntor = 0`.
+
+With `stationary = .true.`, the Newton step solves \(H d = -g\), where
+\(H\) is the undamped Hessian and \(g\) is the free energy gradient. The
+line search reduces \(\|H^{-1} g_{\mathrm{trial}}\|_2\) with \(H\) held
+at the current iterate. This can reach a saddle of the energy. Each
+refinement transfers the solved geometry and field-line angle and retains
+the target level's boundary. The stopping tolerance is a fraction of the
+free-gradient norm of the uncorrected seed at that level.
 
 The cost grows steeply with the interior modes. For the rotating ellipse
 nfp = 5, R0 = 5, 16 boundary nodes, at 8 threads:

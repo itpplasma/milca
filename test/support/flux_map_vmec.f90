@@ -12,7 +12,7 @@ module flux_map_vmec
     use milca_flux_map, only: flux_map_profiles
     use milca_flux_map_force, only: flux_map_force_t, flux_map_force_reset, flux_map_force_add, &
         flux_map_jet_to_cylindrical, flux_map_jet_product, flux_map_jet_cos_sin
-    use milca_eulerian_clebsch, only: clebsch_nfp
+    use milca_eulerian_clebsch, only: clebsch_nfp, clebsch_exact_field
     use flux_map_sections, only: fm3_case_t
     implicit none
     private
@@ -20,6 +20,9 @@ module flux_map_vmec
     public :: fm3_from_vmec, fm3_vmec_force
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
+    ! Allow a small wall interpolation error while excluding distant roots
+    ! of the extrapolated Fourier series.
+    real(dp), parameter :: projection_rho_max = 1.05_dp
     type(fm3_case_t), pointer :: cur => null()
     type(vmec_state_t), pointer :: vs => null()
     integer :: plane = 1, component = 1, failures = 0
@@ -55,10 +58,10 @@ contains
             plane = k
             component = 1
             call spline_derham_project(c%derham, 0, vmec_value, cx, status, c%degree + 3)
-            if (status /= 0) return
+            if (status /= 0) exit
             component = 2
             call spline_derham_project(c%derham, 0, vmec_value, cy, status, c%degree + 3)
-            if (status /= 0) return
+            if (status /= 0) exit
             do i = 1, n0
                 if (c%fm%is_wall(i)) then
                     theta = atan2(cy(i), cx(i))
@@ -73,9 +76,10 @@ contains
         end do
         cur => null()
         vs => null()
+        if (failures > 0) status = 1
     end subroutine fm3_from_vmec
 
-    subroutine fm3_vmec_force(state, profiles, orientation, bands, radial, acc)
+    subroutine fm3_vmec_force(state, profiles, orientation, bands, radial, acc, exact_field, field_error)
         !! The force balance (milca_flux_map_force) of the VMEC state itself,
         !! without a mesh: u = rho (cos theta*, orientation sin theta*),
         !! theta* = theta + lambda, as a function of (R, phi, Z) through the
@@ -89,13 +93,16 @@ contains
         real(dp), intent(in) :: orientation
         integer, intent(in) :: bands, radial
         type(flux_map_force_t), intent(out) :: acc
+        procedure(clebsch_exact_field), optional :: exact_field
+        real(dp), intent(out), optional :: field_error(2)
         real(dp) :: rho, theta, zeta, rj(10), zj(10), lj(10), tj(10), cj(10), sj(10), pj(10), &
-                    xq(10), yq(10), xc(10), yc(10), w
+                    xq(10), yq(10), xc(10), yc(10), w, field(3), reference(3)
         integer :: i, j, k, ntheta, nzeta
 
         ntheta = 4*maxval(state%m) + 8
         nzeta = 4*nint(maxval(abs(state%xn))/state%nfp) + 8
         call flux_map_force_reset(acc, bands)
+        if (present(field_error)) field_error = 0
         do i = 1, radial
             rho = sqrt((i - 0.5_dp)/radial)
             pj = 0
@@ -116,7 +123,11 @@ contains
                     ! dV = R |d(R, Z)/d(rho, theta)| drho dtheta dzeta, ds = 2 rho drho
                     w = rj(1)*abs(rj(2)*zj(3) - rj(3)*zj(2))/(2*rho*radial)*two_pi/ntheta &
                         *two_pi/nzeta
-                    call flux_map_force_add(acc, w, rj(1), xc, yc, profiles)
+                    call flux_map_force_add(acc, w, rj(1), xc, yc, profiles, field)
+                    if (present(exact_field) .and. present(field_error)) then
+                        call exact_field([rj(1), zeta, zj(1)], reference)
+                        field_error = field_error + w*[sum((field - reference)**2), sum(reference**2)]
+                    end if
                 end do
             end do
         end do
@@ -139,7 +150,7 @@ contains
         zeta = two_pi*(plane - 1)/(cur%nt*clebsch_nfp)
         rho = guess(1)
         theta = guess(2)
-        call vmec_state_invert(vs, rz, zeta, rho, theta, st)
+        call vmec_state_invert(vs, rz, zeta, rho, theta, st, projection_rho_max)
         if (st /= 0) then
             ! coarse search, then Newton again
             best = huge(1.0_dp)
@@ -154,7 +165,7 @@ contains
                     end if
                 end do
             end do
-            call vmec_state_invert(vs, rz, zeta, rho, theta, st)
+            call vmec_state_invert(vs, rz, zeta, rho, theta, st, projection_rho_max)
             if (st /= 0) failures = failures + 1
         end if
         guess = [rho, theta]

@@ -32,7 +32,7 @@ program test_flux_map_force
     use milca_flux_map_force, only: flux_map_jet_to_cylindrical, flux_map3d_force_point
     use flux_map_sections
     use flux_map_vmec, only: fm3_vmec_force
-    use milca_vmec_state, only: vmec_state_t, vmec_state_set, vmec_state_jet
+    use milca_vmec_state, only: vmec_state_t, vmec_state_set, vmec_state_invert, vmec_state_jet
     use milca_flux_map_force, only: flux_map_force_t, flux_map_force_norm, FORCE_J, FORCE_B, &
         FORCE_F, FORCE_GRAD_B2
     use landreman_sections, only: section_oracle, section_axis, section_boundary_radius, &
@@ -47,6 +47,7 @@ program test_flux_map_force
     call change_of_variables()
     call discrete_state()
     call vmec_route()
+    call vmec_bounded_inverse()
     call vmec_four_surfaces()
     if (failures > 0) error stop 'flux map force balance test failed'
     print '(a)', 'PASS flux map force balance'
@@ -216,6 +217,28 @@ contains
         call check(log(res(1)/res(2))/log(2.0_dp) > 3.0_dp, &
                    'VMEC route: order above 3 in the radial grid', log(res(1)/res(2))/log(2.0_dp))
     end subroutine vmec_route
+
+    subroutine vmec_bounded_inverse()
+        ! Circular surfaces with R - 3 = rho cos(theta) and Z = rho sin(theta).
+        integer, parameter :: ns = 5
+        type(vmec_state_t) :: st
+        real(dp) :: rmnc(2, ns), zmns(2, ns), lmns(2, ns), rho, theta, err
+        integer :: i, status
+
+        rmnc(1, :) = 3.0_dp
+        rmnc(2, :) = [(sqrt(real(i - 1, dp)/(ns - 1)), i = 1, ns)]
+        zmns(1, :) = 0
+        zmns(2, :) = rmnc(2, :)
+        lmns = 0
+        call vmec_state_set(st, 1, [0.0_dp, 1.0_dp], [0.0_dp, 0.0_dp], rmnc, zmns, lmns, 1.0_dp)
+        rho = 0.9_dp
+        theta = 0
+        call vmec_state_invert(st, [4.01_dp, 0.0_dp], 0.0_dp, rho, theta, status, 1.05_dp)
+        err = abs(rho - 1.01_dp)
+        call check(status == 0 .and. err < 1e-13_dp, 'VMEC inverse permits slight wall extrapolation', err)
+        call vmec_state_invert(st, [4.20_dp, 0.0_dp], 0.0_dp, rho, theta, status, 1.05_dp)
+        call check(status /= 0 .and. rho <= 1.05_dp, 'VMEC inverse rejects distant extrapolation', rho)
+    end subroutine vmec_bounded_inverse
 
     subroutine vmec_four_surfaces()
         ! m = 1 coefficients rho*(1 + s + s**2) on the full and half grids.

@@ -7,16 +7,19 @@ program test_map_3d_equilibrium
     use milca_equilibrium_state, only: equilibrium_state_t, EQ_VALUES
     use milca_map_3d_equilibrium, only: map_3d_equilibrium, map_3d_sample, &
                                         map_3d_coordinates
+    use milca_map_3d_force, only: map_3d_force
+    use milca_flux_map_force, only: flux_map_force_t
     use milca_map_3d_readback_leaves, only: map_3d_field, &
         map_3d_field_jvp, map_3d_field_vjp
     use omp_lib, only: omp_set_num_threads
     implicit none
-    type(ideal_map_t) :: map
+    type(ideal_map_t) :: map, invalid
     type(gs_state_t) :: mesh
     type(toroidal_profile_t) :: profile
     type(toroidal_seed_t) :: seed, wrong
     type(equilibrium_state_t) :: equilibrium
-   real(dp) :: c(4,-1:1,0:1), points(3,31), values(EQ_VALUES,31), expected(EQ_VALUES,31)
+    type(flux_map_force_t) :: force
+    real(dp) :: c(4,-1:1,0:1), points(3,31), values(EQ_VALUES,31), expected(EQ_VALUES,31)
     real(dp) :: parallel_values(EQ_VALUES, 31), xi(2), q(3), d(3, 3), g(2, 2), ref(2)
     real(dp) :: phi, cg(2), chi, b3, pressure, error
     real(dp) :: adinput(18), direction_ad(18), bar(7), tangent(7), adjoint(18)
@@ -28,10 +31,28 @@ program test_map_3d_equilibrium
     if (status /= 0) error stop 'disk mesh'
     call ideal_seed_3d_init(map, seed, mesh, c, 3, 0.7_dp, profile, status)
     if (status /= 0) error stop '3D readback seed'
+    call map_3d_force(map, seed, force_profiles, 1.0_dp, 2, force, status)
+    if (status /= 0) error stop 'force diagnostic rejected the identity map'
+    call map_3d_force(map, seed, force_profiles, -1.0_dp, 2, force, status)
+    if (status /= 0) error stop 'force diagnostic rejected a consistent label orientation'
+    invalid = map
+    invalid%x(2, :, :) = -map%x(2, :, :)
+    call map_3d_force(invalid, seed, force_profiles, 1.0_dp, 2, force, status)
+    if (status == 0) error stop 'force diagnostic admitted reversed orientation'
+    invalid = map
+    ! Adding 2v to the label angle gives an angular derivative 1 + 2u.
+    invalid%angle_mpol = 1
+    invalid%nangle = 2
+    invalid%angle_m = [1]
+    invalid%angle_n = [0]
+    invalid%angle = [0.0_dp, 2.0_dp]
+    call map_3d_force(invalid, seed, force_profiles, 1.0_dp, 2, force, status)
+    if (force%jacobian_min >= 0 .or. force%jacobian_max <= 0) error stop 'expected a label fold'
+    if (status == 0) error stop 'force diagnostic admitted a label fold'
     ! Independent cylindrical identity-map formula.
     do j = 1, 31
         cell = 1 + mod(j - 1, map%cells); xi = [0.21_dp, 0.37_dp]; phi = 0.17_dp*j
-      call map_3d_sample(map, seed, cell, xi, phi, points(:, j), expected(:, j), status)
+        call map_3d_sample(map, seed, cell, xi, phi, points(:, j), expected(:, j), status)
         if (status /= 0) error stop 'identity map sample'
         call map_3d_coordinates(map, cell, xi, phi, q, d, ref, g)
         call seed%evaluate(ref, chi, cg, b3, pressure)
@@ -46,7 +67,7 @@ program test_map_3d_equilibrium
     end do
     do j = 1, 31
         cell = 1 + mod(j - 1, map%cells); xi = [0.21_dp, 0.37_dp]; phi = 0.17_dp*j
-      call map_3d_sample(map, seed, cell, xi, phi, points(:, j), expected(:, j), status)
+        call map_3d_sample(map, seed, cell, xi, phi, points(:, j), expected(:, j), status)
         if (status /= 0) error stop 'nonzero Fourier map sample'
     end do
     wrong = seed; wrong%flux = 1.01_dp*seed%flux
@@ -58,10 +79,10 @@ program test_map_3d_equilibrium
     call equilibrium%field%sample(points, values, statuses)
     call omp_set_num_threads(4)
     call equilibrium%field%sample(points, parallel_values, parallel_statuses)
-if (any(statuses /= 0) .or. any(parallel_statuses /= 0)) error stop '3D point inversion'
+    if (any(statuses /= 0) .or. any(parallel_statuses /= 0)) error stop '3D point inversion'
     error = maxval(abs(values - expected))
     if (error > 2e-11_dp) error stop 'physical 3D map round trip'
- if (maxval(abs(values - parallel_values)) > 2e-11_dp) error stop 'thread sample parity'
+    if (maxval(abs(values - parallel_values)) > 2e-11_dp) error stop 'thread sample parity'
     adinput=[1.2_dp,0.1_dp,0.02_dp,0.05_dp,0.9_dp,-0.01_dp, &
         0.03_dp,0.04_dp,1.01_dp,0.4_dp,0.02_dp,0.03_dp,0.3_dp, &
         0.2_dp,-0.3_dp,0.7_dp,2.8_dp,-1.0_dp]
@@ -99,13 +120,24 @@ if (any(statuses /= 0) .or. any(parallel_statuses /= 0)) error stop '3D point in
     call map_3d_coordinates(map, 1, [0.21_dp, 0.37_dp], 0.17_dp, q, d, ref, g)
     if (maxval(abs(q(:2) - ref)) > 1e-12_dp) error stop 'P4 identity map coordinates'
     print '(a,es14.5)', '[V] 3D physical round-trip error: ', error
-   print '(a)', '[V] candidate state and derivatives have unavailable continuous bounds'
+    print '(a)', '[V] candidate state and derivatives have unavailable continuous bounds'
 contains
+    subroutine force_profiles(s, tau, gp, p)
+        real(dp), intent(in) :: s
+        real(dp), intent(out) :: tau(3), gp(3), p(3)
+        real(dp) :: iota, pressure, integral, iota_slope, pressure_slope
+
+        call profile%evaluate(s, iota, pressure, integral, iota_slope, pressure_slope)
+        tau = [seed%flux/acos(-1.0_dp), 0.0_dp, 0.0_dp]
+        gp = 0.5_dp*tau(1)*[iota, iota_slope, 0.0_dp]
+        p = [pressure, pressure_slope, 0.0_dp]
+    end subroutine force_profiles
+
     subroutine field_at(a,y)
         real(dp),intent(in)::a(18)
         real(dp),intent(out)::y(7)
-    call map_3d_field(a(1), a(2), a(3), a(4), a(5), a(6), a(7), a(8), a(9), a(10), &
-        a(11), a(12), a(13), a(14), a(15), a(16), a(17), a(18), y(1), y(2), y(3), &
-        y(4), y(5), y(6), y(7))
+        call map_3d_field(a(1), a(2), a(3), a(4), a(5), a(6), a(7), a(8), a(9), a(10), &
+            a(11), a(12), a(13), a(14), a(15), a(16), a(17), a(18), y(1), y(2), y(3), &
+            y(4), y(5), y(6), y(7))
     end subroutine
 end program
