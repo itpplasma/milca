@@ -348,7 +348,7 @@ option(MILCA_BUILD_GLL_SPIKE "Build the axisymmetric matrix-free GLL map experim
 # symmetry #263 #265 and polar quadrature at point singularities #267, on
 # block sides and vertices #268, the KKT Newton with inertia and the
 # parameter continuation #288).
-set(MILCA_FORTFEM_REVISION "758d84f88e1b3bc820224372af82c59b243950bc")
+set(MILCA_FORTFEM_REVISION "52d20cc8dd4b423541ace3fe7b3123072e16ef17")
 FetchContent_Declare(fortfem
     GIT_REPOSITORY https://github.com/lazy-fortran/fortfem.git
     GIT_TAG ${MILCA_FORTFEM_REVISION})
