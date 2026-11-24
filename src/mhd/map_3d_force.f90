@@ -51,23 +51,36 @@ contains
         real(dp), intent(in) :: xi(2), phi, orientation
         real(dp), intent(out) :: rj(10), zj(10), xq(10), yq(10)
         integer, intent(out) :: status
+        status = 1
+        if (.not. supports_force_jets(map)) return
+        call sample_force_jets(map, seed, cell, xi, phi, orientation, rj, zj, xq, yq)
+        status = 0
+    end subroutine map_3d_force_jets
+
+    logical function supports_force_jets(map) result(supported)
+        type(ideal_map_t), intent(in) :: map
+
+        supported = .false.
+        select type (chart => map%chart)
+        type is (cylindrical_chart_t)
+            supported = all(map%x(3, :, :) == 0)
+        end select
+    end function supports_force_jets
+
+    subroutine sample_force_jets(map, seed, cell, xi, phi, orientation, rj, zj, xq, yq)
+        type(ideal_map_t), intent(in) :: map
+        type(toroidal_seed_t), intent(in) :: seed
+        integer, intent(in) :: cell
+        real(dp), intent(in) :: xi(2), phi, orientation
+        real(dp), intent(out) :: rj(10), zj(10), xq(10), yq(10)
         real(dp) :: shape(TRIANGLE_MAX_NODES), gradient(2, TRIANGLE_MAX_NODES), &
                     hessian(2, 2, TRIANGLE_MAX_NODES), section(6, 3), f(5), c, s, phase, &
                     uj(10), vj(10), ej(10), re(10), im(10), next(10), cj(10), sj(10), &
-                    cosj(10), sinj(10), unit(10)
-        real(dp), allocatable :: coefficient(:, :)
-        integer :: k, n, a, i, m, level
+                    cosj(10), sinj(10), unit(10), coefficient(2, TRIANGLE_MAX_NODES)
+        integer :: k, n, a, i, m, level, node
 
-        status = 1
-        select type (chart => map%chart)
-        type is (cylindrical_chart_t)
-        class default
-            return
-        end select
-        if (any(map%x(3, :, :) /= 0)) return
         n = map%nloc
         call triangle_basis_jet(xi, shape(:n), gradient(:, :n), hessian(:, :, :n))
-        allocate (coefficient(3, n))
         rj = 0
         zj = 0
         do k = 1, map%nmode
@@ -78,9 +91,11 @@ contains
                 s = 1 - c
                 call curve_fourier_mode(c, s, phase, phi, f(1), f(2), f(3), f(4), f(5))
             end if
-            coefficient = map%x(:, k, map%conn(:, cell))
+            do node = 1, n
+                coefficient(:, node) = map%x(1:2, k, map%conn(node, cell))
+            end do
             do a = 1, 2
-                call section_jet(coefficient(a, :), section(:, a))
+                call section_jet(coefficient(a, :n), section(:, a))
             end do
             rj = rj + toroidal_jet(section(:, 1), f)
             zj = zj + toroidal_jet(section(:, 2), f)
@@ -130,7 +145,6 @@ contains
         call flux_map_jet_cos_sin(ej, cj, sj)
         xq = flux_map_jet_product(uj, cj) - flux_map_jet_product(vj, sj)
         yq = orientation*(flux_map_jet_product(uj, sj) + flux_map_jet_product(vj, cj))
-        status = 0
 
     contains
 
@@ -157,7 +171,7 @@ contains
                    sec(4)*mode(1), sec(5)*mode(1), sec(2)*mode(2), sec(6)*mode(1), &
                    sec(3)*mode(2), sec(1)*mode(3)]
         end function toroidal_jet
-    end subroutine map_3d_force_jets
+    end subroutine sample_force_jets
 
     subroutine map_3d_force_field(map, seed, profiles, orientation, cell, xi, phi, b, j, f, status)
         !! B, J = curl B and F = J X B - grad p, components (R, phi, Z), of
@@ -204,13 +218,15 @@ contains
         type(flux_map_force_t) :: part
         real(dp) :: x(nq), w(nq), xi(2), weight, phi, rj(10), zj(10), xq(10), yq(10), xc(10), &
                     yc(10), volume_jacobian
-        integer :: e, i, j, k, nphi, local, failed
+        integer :: e, i, j, k, nphi, failed
 
+        status = 1
+        call flux_map_force_reset(acc, bands)
+        if (.not. supports_force_jets(map)) return
         call gauss_legendre(nq, x, w)
         x = (x + 1)/2
         w = w/2
         nphi = max(16, 4*map%ntor + 4)
-        call flux_map_force_reset(acc, bands)
         failed = 0
         !$omp parallel default(private) shared(map, seed, acc, x, w, nphi, bands, orientation) &
         !$omp     reduction(+:failed)
@@ -223,12 +239,7 @@ contains
                     do i = 1, nq
                         xi = [x(i)*(1 - x(j)), x(j)]
                         weight = w(i)*w(j)*(1 - x(j))
-                        call map_3d_force_jets(map, seed, e, xi, phi, orientation, rj, zj, xq, &
-                                               yq, local)
-                        if (local /= 0) then
-                            failed = failed + 1
-                            cycle
-                        end if
+                        call sample_force_jets(map, seed, e, xi, phi, orientation, rj, zj, xq, yq)
                         volume_jacobian = -map%sigma*rj(1)*(rj(2)*zj(3) - rj(3)*zj(2))
                         if (.not. (rj(1) > 0 .and. volume_jacobian > 0)) then
                             failed = failed + 1
@@ -247,7 +258,6 @@ contains
         call flux_map_force_merge(acc, part)
         !$omp end critical (map_3d_force_merge_parts)
         !$omp end parallel
-        status = 1
         if (failed /= 0 .or. acc%points == 0) return
         if (acc%jacobian_min > 0 .or. acc%jacobian_max < 0) status = 0
     end subroutine map_3d_force
