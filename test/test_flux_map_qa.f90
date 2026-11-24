@@ -45,6 +45,7 @@ program test_flux_map_qa
     integer :: nsamples = 256
     type(imported_equilibrium_t) :: eq
     type(fm3_case_t), target :: c, previous, axis_seed
+    type(fm3_wall_cache_t) :: first_wall
     character(512) :: deck = '../benchmarks/label-qa/input.landreman-paul-qa-iota', &
                       outdir = 'flux-map-qa-out', stages = '2:2:9', arg
     integer :: eval_planes, stage_spec(4, max_stages), nstages, istage, k, st, u, newton_total, j, solve_status
@@ -165,7 +166,8 @@ program test_flux_map_qa
                     call plane_curve(2*pi*(k - 1)/(nt*eq%nfp), samples(:, :, k))
                 end do
                 call fm3_build(c, samples, cells, deg, 4, st, preserve_area=keep_area(), &
-                               grading=grading, match_sample_angle=match_sample_angle, radial_cells=radial)
+                               grading=grading, match_sample_angle=match_sample_angle, radial_cells=radial, &
+                               first_wall=first_wall)
                 if (st == 0 .and. c%map_residual < 1e-9_dp) exit
                 if (st /= 0 .and. st /= 13) exit
                 if (nsamples >= 2048) exit

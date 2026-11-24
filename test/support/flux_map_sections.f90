@@ -28,6 +28,13 @@ module flux_map_sections
     implicit none
     private
 
+    type, public :: fm3_wall_cache_t
+        private
+        type(harmonic_disc_t) :: map
+        real(dp), allocatable :: samples(:, :)
+        logical :: match_sample_angle = .false.
+    end type fm3_wall_cache_t
+
     type, public :: fm3_case_t
         type(spline_space_t) :: space ! geometry of plane 1
         type(spline_derham_t) :: derham
@@ -61,7 +68,7 @@ module flux_map_sections
 contains
 
     subroutine fm3_build(c, samples, cells, degree, extra_points, status, preserve_area, grading, match_sample_angle, &
-                         radial_cells)
+                         radial_cells, first_wall)
         !! Meshes of all planes from the wall curves samples(2, m, nt):
         !! counter-clockwise, equally spaced in a smooth periodic parameter,
         !! the first sample (mapped to the disc angle 0) a smooth function of
@@ -70,6 +77,7 @@ contains
         !! curvature weight of the boundary correspondence of the harmonic
         !! maps (more wall cells at tips). match_sample_angle preserves the sample angle.
         !! radial_cells sets the radial count of the outer blocks.
+        !! first_wall reuses the harmonic map of the first plane across meshes.
         !! Status 10 + s: status s of the harmonic map
         !! of a plane (3: the samples do not resolve the curve), 20: a mesh is
         !! not certified valid.
@@ -81,9 +89,11 @@ contains
         real(dp), intent(in), optional :: grading
         logical, intent(in), optional :: match_sample_angle
         integer, intent(in), optional :: radial_cells
+        type(fm3_wall_cache_t), optional, target, intent(inout) :: first_wall
         type(block_layout_t) :: layout
         type(spline_space_options_t) :: options
-        type(harmonic_disc_t) :: map
+        type(harmonic_disc_t), target :: local_map
+        type(harmonic_disc_t), pointer :: map
         real(dp), allocatable :: xg(:, :)
         integer, allocatable :: wall(:)
         complex(dp) :: z
@@ -112,7 +122,13 @@ contains
         allocate (c%base(2, size(c%disc, 2), c%nt))
         c%map_residual = 0
         do k = c%nt, 1, -1
-            call harmonic_disc_build(map, samples(:, :, k), status, grading, match_sample_angle)
+            if (k == 1 .and. present(first_wall)) then
+                call fm3_first_wall_map(first_wall, samples(:, :, k), grading, match_sample_angle, status)
+                map => first_wall%map
+            else
+                call harmonic_disc_build(local_map, samples(:, :, k), status, grading, match_sample_angle)
+                map => local_map
+            end if
             if (status /= 0) then
                 status = 10 + status
                 return
@@ -142,6 +158,35 @@ contains
         call spline_derham_boundary_dofs(c%derham, LAYOUT_WALL, 0, wall)
         call flux_map3d_init(c%fm, c%n0, c%nt, wall)
     end subroutine fm3_build
+
+    subroutine fm3_first_wall_map(cache, samples, grading, match_sample_angle, status)
+        type(fm3_wall_cache_t), intent(inout) :: cache
+        real(dp), intent(in) :: samples(:, :)
+        real(dp), optional, intent(in) :: grading
+        logical, optional, intent(in) :: match_sample_angle
+        integer, intent(out) :: status
+        real(dp) :: weight
+        logical :: use_sample_angle
+
+        weight = 0.0_dp
+        if (present(grading)) weight = grading
+        use_sample_angle = .false.
+        if (present(match_sample_angle)) use_sample_angle = match_sample_angle
+        if (allocated(cache%samples)) then
+            if (all(shape(cache%samples) == shape(samples)) .and. cache%map%grading == weight .and. &
+                (cache%match_sample_angle .eqv. use_sample_angle)) then
+                if (all(cache%samples == samples)) then
+                    status = 0
+                    return
+                end if
+            end if
+            deallocate (cache%samples)
+        end if
+        call harmonic_disc_build(cache%map, samples, status, weight, use_sample_angle)
+        if (status /= 0) return
+        cache%samples = samples
+        cache%match_sample_angle = use_sample_angle
+    end subroutine fm3_first_wall_map
 
     real(dp) function core_fraction()
         !! Size of the O-grid core relative to the disc radius (0.5; diagnostic
