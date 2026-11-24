@@ -365,28 +365,41 @@ contains
         status = 0
     end subroutine fm3_axis
 
-    subroutine fm3_preimage(c, t, profiles, target, x, rz, b, status)
+    subroutine fm3_preimage(c, t, profiles, target, x, rz, b, status, block_hint, inverse_jacobian)
         !! The point of the plane t that u_h maps to target: Newton in the
         !! coordinates x of the reference plane from
-        !! the guess x. Returns its position rz and B.
+        !! the guess x. Returns its position rz and B. The optional hint is
+        !! updated to the converged block. The optional inverse maps a label
+        !! displacement to a reference-plane displacement.
         type(fm3_case_t), intent(in) :: c
         real(dp), intent(in) :: t, target(2)
         procedure(flux_map_profiles) :: profiles
         real(dp), intent(inout) :: x(2)
         real(dp), intent(out) :: rz(2), b(3)
         integer, intent(out) :: status
-        real(dp) :: u(8), r(2), jac(2, 2), det, dx(2), lim
+        integer, intent(inout), optional :: block_hint
+        real(dp), intent(out), optional :: inverse_jacobian(2, 2)
+        real(dp) :: u(8), r(2), jac(2, 2), inverse(2, 2), det, dx(2), lim
         integer :: it, block
 
         block = 1
+        if (present(block_hint)) block = block_hint
         lim = 0.05_dp*(maxval(c%samples(1, :, 1)) - minval(c%samples(1, :, 1)))
         do it = 1, 60
             call fm3_state(c, x, block, t, profiles, rz, u, b, status, jac)
             if (status /= 0) return
             r = u(1:2) - target
-            if (norm2(r) < 1e-11_dp) return
             det = jac(1, 1)*jac(2, 2) - jac(1, 2)*jac(2, 1)
-            dx = -[jac(2, 2)*r(1) - jac(1, 2)*r(2), jac(1, 1)*r(2) - jac(2, 1)*r(1)]/det
+            inverse = 0
+            if (abs(det) > tiny(det)) &
+                inverse = reshape([jac(2, 2), -jac(2, 1), -jac(1, 2), jac(1, 1)], [2, 2])/det
+            if (norm2(r) < 1e-11_dp) then
+                if (present(block_hint)) block_hint = block
+                if (present(inverse_jacobian)) inverse_jacobian = inverse
+                return
+            end if
+            if (abs(det) <= tiny(det)) exit
+            dx = -matmul(inverse, r)
             ! steps limited to a tenth of the section size
             if (norm2(dx) > lim) dx = dx*lim/norm2(dx)
             x = x + dx
