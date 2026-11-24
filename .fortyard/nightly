@@ -3,8 +3,9 @@
 # jobs of ci/nightly-jobs.json one after another. Fails when any of them fails.
 set -u
 export OPENBLAS_NUM_THREADS=1 MPLBACKEND=Agg
+export FO_CMAKE_CONFIG=Release
 failed=
-fo build && FO_TEST_RERUN=1 fo test --all || failed="$failed tests"
+fo build && FO_TEST_RERUN=1 fo test --all --verbose || failed="$failed tests"
 jobs=$(python3 -I -c 'import json, sys
 for name, command in json.load(open(sys.argv[1])).items():
     print(name + "\t" + command)' ci/nightly-jobs.json) || exit 1

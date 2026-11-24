@@ -4,9 +4,10 @@
 # users; a moved dependency pin selects the users of what the dependency
 # changed between the pins; an edit that only registers tests selects those;
 # any other change of the build description runs the whole fast suite. Tests
-# labelled slow stay on the Slurm tier (ci/run.sh).
+# labelled slow run at night.
 set -eu
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}" MPLBACKEND=Agg
+export FO_CMAKE_CONFIG=Release
 candidate=$(git rev-parse HEAD)
 base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD~1)
 if [ "$base" = "$candidate" ]; then
