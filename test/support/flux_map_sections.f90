@@ -601,28 +601,28 @@ contains
         real(dp), intent(out) :: flux(:), bmin, bmax
         real(dp), allocatable :: v0(:, :, :), gn(:, :, :)
         integer, allocatable :: d0(:)
-        real(dp) :: jet(2, 6), det1, f(2, 2), rz(2), u(8), b(3)
-        integer :: cell, q, p, k, st
+        real(dp) :: f(2, 2), rz(2), u(8), b(3)
+        integer :: cell, q, p, k
 
         flux = 0
         bmin = huge(1.0_dp)
         bmax = -huge(1.0_dp)
+        !$omp parallel do default(private) shared(c) reduction(+:flux) reduction(min:bmin) reduction(max:bmax)
         do cell = 1, size(c%quad%point_offset)
             call clebsch_node_gradients(c%derham, c%quad, cell, v0, d0, gn)
             do q = 1, c%quad%points_per_cell
                 p = c%quad%point_offset(cell) + q - 1
-                call spline_geometry_at(c%space, c%quad%block(p), c%quad%xi(:, p), jet, st)
-                det1 = 1
                 do k = 1, c%nt
                     f = matmul(c%base(:, d0, k), transpose(gn(:, :, q)))
                     call flux_map3d_point(c%fm, c%base, d0, v0(1, :, q), gn(:, :, q), &
                                           (k - 1)/real(c%nt, dp), profiles, rz, u, b)
-                    flux(k) = flux(k) + c%quad%weight(p)*det1*abs(f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1))*b(2)
+                    flux(k) = flux(k) + c%quad%weight(p)*abs(f(1, 1)*f(2, 2) - f(1, 2)*f(2, 1))*b(2)
                     bmin = min(bmin, b(2))
                     bmax = max(bmax, b(2))
                 end do
             end do
         end do
+        !$omp end parallel do
     end subroutine fm3_flux
 
     subroutine fm3_mesh_quality(c, quality)
