@@ -14,8 +14,9 @@ program test_flux_map_qa
     !! in the layout benchmarks/label-qa/compare.py reads (s = 1 is the given
     !! wall and is not written).
     !!
-    !! Arguments: deck, output directory, stages "degree:cells:planes,..."
-    !! (default 2:2:9), iota scale (1), verbose.
+    !! Arguments: deck, output directory, stages "degree:cells:planes[:radial],..."
+    !! (default 2:2:9), iota scale (1), verbose. The optional radial count
+    !! applies to the four outer blocks and defaults to cells.
     !!
     !! With MILCA_FM3_VMEC=<wout file> every stage also evaluates the VMEC
     !! state of that file on its mesh (flux_map_vmec, both orientations of
@@ -46,7 +47,7 @@ program test_flux_map_qa
     type(fm3_case_t), target :: c, previous, axis_seed
     character(512) :: deck = '../benchmarks/label-qa/input.landreman-paul-qa-iota', &
                       outdir = 'flux-map-qa-out', stages = '2:2:9', arg
-    integer :: eval_planes, stage_spec(3, max_stages), nstages, istage, k, st, u, newton_total, j, solve_status
+    integer :: eval_planes, stage_spec(4, max_stages), nstages, istage, k, st, u, newton_total, j, solve_status
     real(dp) :: phiedge, kappa = 1, t0, t1, ts, energy, phi, axis(2), x0(2)
     real(dp) :: deck_angle_sense, deck_angle_origin
     real(dp), allocatable :: iota_c(:), pres_c(:), samples(:, :, :), quality(:), flux(:)
@@ -152,7 +153,7 @@ program test_flux_map_qa
     do istage = 1, nstages
         call wall_time(ts)
         associate (deg => stage_spec(1, istage), cells => stage_spec(2, istage), &
-                   nt => stage_spec(3, istage))
+                   nt => stage_spec(3, istage), radial => stage_spec(4, istage))
             if (allocated(quality)) deallocate (quality, flux)
             allocate (quality(nt), flux(nt))
             ! wall samples doubled until the harmonic section maps resolve the curves
@@ -164,7 +165,7 @@ program test_flux_map_qa
                     call plane_curve(2*pi*(k - 1)/(nt*eq%nfp), samples(:, :, k))
                 end do
                 call fm3_build(c, samples, cells, deg, 4, st, preserve_area=keep_area(), &
-                               grading=grading, match_sample_angle=match_sample_angle)
+                               grading=grading, match_sample_angle=match_sample_angle, radial_cells=radial)
                 if (st == 0 .and. c%map_residual < 1e-9_dp) exit
                 if (st /= 0 .and. st /= 13) exit
                 if (nsamples >= 2048) exit
@@ -267,7 +268,7 @@ program test_flux_map_qa
 contains
 
     subroutine parse_stages()
-        integer :: p, q, r
+        integer :: p, q, r, sep
         character(512) :: rest
 
         rest = stages
@@ -275,12 +276,24 @@ contains
         do while (len_trim(rest) > 0)
             p = index(rest, ',')
             if (p == 0) p = len_trim(rest) + 1
+            if (nstages == max_stages) error stop 'too many continuation stages'
             nstages = nstages + 1
             q = index(rest(:p - 1), ':')
             r = q + index(rest(q + 1:p - 1), ':')
+            if (q <= 1 .or. r <= q + 1 .or. r >= p - 1) error stop 'invalid continuation stage'
             read (rest(:q - 1), *) stage_spec(1, nstages)
             read (rest(q + 1:r - 1), *) stage_spec(2, nstages)
-            read (rest(r + 1:p - 1), *) stage_spec(3, nstages)
+            sep = index(rest(r + 1:p - 1), ':')
+            if (sep == 0) then
+                read (rest(r + 1:p - 1), *) stage_spec(3, nstages)
+                stage_spec(4, nstages) = stage_spec(2, nstages)
+            else
+                sep = r + sep
+                if (sep <= r + 1 .or. sep >= p - 1) error stop 'invalid continuation stage'
+                read (rest(r + 1:sep - 1), *) stage_spec(3, nstages)
+                read (rest(sep + 1:p - 1), *) stage_spec(4, nstages)
+                if (stage_spec(4, nstages) < 1) error stop 'radial cell count must be positive'
+            end if
             rest = rest(p + 1:)
         end do
     end subroutine parse_stages
