@@ -19,7 +19,7 @@ module milca_ideal_seed_3d
     use milca_ideal_seed_3d_leaves, only: seed_complex_product, seed_boundary_mode, &
         seed_horner, seed_horner_jvp, seed_toroidal_form, seed_disk_coordinates, seed_disk_boundary, &
         seed_primitive_coefficient, seed_primitive_finish, seed_hermite_profile, &
-        seed_disc_coordinates, seed_disc_pullback, seed_hermite_profile_jvp
+        seed_disc_coordinates, seed_disc_pullback, seed_hermite_profile_jvp, seed_hermite_profile_curvature
     implicit none
     private
     public :: toroidal_profile_t, toroidal_seed_t, ideal_seed_3d_init, ideal_seed_angle_tables
@@ -95,14 +95,15 @@ contains
     end subroutine
 
     pure subroutine hermite_profile_evaluate(knots, values, slopes, s, value, primitive, &
-            cumulative, slope)
-        ! Value and integral from 0 of the piecewise cubic Hermite profile at s;
-        ! cumulative(k) is the integral up to knots(k) when known. Outside
-        ! [knots(1), knots(K)] the end pieces continue as cubics.
+            cumulative, slope, curvature)
+        ! Value, optional integral from 0, and s derivatives of the piecewise
+        ! cubic. At an interior knot use the piece to its right. Outside the
+        ! knot interval continue the end pieces. cumulative(k) is the known
+        ! integral up to knots(k).
         real(dp), intent(in) :: knots(:), values(:), slopes(:), s
-        real(dp), intent(out) :: value, primitive
+        real(dp), intent(out) :: value
         real(dp), intent(in), optional :: cumulative(:)
-        real(dp), intent(out), optional :: slope
+        real(dp), intent(out), optional :: primitive, slope, curvature
         real(dp) :: h, piece, unused
         integer :: low, high, mid, k
         low = 1; high = size(knots)
@@ -121,6 +122,11 @@ contains
             call seed_hermite_profile_jvp((s - knots(low))/h, h, values(low), slopes(low), &
                 values(low + 1), slopes(low + 1), 1/h, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, slope, unused)
         end if
+        if (present(curvature)) then
+            call seed_hermite_profile_curvature((s - knots(low))/h, h, values(low), slopes(low), &
+                values(low + 1), slopes(low + 1), curvature)
+        end if
+        if (.not. present(primitive)) return
         if (present(cumulative)) then
             primitive = cumulative(low) + piece
             return
