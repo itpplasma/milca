@@ -606,7 +606,7 @@ contains
         z = fm%z
         call flux_map_newton(energy_system, z, fm%fixed, fm%gauge, gauge_at, fm%stationary, &
                              fm%relaxed_steps, fm%verbose, tolerance, max_steps, report, status, &
-                             model_agreement_damping=.true.)
+                             model_agreement_damping=.true., initial_damping=0.1_dp)
         fm%z = z
         fm%steps = report%steps
         fm%energy = report%energy

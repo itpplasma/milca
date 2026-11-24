@@ -435,7 +435,7 @@ contains
     end subroutine cell_projection
 
     subroutine flux_map_newton(system, z, fixed, gauge, update, stationary, relaxed, &
-                               verbose, tolerance, max_steps, report, status, model_agreement_damping)
+                               verbose, tolerance, max_steps, report, status, model_agreement_damping, initial_damping)
         !! The solver loop of the flux map, axisymmetric and 3D: Newton on
         !! the KKT system of W with the gauge constraints, by LDL^T with its
         !! inertia (fortfem_constrained_newton). update rebuilds the gauge
@@ -457,6 +457,7 @@ contains
         type(newton_report_t), intent(out) :: report
         integer, intent(out) :: status
         logical, intent(in), optional :: model_agreement_damping
+        real(dp), intent(in), optional :: initial_damping
         type(newton_options_t) :: options
 
         options%tolerance = tolerance
@@ -466,6 +467,7 @@ contains
         if (stationary) options%acceptance = NEWTON_ACCEPT_GRADIENT
         options%verbose = verbose
         if (present(model_agreement_damping)) options%model_agreement_damping = model_agreement_damping
+        if (present(initial_damping)) options%initial_damping = initial_damping
         call constrained_newton(system, z, fixed, gauge, options, report, status, update)
         if (verbose) print '(a,3f9.2)', &
             '    time: energy+gradient+Hessian, energy(+gradient), linear solves (s)', &
