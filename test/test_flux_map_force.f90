@@ -29,7 +29,7 @@ program test_flux_map_force
     use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map_3d, only: flux_map3d_point, flux_map3d_system
     use milca_flux_map_leaves, only: flux_map_force_3d
-    use milca_flux_map_force, only: flux_map_jet_to_cylindrical, flux_map3d_force_point
+    use milca_flux_map_force, only: flux_map_jet_to_cylindrical, flux_map3d_force_point, flux_map3d_force
     use flux_map_sections
     use flux_map_vmec, only: fm3_vmec_force
     use milca_vmec_state, only: vmec_state_t, vmec_state_set, vmec_state_invert, vmec_state_jet
@@ -46,6 +46,7 @@ program test_flux_map_force
     call leaf_on_analytic_fields()
     call change_of_variables()
     call discrete_state()
+    call volume_force_against_point_samples()
     call vmec_route()
     call vmec_bounded_inverse()
     call vmec_four_surfaces()
@@ -371,6 +372,29 @@ contains
                    worst_label/scale_label)
         call discrete_energy_derivatives()
     end subroutine discrete_state
+
+    subroutine volume_force_against_point_samples()
+        type(flux_map_force_t) :: acc
+        real(dp) :: totals(4), rz(2), b(3), j(3), f(3), volume, weight, t, error
+        integer :: p, k, nqt, status
+
+        nqt = c%fm%toroidal_quadrature_count()
+        call flux_map3d_force(c%fm, c%derham, c%quad, profiles, c%base, c%fm%z, 1, acc, status)
+        if (status /= 0) error stop 'volume force'
+        totals = 0
+        do k = 1, nqt
+            t = real(k - 1, dp)/nqt
+            do p = 1, c%quad%point_count
+                call flux_map3d_force_point(c%fm, c%derham, profiles, c%base, c%fm%z, c%quad%block(p), &
+                                            c%quad%xi(:, p), t, rz, b, j, f, status, volume=volume)
+                if (status /= 0) error stop 'point force integral'
+                weight = c%quad%weight(p)*volume*clebsch_nfp/nqt
+                totals = totals + weight*[1.0_dp, sum(f**2), sum(j**2), sum(b**2)]
+            end do
+        end do
+        error = maxval(abs(acc%sums([1, FORCE_F, FORCE_J, FORCE_B], 0)/totals - 1))
+        call check(error < 5e-12_dp, 'volume force, current and field against pointwise integration', error)
+    end subroutine volume_force_against_point_samples
 
     subroutine discrete_energy_derivatives()
         real(dp), parameter :: h = 1e-5_dp
