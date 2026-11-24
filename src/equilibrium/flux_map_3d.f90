@@ -310,7 +310,8 @@ contains
                                  products(:, :, :), gloc(:), blocks(:, :, :), vals(:), zx(:, :), zy(:, :), &
                                  ax(:), ay(:), bx(:), by(:), lam(:), mw(:, :), gsec(:, :), &
                                  hs(:, :), lm(:), ltab(:, :, :), mloc(:), turn(:), &
-                                 trial_jets(:, :), weighted_jets(:, :)
+                                 trial_jets(:, :), weighted_jets(:, :), &
+                                 label_basis(:, :), label_weighted(:, :), label_product(:, :)
         integer, allocatable :: ix(:), iy(:), idx(:), rows(:), cols(:)
         logical, allocatable :: is_w(:)
         real(dp) :: lt(fm%nt, 2), ht(fm%nt, 2), sk(2, fm%nt), gk(2, 2, fm%nt), sm(2), f(2, 2), &
@@ -318,12 +319,13 @@ contains
                     tau(3), gp(3), pr(3), w, wg(8), wh(36), h8(8, 8), ref, shift, k11, k12, &
                     vm(3), et(3), c3(3), gs(3), bv(3), bx3(3), ferr(2), sn, cs
         integer :: n0, nt, ntot, nqt, cell, q, p, m, i, j, k, a, b, c1, nloc, nsec, nl, &
-                   nz, blk, la, lb, nlmax, ia, ib, ng, nb, pair
+                   nz, blk, la, lb, nlmax, ia, ib, ng, nb, pair, label_rows, first, last
+        integer, parameter :: xjet(3) = [1, 3, 5], yjet(3) = [2, 6, 8]
         real(dp), pointer, contiguous :: v0(:, :, :)
         integer, pointer, contiguous :: d0(:)
         real(dp), allocatable, target :: v_work(:, :, :)
         integer, allocatable, target :: d_work(:)
-        logical :: derivs, cached, cached_section
+        logical :: derivs, cached, cached_section, interior_axis_cell
         type(csc_t) :: mm
         type(fortsparse_status_t) :: info
         interface
@@ -342,6 +344,7 @@ contains
         ! The external field can vary in angle even for an axisymmetric map.
         nqt = fm%toroidal_quadrature_count(reference_field=present(exact_field))
         nb = nt*(nt + 1)/2
+        label_rows = 3*quad%points_per_cell
         derivs = present(gradient)
         cached = .false.
         cached_section = .false.
@@ -394,7 +397,7 @@ contains
         !$omp parallel do schedule(dynamic) default(private) &
         !$omp shared(fm, derham, quad, plane_nodes, z, gradient, rows, cols, vals, n0, nt, &
         !$omp        ntot, nqt, blk, derivs, clebsch_nfp, hessian, field_error, ltab, ng, &
-        !$omp        gauge_moment, nb, products, cached, cached_section, hessian_plan) &
+        !$omp        gauge_moment, nb, products, cached, cached_section, hessian_plan, label_rows) &
         !$omp reduction(+:energy, ferr)
         do cell = 1, size(quad%point_offset)
             if (cached_section) then
@@ -410,6 +413,7 @@ contains
             allocate (ix(nloc), iy(nloc), is_w(nloc), zx(nloc, nt), zy(nloc, nt), ax(nloc), &
                       ay(nloc), bx(nloc), by(nloc), lam(nloc), mw(3, nloc), gx(2, nloc), lm(nloc))
             is_w = fm%is_wall(d0)
+            interior_axis_cell = cached_section .and. .not. any(is_w)
             nsec = 0
             do i = 1, nloc
                 nsec = nsec + 1
@@ -427,7 +431,12 @@ contains
                 if (allocated(am)) deallocate (am, blocks)
                 allocate (am(nsec, nsec, nqt, 4), blocks(nsec, nsec, nb))
                 am = 0
-                if (cached_section .and. .not. allocated(trial_jets)) then
+                if (interior_axis_cell) then
+                    if (.not. allocated(label_basis)) then
+                        allocate (label_basis(label_rows, nloc), label_weighted(label_rows, 3*nloc), &
+                                  label_product(nloc, 3*nloc))
+                    end if
+                else if (cached_section .and. .not. allocated(trial_jets)) then
                     allocate (trial_jets(8*quad%points_per_cell, 2*nloc), &
                               weighted_jets(8*quad%points_per_cell, 2*nloc))
                 end if
@@ -550,11 +559,24 @@ contains
                         end do
                     end do
                     ! blocks (1,1), (1,2), (2,2); (2,1) is the transpose of (1,2)
-                    hs = matmul(h8, sx(:, :, 1))
-                    if (cached_section) then
+                    if (interior_axis_cell) then
+                        ! Without wall angles or toroidal derivatives, each label uses the same three basis jets.
+                        first = 3*q - 2
+                        last = 3*q
+                        do i = 1, nloc
+                            label_basis(first:last, i) = sx(xjet, ix(i), 1)
+                        end do
+                        label_weighted(first:last, :nloc) = wt*matmul(h8(xjet, xjet), label_basis(first:last, :))
+                        label_weighted(first:last, nloc + 1:2*nloc) = &
+                            wt*matmul(h8(xjet, yjet), label_basis(first:last, :))
+                        label_weighted(first:last, 2*nloc + 1:3*nloc) = &
+                            wt*matmul(h8(yjet, yjet), label_basis(first:last, :))
+                    else if (cached_section) then
+                        hs = matmul(h8, sx(:, :, 1))
                         trial_jets(8*q - 7:8*q, :nsec) = sx(:, :, 1)
                         weighted_jets(8*q - 7:8*q, :nsec) = wt*hs
                     else
+                        hs = matmul(h8, sx(:, :, 1))
                         call dgemm('T', 'N', nsec, nsec, 8, wt, sx(1, 1, 1), 8, &
                                    hs, 8, 1.0_dp, am(1, 1, m, 1), nsec)
                     end if
@@ -602,7 +624,18 @@ contains
                 gradient(idx(i)) = gradient(idx(i)) + gloc(i)
             end do
             if (.not. present(hessian)) cycle
-            if (cached_section) then
+            if (interior_axis_cell) then
+                call dgemm('T', 'N', nloc, 3*nloc, label_rows, 1.0_dp, label_basis, label_rows, &
+                           label_weighted, label_rows, 0.0_dp, label_product, nloc)
+                do j = 1, nloc
+                    do i = 1, nloc
+                        blocks(ix(i), ix(j), 1) = label_product(i, j)
+                        blocks(ix(i), iy(j), 1) = label_product(i, nloc + j)
+                        blocks(iy(i), ix(j), 1) = label_product(j, nloc + i)
+                        blocks(iy(i), iy(j), 1) = label_product(i, 2*nloc + j)
+                    end do
+                end do
+            else if (cached_section) then
                 ! Stack the point jets to assemble the cell with one matrix product.
                 blocks(:, :, 1) = am(:, :, 1, 1)
                 call dgemm('T', 'N', nsec, nsec, size(trial_jets, 1), 1.0_dp, &
