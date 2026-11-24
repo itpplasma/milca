@@ -163,6 +163,12 @@ outside reference, on identical cases and inputs:
 | H2 Landreman–Paul QA, prescribed ι (`benchmarks/label-qa`) | VMEC++ at ns 101 | low shear, B_φ/B_pol ≈ 14 |
 | H3 one strongly shaped deck (QI nfp 2 of nested-equilibrium-input.md, or the CTH-like deck) | VMEC++ | where the map lane folds or stalls |
 
+The integer-transform Landreman equilibrium is a fixed-boundary saddle even
+within stellarator symmetry. Its flux and pressure labels are weakly
+constrained by magnetic-field error. Use it as a stationary-solver test and
+track normalized flux and angle as well as the field.
+[Exact saddle and discrete curvature](flux-map.md#integer-transform-landreman-saddle).
+
 Measured for each code at degrees 3 and 4 and at least three resolutions,
 compared at equal physical error, not equal grid: unknowns, B error,
 surface distance, axis, energy, Newton steps, wall time at 1 and 8

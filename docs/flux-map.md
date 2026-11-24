@@ -404,6 +404,77 @@ separated. A scan of ι → κι in the prototype has its energy minimum at
 reference components of ∇x×∇y or only the plane-normal one, degrees p − 1
 and p) is unstable, so the 3D solver has none.
 
+### Integer-transform Landreman saddle
+
+The exact integer-transform equilibrium is a saddle of the fixed-boundary
+energy in (2), including for perturbations that preserve stellarator symmetry.
+Its field alone is insensitive to a class of perturbations that change the
+flux label and pressure surfaces.
+
+Let $D$ be the unit disc, $s=\psi_L/\delta$ the normalized toroidal flux,
+and $\varphi$ the geometric toroidal angle. Here $\psi_L$ is Landreman's
+positive flux label with boundary value $\delta$. Write the inverse map
+$u=(u_1,u_2)$ in the counterclockwise straight-field-line angle, where
+the rotational transform is $-2$. Equation (24) of Landreman uses a
+clockwise angle and gives $+2$. Rotating the disc by $2\varphi$ gives
+the normalized material coordinates $w$ of Landreman's closed field lines.
+Here $a=\sqrt{1+\epsilon}$, $b=\sqrt{1-\epsilon}$, and $\epsilon$ controls
+the horizontal stretch. The constant toroidal flux derivative gives
+$B=-\delta ab\,\nabla w_1\times\nabla w_2$. Equations (14) and (27) give
+the volume element $\delta ab\,d^2w\,d\zeta$ and the mean magnetic energy
+density $E(w)=(1-\epsilon^2/2)/2+\delta|w|^2$, where $\zeta$ runs once
+around a closed field line. [Landreman, sections 2.2–2.5](https://arxiv.org/html/2609.26742v1#S2).
+
+A diffeomorphism $g:D\to D$ equal to the identity at the wall replaces $s$
+by $|g(w)|^2$ and multiplies $B$ by $\det Dg$. For
+$p(s)=2\delta(1-s)$ and $C=2\pi\delta ab$, its energy is
+
+$$
+W[g]=C\int_D \bigl[E(w)(\det Dg)^2-p(|g(w)|^2)\bigr]\,d^2w . \tag{A1}
+$$
+
+Let $H(v,h)$ be the mixed derivative of $W[\mathrm{Id}+\alpha v+\beta h]$
+at $\alpha=\beta=0$. Take $v$ divergence-free and both increments zero at
+the wall. Differentiating the determinant and pressure gives
+
+$$
+H(v,h)=C\int_D\bigl[-2E\,\mathrm{tr}(Dv\,Dh)+4\delta\,v\cdot h\bigr]\,d^2w . \tag{A2}
+$$
+
+Integrating the first term by parts and using $\nabla E=2\delta w$ gives
+
+$$
+H(v,h)=4\delta C\int_D \nabla(w\cdot v)\cdot h\,d^2w . \tag{A3}
+$$
+
+Set $q=1-|w|^2$, $v=(\partial_{w_2},-\partial_{w_1})(w_2q^3)$, and
+$h=q^2\nabla(w\cdot v)$. Under the stellarator reflection
+$(w_1,w_2)\mapsto(w_1,-w_2)$, the first component of each increment is even
+and the second is odd.
+Equation (A3) and integration by parts give
+
+$$
+H(v,v)=0,\qquad H(v,h)=4\delta C\int_D q^2|\nabla(w\cdot v)|^2\,d^2w
+=\frac{50\pi^2\delta^2 ab}{63}>0 . \tag{A4}
+$$
+
+The determinant of the Hessian on these two directions is
+$-H(v,h)^2$. The pressure surfaces change along $v$ while the magnetic
+field is unchanged to first order.
+
+For $\epsilon=0.5$, $\delta=1/64$, direct volume quadrature gives
+$H(v,h)=1.65615\times10^{-3}$ and $H(h,h)=0.468829$ in the oracle's
+energy normalization. At the projected analytic inverse map, the CEMV
+Hessian adds positive curvature along $v$. This curvature drops from
+$1.03\times10^{-3}$ with four cells and 13 planes at degree two to
+$2.41\times10^{-6}$ with 16 cells and 29 planes. The determinant on the
+two projected directions changes from $+4.74\times10^{-4}$ to
+$-1.62\times10^{-6}$, compared with the exact value
+$-2.74\times10^{-6}$. On three interior surfaces the root-mean-square error
+in normalized toroidal flux is 0.0273 at the four-cell energy minimizer
+and 0.00219 at the analytic projection. A magnetic-field error check alone
+can miss departure from the target branch.
+
 ### Prototype (Python, C0 Lagrange elements, [benchmarks/flux-map-spike](../benchmarks/flux-map-spike/README.md))
 
 Solov'ev (R0 = 1, own parameters), degree 2, 8 elements per block side,
