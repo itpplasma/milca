@@ -55,31 +55,38 @@ contains
         integer, intent(out) :: status
         real(dp), intent(in), optional :: tolerance
         type(plane_t) :: plane
-        real(dp), allocatable :: x(:, :), planes(:, :, :), normal(:, :), rhs(:, :)
+        real(dp), allocatable :: planes(:, :, :), normal(:, :), rhs(:, :)
         real(dp) :: tol, orientation, area
-        integer :: j, m, a, info
+        integer :: j, m, a, info, plane_status(map%nphi)
         integer, allocatable :: pivot(:)
         status = WINSLOW_FAILED
         tol = 1e-10_dp
         if (present(tolerance)) tol = tolerance
         call plane_setup(map, plane)
-        allocate (planes(2, map%nodes, map%nphi), x(2, map%nodes))
+        allocate (planes(2, map%nodes, map%nphi))
+        !$omp parallel do default(shared) private(a, area, orientation) schedule(static) if(map%nphi > 1)
         do j = 1, map%nphi
-            do a = 1, map%nodes
-                x(:, a) = matmul(map%x(1:2, :, a), map%trig(:, j))
-            end do
-            area = ring_area(plane, x)
-            if (.not. abs(area) > 0 .or. .not. ring_simple(plane, x)) then
-                status = WINSLOW_NOT_SIMPLE
-                return
-            end if
-            ! a clockwise boundary has det A < 0: solve the reflected plane
-            orientation = sign(1.0_dp, area)
-            x(2, :) = orientation*x(2, :)
-            call plane_solve(map, plane, x, tol, info)
-            if (info /= WINSLOW_OK) return
-            x(2, :) = orientation*x(2, :)
-            planes(:, :, j) = x
+            associate (x => planes(:, :, j))
+                do a = 1, map%nodes
+                    x(:, a) = matmul(map%x(1:2, :, a), map%trig(:, j))
+                end do
+                area = ring_area(plane, x)
+                if (.not. abs(area) > 0 .or. .not. ring_simple(plane, x)) then
+                    plane_status(j) = WINSLOW_NOT_SIMPLE
+                    cycle
+                end if
+                ! a clockwise boundary has det A < 0: solve the reflected plane
+                orientation = sign(1.0_dp, area)
+                x(2, :) = orientation*x(2, :)
+                call plane_solve(map, plane, x, tol, plane_status(j))
+                x(2, :) = orientation*x(2, :)
+            end associate
+        end do
+        !$omp end parallel do
+        do j = 1, map%nphi
+            if (plane_status(j) == WINSLOW_OK) cycle
+            status = plane_status(j)
+            return
         end do
         ! least squares on the plane values: (T T^t) c = T X
         allocate (normal(map%nmode, map%nmode), rhs(map%nmode, 2*map%nodes), &
