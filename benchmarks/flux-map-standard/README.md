@@ -1,7 +1,7 @@
 # Flux map on standard fixed-boundary decks
 
-Opt-in cases for the 3D flux map (`docs/flux-map.md`, "Section meshes by
-harmonic maps"); none is a registered test. Each directory holds the deck
+Opt-in solves for the 3D flux map (`docs/flux-map.md`, "Section meshes by
+harmonic maps"). Each directory holds the deck
 with the rotational transform prescribed (`input.<name>-iota`, written by
 `make_reference.py` from the VMEC++ state of the deck as given) and the
 VMEC++ reference in `reference/` (axis, surfaces s = 0.25, 0.5, 1 with |B|,
@@ -42,9 +42,11 @@ Diagnostic switches: `MILCA_FM3_PSCALE` (pressure factor),
 meshes, 0 = arc length), `MILCA_FM3_BANDS` (bands of s of the VMEC report).
 
 `MILCA_FM3_SAMPLE_ANGLE=1` uses the deck's poloidal sample spacing for the
-harmonic-disc boundary angles. Omit curvature grading when using this
-option. For the quasi-axisymmetric vacuum deck, use stages
-`2:2:9,3:4:21,4:6:21` to compare this option with `MILCA_FM3_GRADING=1`.
+harmonic-disc boundary angles. It fixes the poloidal angle origin across
+the toroidal planes so that resampling the wall adds no toroidal harmonics.
+Omit curvature grading when using this option. For the quasi-axisymmetric
+vacuum deck, use stages `2:2:9,3:4:21,4:6:21` to compare this option with
+`MILCA_FM3_GRADING=1`.
 The finer 17-plane configuration uses `2:2:9,3:4:17,5:8:17:4`.
 
 With `MILCA_FM3_VMEC=<wout>` the force balance of the VMEC state is printed

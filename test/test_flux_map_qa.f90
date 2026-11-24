@@ -32,6 +32,7 @@ program test_flux_map_qa
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
     use fortsparse_csr, only: csr_t
     use fortfem_spline_eval, only: spline_point_matrix
+    use fortfem_spline_derham, only: spline_derham_t_basis
     use flux_map_sections
     use flux_map_vmec, only: fm3_from_vmec, fm3_from_vmec_failures, fm3_vmec_force
     use milca_flux_map_force, only: flux_map_force_t, flux_map3d_force, flux_map_force_print, &
@@ -87,7 +88,7 @@ program test_flux_map_qa
         read (arg, *) kappa
     end if
     verbose = command_argument_count() >= 5
-    if (trim(stages) /= 'vmec') call parse_stages()
+    if (stages /= 'vmec' .and. stages /= 'wall') call parse_stages()
     call get_environment_variable('MILCA_FM3_PSCALE', arg, vlen)
     if (vlen > 0) read (arg, *) pscale
     call get_environment_variable('MILCA_FM3_GRADING', arg, vlen)
@@ -149,6 +150,10 @@ program test_flux_map_qa
         stop
     end if
     call exact_origin(0.0_dp, deck_angle_origin, deck_angle_sense)
+    if (stages == 'wall') then
+        call check_toroidal_wall_interpolation()
+        stop
+    end if
     print '(a,f4.0)', 'poloidal deck winding ', deck_angle_sense
     newton_total = 0
     do istage = 1, nstages
@@ -268,6 +273,33 @@ program test_flux_map_qa
         trim(outdir), '  surface points skipped ', skipped
 
 contains
+
+    subroutine check_toroidal_wall_interpolation()
+        integer, parameter :: nwall = 32
+        real(dp), allocatable :: sampled(:, :, :), basis(:, :), edge(:, :)
+        real(dp) :: direct(2, nwall), interpolated(2, nwall), t, error
+        integer :: nt, k, j
+
+        if (.not. match_sample_angle) error stop 'wall check requires deck sample angles'
+        nt = 2*max(abs(lbound(eq%rbc, 1)), abs(ubound(eq%rbc, 1))) + 1
+        allocate (sampled(2, nwall, nt), basis(nt, 2), edge(nt, 2))
+        do k = 1, nt
+            call plane_curve(2*pi*(k - 1)/(nt*eq%nfp), sampled(:, :, k))
+        end do
+        error = 0
+        do j = 1, nt
+            t = (j - 0.5_dp)/nt
+            call spline_derham_t_basis(nt, t, basis, edge)
+            call plane_curve(2*pi*t/eq%nfp, direct)
+            interpolated = 0
+            do k = 1, nt
+                interpolated = interpolated + basis(k, 1)*sampled(:, :, k)
+            end do
+            error = max(error, maxval(norm2(interpolated - direct, dim=1)))
+        end do
+        print '(a,es12.4)', 'Maximum off-plane wall interpolation error (m) ', error
+        if (error > 1e-11_dp) error stop 'deck wall interpolation changes the prescribed wall'
+    end subroutine check_toroidal_wall_interpolation
 
     subroutine parse_stages()
         integer :: p, q, r, sep
@@ -646,16 +678,17 @@ contains
     end function diag_of
 
     subroutine plane_curve(phi, curve)
-        !! Wall curve of the deck in the plane phi, counter-clockwise, equally
-        !! spaced in the deck angle from the outboard point at the height of
-        !! the area centroid (a smooth function of phi).
+        !! A fixed deck angle origin preserves the wall's toroidal bandwidth.
         real(dp), intent(in) :: phi
         real(dp), intent(out) :: curve(:, :)
         real(dp) :: th0, sense, coarse_axis(2)
         integer :: ii, ns, local
 
         ns = size(curve, 2)
-        if (axis_seed%n0 == 0) then
+        if (match_sample_angle .and. .not. sheared) then
+            th0 = deck_angle_origin
+            sense = deck_angle_sense
+        else if (axis_seed%n0 == 0) then
             call exact_origin(phi, th0, sense)
         else
             ! Fix the section anchor across the stationary continuation.
