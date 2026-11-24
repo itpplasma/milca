@@ -567,17 +567,20 @@ contains
         call move_alloc(mm%val, hessian%val)
     end subroutine flux_map3d_system
 
-    subroutine flux_map3d_point(fm, plane_nodes, d0, nv, gn, t, profiles, rz, u, b)
+    subroutine flux_map3d_point(fm, plane_nodes, d0, nv, gn, t, profiles, rz, u, b, label_jacobian)
         !! State at one point of the section and the toroidal parameter t:
         !! d0, nv, gn are the section functions that do not vanish there,
         !! their values and their gradients in the geometry of the reference
         !! plane (as from spline_point_matrix). Returns the position (R, Z),
         !! u = (x, y, grad x, grad y) and B in components (R, phi, Z).
+        !! label_jacobian gives the derivatives of (x, y) with respect to the
+        !! coordinates (R, Z) of the reference plane at fixed t.
         type(flux_map3d_t), intent(in) :: fm
         real(dp), intent(in) :: plane_nodes(:, :, :), nv(:), gn(:, :), t
         integer, intent(in) :: d0(:)
         procedure(flux_map_profiles) :: profiles
         real(dp), intent(out) :: rz(2), u(8), b(3)
+        real(dp), intent(out), optional :: label_jacobian(2, 2)
         real(dp) :: lt(fm%nt, 2), ht(fm%nt, 2), f(2, 2), ft(2, 2), detf, vel(2), sig, th, &
                     gsig(3), gth(3), tau(3), gp(3), pr(3), c3(3), gs(3), ref, shift
         real(dp) :: gx(2, size(d0)), ax(size(d0)), ay(size(d0)), bx(size(d0)), by(size(d0)), &
@@ -627,6 +630,10 @@ contains
         by = matmul(zy, lt(:, 2))
         call locals(is_w, ix, iy, nv, gx, vel, rz(1), ax, ay, bx, by, u, sx(:, :nsec, :), sig, &
                     th, gsig, gth, lam, mw)
+        if (present(label_jacobian)) then
+            label_jacobian(1, :) = matmul(u([3, 5]), f)
+            label_jacobian(2, :) = matmul(u([6, 8]), f)
+        end if
         call profiles(u(1)**2 + u(2)**2, tau, gp, pr)
         c3 = [u(4)*u(8) - u(5)*u(7), u(5)*u(6) - u(3)*u(8), u(3)*u(7) - u(4)*u(6)]
         gs = 2*(u(1)*u(3:5) + u(2)*u(6:8))
