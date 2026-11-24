@@ -73,6 +73,8 @@ module milca_flux_map_3d
         !! of its rounding threshold.
         integer :: negative_eigenvalues = -1, zero_eigenvalues = -1
         logical :: inertia_reliable = .false.
+    contains
+        procedure :: toroidal_quadrature_count
     end type flux_map3d_t
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
@@ -80,6 +82,18 @@ module milca_flux_map_3d
               flux_map3d_point, flux_map3d_expand_symmetric
 
 contains
+
+    pure integer function toroidal_quadrature_count(fm, reference_field) result(count)
+        class(flux_map3d_t), intent(in) :: fm
+        logical, intent(in), optional :: reference_field
+
+        count = fm%toroidal_points*fm%nt + 2
+        if (present(reference_field)) then
+            if (reference_field) return
+        end if
+        ! The model integrands are constant when only the zero mode is present.
+        if (fm%nt == 1) count = 1
+    end function toroidal_quadrature_count
 
     subroutine flux_map3d_init(fm, n0, nt, wall)
         !! wall: the section V0 functions with a trace on the wall.
@@ -245,7 +259,8 @@ contains
         n0 = fm%n0
         nt = fm%nt
         ntot = n0*nt
-        nqt = fm%toroidal_points*nt + 2
+        ! The external field can vary in angle even for an axisymmetric map.
+        nqt = fm%toroidal_quadrature_count(reference_field=present(exact_field))
         nb = nt*(nt + 1)/2
         derivs = present(gradient)
         cached = .false.

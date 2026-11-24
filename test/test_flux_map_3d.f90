@@ -44,10 +44,10 @@ program test_flux_map_3d
     use milca_nested_oracles, only: NESTED_SHEARED
     use milca_eulerian_clebsch, only: clebsch_nfp
     use milca_flux_map, only: flux_map_t, flux_map_init, flux_map_system
-    use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_solve
+    use milca_flux_map_3d, only: flux_map3d_t, flux_map3d_init, flux_map3d_system, flux_map3d_solve
     use flux_map_sections
     use milca_flux_map_force, only: flux_map_force_t, flux_map3d_force, flux_map_force_print, &
-        flux_map_force_norm, FORCE_F, FORCE_GRAD_B2, FORCE_GRAD_P
+        flux_map_force_norm, FORCE_F, FORCE_GRAD_B2, FORCE_GRAD_P, FORCE_VOLUME
     use solovev_label_fields, only: solovev_profiles, exact_b, boundary_samples, r0, alpha, &
         psi_b, chart, flux_scale
     use landreman_sections, only: section_oracle, section_exact_b, section_axis, &
@@ -55,6 +55,7 @@ program test_flux_map_3d
     implicit none
     real(dp), parameter :: pi = acos(-1.0_dp)
     integer :: degree = 2, levels = 0, nt = 0, failures = 0, level, tpoints = 2, extra = 4, first = 2
+    integer :: profile_evaluations
     logical :: cold = .true., stationary = .false., mode_given = .false.
     type(fm3_case_t), target :: previous
     integer :: cells(3) = [2, 4, 8], start_planes = 0, planes
@@ -186,6 +187,15 @@ contains
         p = pressure_scale()*p
     end subroutine solovev_fm
 
+    subroutine counted_solovev_fm(s, tau, gp, p)
+        real(dp), intent(in) :: s
+        real(dp), intent(out) :: tau(3), gp(3), p(3)
+
+        !$omp atomic update
+        profile_evaluations = profile_evaluations + 1
+        call solovev_fm(s, tau, gp, p)
+    end subroutine counted_solovev_fm
+
     subroutine solovev_b(x, b)
         real(dp), intent(in) :: x(3)
         real(dp), intent(out) :: b(3)
@@ -193,6 +203,13 @@ contains
         b = exact_b([x(1), 0.0_dp, x(3)])
         b(2) = flux_scale*b(2)
     end subroutine solovev_b
+
+    subroutine toroidal_test_field(x, b)
+        real(dp), intent(in) :: x(3)
+        real(dp), intent(out) :: b(3)
+
+        b = [sin(clebsch_nfp*x(2)), 0.0_dp, 0.0_dp]
+    end subroutine toroidal_test_field
 
     subroutine landreman_fm(s, tau, gp, p)
         real(dp), intent(in) :: s
@@ -280,9 +297,11 @@ contains
     subroutine check_axisymmetric_reduction(c)
         type(fm3_case_t), intent(in) :: c
         type(flux_map_t) :: poloidal
+        type(flux_map3d_t) :: one_plane
+        type(flux_map_force_t) :: force
         real(dp), allocatable :: grad_2d(:), grad_3d(:), reduced(:)
-        real(dp) :: energy_2d, energy_3d
-        integer :: i, n, nt, ntot
+        real(dp) :: energy_2d, energy_3d, field_error(2), volume
+        integer :: i, n, nt, ntot, status
 
         n = c%n0
         nt = c%nt
@@ -299,6 +318,27 @@ contains
                    '3D and axisymmetric energies on the same mesh agree')
         call check(norm2(reduced - grad_2d) < 1e-11_dp*max(norm2(grad_2d), 1.0_dp), &
                    '3D gradient restricted to axisymmetry matches the axisymmetric gradient')
+
+        call flux_map3d_init(one_plane, n, 1, pack([(i, i=1, n)], c%fm%is_wall))
+        one_plane%z = poloidal%z
+        profile_evaluations = 0
+        call flux_map3d_system(one_plane, c%derham, c%quad, counted_solovev_fm, c%base(:, :, :1), &
+                               one_plane%z, energy_3d, grad_3d)
+        call check(profile_evaluations == c%quad%point_count, 'one profile evaluation per section point')
+        call check(abs(energy_3d - energy_2d) < 1e-12_dp*max(abs(energy_2d), 1.0_dp), &
+                   'one-plane energy matches the axisymmetric energy')
+        call check(norm2(grad_3d - grad_2d) < 1e-11_dp*max(norm2(grad_2d), 1.0_dp), &
+                   'one-plane gradient matches the axisymmetric gradient')
+        profile_evaluations = 0
+        call flux_map3d_force(one_plane, c%derham, c%quad, counted_solovev_fm, c%base(:, :, :1), &
+                              one_plane%z, 10, force, status)
+        call check(status == 0 .and. profile_evaluations == c%quad%point_count, &
+                   'one force evaluation per section point')
+        volume = force%sums(FORCE_VOLUME, 0)
+        call flux_map3d_system(one_plane, c%derham, c%quad, solovev_fm, c%base(:, :, :1), &
+                               one_plane%z, energy_3d, exact_field=toroidal_test_field, field_error=field_error)
+        call check(abs(field_error(2) - 0.5_dp*volume) < 1e-12_dp*volume, &
+                   'reference field error resolves toroidal variation with one plane')
     end subroutine check_axisymmetric_reduction
 
     subroutine report_force(c, profiles)

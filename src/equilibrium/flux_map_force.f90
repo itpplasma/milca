@@ -402,9 +402,8 @@ contains
 
     subroutine flux_map3d_force(fm, derham, quad, profiles, plane_nodes, z, bands, acc, status)
         !! The force balance of the state z over the quadrature points of
-        !! quad and fm%toroidal_points points per plane in t (the points of
-        !! flux_map3d_system). Status 1: the section jets could not be
-        !! evaluated.
+        !! quad and the toroidal quadrature of flux_map3d_system.
+        !! Status 1: the section jets could not be evaluated.
         type(flux_map3d_t), intent(in) :: fm
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
@@ -420,7 +419,7 @@ contains
         integer :: nt, nqt, p, m, c
 
         nt = fm%nt
-        nqt = fm%toroidal_points*nt + 2
+        nqt = fm%toroidal_quadrature_count()
         call flux_map_force_reset(acc, bands)
         do c = 0, 5
             call spline_point_matrix(derham%space, quad%block, quad%xi, c, rp, ci, v, status)
