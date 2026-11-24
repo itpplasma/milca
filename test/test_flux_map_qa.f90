@@ -294,27 +294,32 @@ contains
         real(dp), intent(in) :: level, t, x0(2)
         real(dp), intent(out) :: rz(2, nray), b(3, nray)
         logical, intent(out) :: found(nray)
-        real(dp) :: e(2), x(2), xprev(2)
-        integer :: q, it, stl, nc
+        real(dp) :: x(2), previous_point(2), target(2), previous_target(2), inverse(2, 2), angle
+        integer :: q, it, stl, nc, block, previous_block
         logical :: have
 
         have = .false.
         do q = 1, nray
-            e = [cos(2*pi*(q - 1)/nray), sin(2*pi*(q - 1)/nray)]
-            ! from the previous ray's point (one Newton solve); on failure
-            ! continuation in the radius of the disc from the axis, then
-            ! finer, then the ray is skipped
+            angle = 2*pi*(q - 1)/nray
+            target = sqrt(level)*[cos(angle), sin(angle)]
             stl = 1
             if (have) then
-                x = xprev
-                call fm3_preimage(c, t, profiles, sqrt(level)*e, x, rz(:, q), b(:, q), stl)
+                x = previous_point + matmul(inverse, target - previous_target)
+                block = previous_block
+                call fm3_preimage(c, t, profiles, target, x, rz(:, q), b(:, q), stl, block, inverse)
+                if (stl /= 0) then
+                    x = previous_point
+                    block = 1
+                    call fm3_preimage(c, t, profiles, target, x, rz(:, q), b(:, q), stl, block, inverse)
+                end if
             end if
             if (stl /= 0) then
                 do nc = 16, 256, 240
                     x = x0
+                    block = 1
                     do it = 1, nc
-                        call fm3_preimage(c, t, profiles, sqrt(level)*it/nc*e, x, rz(:, q), &
-                                          b(:, q), stl)
+                        call fm3_preimage(c, t, profiles, (real(it, dp)/nc)*target, x, rz(:, q), &
+                                          b(:, q), stl, block, inverse)
                         if (stl /= 0) exit
                     end do
                     if (stl == 0) exit
@@ -322,7 +327,11 @@ contains
             end if
             found(q) = stl == 0
             have = found(q)
-            if (have) xprev = x
+            if (have) then
+                previous_point = x
+                previous_target = target
+                previous_block = block
+            end if
         end do
     end subroutine ring
 
