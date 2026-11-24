@@ -545,7 +545,8 @@ contains
                 call continue_fixed_level(coarse, coarse_seed)
             end if
             call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-                reference_gradient=reference, stationary=stationary)
+                reference_gradient=reference, stationary=stationary, &
+                model_agreement_damping=map%ntor > 0 .and. .not. prescribe_current)
             if (stationary .and. step <= steps .and. solve_status /= IDEAL_MAP_OK) &
                 call fail('the coarse stationary solve did not converge')
             newton_total = newton_total + report%iterations
@@ -1233,7 +1234,8 @@ contains
             call continue_fixed_level(previous_map, previous_seed)
         end if
         call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-            reference_gradient=reference, stationary=stationary)
+            reference_gradient=reference, stationary=stationary, &
+            model_agreement_damping=map%ntor > 0 .and. .not. prescribe_current)
         call finish_level()
         ! The energy sees the map only at its quadrature points, and the
         ! continued start can reach a stationary point that folds between
@@ -1247,7 +1249,8 @@ contains
             reference = free_gradient()
             seed_x = map%x
             call ideal_map_solve(map, tolerance, max_iterations, report, solve_status, &
-                reference_gradient=reference, stationary=stationary)
+                reference_gradient=reference, stationary=stationary, &
+                model_agreement_damping=map%ntor > 0 .and. .not. prescribe_current)
             call finish_level()
         end if
     end subroutine
