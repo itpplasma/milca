@@ -16,7 +16,7 @@ module flux_map_sections
     use fortfem_spline_eval, only: spline_quadrature_t, spline_quadrature_build, &
         spline_point_matrix, spline_locate, spline_boundary_nodes, &
         spline_side_quadrature_t, spline_interface_quadrature, &
-        spline_cell_tables, spline_cell_xi_jets
+        spline_cell_tables, spline_cell_xi_jets, spline_point_jet_matrix
     use fortfem_spline_layout, only: LAYOUT_INTERIOR
     use fortfem_spline_derham, only: spline_derham_t, spline_derham_build, &
         spline_derham_boundary_dofs, spline_derham_project, spline_derham_t_basis
@@ -289,26 +289,18 @@ contains
         integer, allocatable, intent(out) :: d0(:)
         real(dp), allocatable, intent(out) :: nv(:), gn(:, :)
         integer, intent(out) :: status
-        integer, allocatable :: rowptr(:), colidx(:)
-        real(dp), allocatable :: val(:)
+        integer, allocatable :: rowptr(:)
+        real(dp), allocatable :: jets(:, :)
         real(dp) :: xi(2)
-        integer :: k
+        integer :: located
 
-        call spline_locate(c%space, block, x0, block, xi, status)
+        call spline_locate(c%space, block, x0, located, xi, status)
         if (status /= 0) return
-        do k = 0, 2
-            call spline_point_matrix(c%space, [block], reshape(xi, [2, 1]), k, rowptr, colidx, &
-                                     val, status)
-            if (status /= 0) return
-            if (k == 0) then
-                d0 = colidx
-                nv = val
-                allocate (gn(2, size(d0)))
-            else
-                if (size(colidx) /= size(d0)) error stop 'fm3_locate: row patterns differ'
-                gn(k, :) = val
-            end if
-        end do
+        block = located
+        call spline_point_jet_matrix(c%space, [block], reshape(xi, [2, 1]), 1, rowptr, d0, jets, status)
+        if (status /= 0) return
+        nv = jets(1, :)
+        gn = jets(2:3, :)
     end subroutine fm3_locate
 
     subroutine fm3_state(c, x0, block, t, profiles, rz, u, b, status, label_jacobian)
@@ -496,33 +488,23 @@ contains
         procedure(flux_map_profiles) :: profiles
         real(dp), intent(out) :: winding(:), least_step(:)
         integer, intent(out) :: status
-        integer, allocatable :: wblock(:), rowptr(:), colidx(:), d0(:)
-        real(dp), allocatable :: wxi(:, :), ws(:, :), val(:), gn(:, :), angle(:), nv(:)
+        integer, allocatable :: wblock(:), rowptr(:), colidx(:)
+        real(dp), allocatable :: wxi(:, :), ws(:, :), jets(:, :), angle(:)
         real(dp) :: rz(2), u(8), b(3), d
-        integer :: k, i, n, comp
+        integer :: k, i, n, first, last
 
         call spline_boundary_nodes(c%space, LAYOUT_WALL, 2, wblock, wxi, ws, status)
+        if (status /= 0) return
+        call spline_point_jet_matrix(c%space, wblock, wxi, 1, rowptr, colidx, jets, status)
         if (status /= 0) return
         n = size(wblock)
         allocate (angle(n))
         do k = 1, c%nt
             do i = 1, n
-                do comp = 0, 2
-                    call spline_point_matrix(c%space, wblock(i:i), wxi(:, i:i), comp, rowptr, &
-                                             colidx, val, status)
-                    if (status /= 0) return
-                    if (comp == 0) then
-                        if (allocated(gn)) deallocate (gn)
-                        allocate (gn(2, size(colidx)))
-                        gn = 0
-                        nv = val
-                        d0 = colidx
-                    else
-                        gn(comp, :) = val
-                    end if
-                end do
-                call flux_map3d_point(c%fm, c%base, d0, nv, gn, (k - 1)/real(c%nt, dp), &
-                                      profiles, rz, u, b)
+                first = rowptr(i)
+                last = rowptr(i + 1) - 1
+                call flux_map3d_point(c%fm, c%base, colidx(first:last), jets(1, first:last), &
+                    jets(2:3, first:last), (k - 1)/real(c%nt, dp), profiles, rz, u, b)
                 angle(i) = atan2(u(2), u(1))
             end do
             winding(k) = 0
@@ -538,60 +520,44 @@ contains
     end subroutine fm3_wall_winding
 
     subroutine fm3_interface_jump(c, profiles, jump, status)
-        !! The part of the force balance that the volume measure of
-        !! milca_flux_map_force does not see: across the C0 block interfaces
-        !! of the section B.n is continuous and the tangential field may
-        !! jump, a sheet current with the surface force [B^2/2] n. jump =
-        !! rms of [B^2/2] over rms of B^2/2 on the interfaces (Gauss points of
-        !! every cell side, weights of plane 1, all planes).
+        !! Magnetic-pressure jump at C0 section block interfaces, scaled by
+        !! RMS magnetic pressure (Gauss points of every cell side, plane 1
+        !! weights and magnetic field values from all planes).
         type(fm3_case_t), intent(in) :: c
         procedure(flux_map_profiles) :: profiles
         real(dp), intent(out) :: jump
         integer, intent(out) :: status
         type(spline_side_quadrature_t) :: sq
-        real(dp) :: b(3, 2), acc(2)
-        integer :: q, k
+        integer, allocatable :: rowptr(:), colidx(:), opposite_ptr(:), opposite_idx(:)
+        real(dp), allocatable :: jets(:, :), opposite_jets(:, :)
+        real(dp) :: b(3, 2), acc(2), t, rz(2), u(8)
+        integer :: q, k, first, last, opposite_first, opposite_last
 
         call spline_interface_quadrature(c%space, LAYOUT_INTERIOR, c%degree + 2, sq, status)
         if (status /= 0) return
+        call spline_point_jet_matrix(c%space, sq%block, sq%xi, 1, rowptr, colidx, jets, status)
+        if (status /= 0) return
+        call spline_point_jet_matrix(c%space, sq%neighbour_block, sq%neighbour_xi, 1, &
+            opposite_ptr, opposite_idx, opposite_jets, status)
+        if (status /= 0) return
         acc = 0
         do q = 1, sq%point_count
+            first = rowptr(q)
+            last = rowptr(q + 1) - 1
+            opposite_first = opposite_ptr(q)
+            opposite_last = opposite_ptr(q + 1) - 1
             do k = 1, c%nt
-                call side_field(sq%block(q), sq%xi(:, q), b(:, 1))
-                call side_field(sq%neighbour_block(q), sq%neighbour_xi(:, q), b(:, 2))
-                if (status /= 0) return
+                t = (k - 1)/real(c%nt, dp)
+                call flux_map3d_point(c%fm, c%base, colidx(first:last), jets(1, first:last), &
+                    jets(2:3, first:last), t, profiles, rz, u, b(:, 1))
+                call flux_map3d_point(c%fm, c%base, opposite_idx(opposite_first:opposite_last), &
+                    opposite_jets(1, opposite_first:opposite_last), &
+                    opposite_jets(2:3, opposite_first:opposite_last), t, profiles, rz, u, b(:, 2))
                 acc = acc + sq%weight(q)*[(sum(b(:, 1)**2) - sum(b(:, 2)**2))**2, &
                                           (sum(b(:, 1)**2) + sum(b(:, 2)**2))**2]/4
             end do
         end do
         jump = sqrt(acc(1)/acc(2))
-
-    contains
-
-        subroutine side_field(block, xi, bb)
-            integer, intent(in) :: block
-            real(dp), intent(in) :: xi(2)
-            real(dp), intent(out) :: bb(3)
-            integer, allocatable :: rowptr(:), colidx(:), d0(:)
-            real(dp), allocatable :: val(:), nv(:), gn(:, :)
-            real(dp) :: rz(2), u(8)
-            integer :: comp
-
-            do comp = 0, 2
-                call spline_point_matrix(c%space, [block], reshape(xi, [2, 1]), comp, rowptr, &
-                                         colidx, val, status)
-                if (status /= 0) return
-                if (comp == 0) then
-                    d0 = colidx
-                    nv = val
-                    allocate (gn(2, size(d0)))
-                else
-                    gn(comp, :) = val
-                end if
-            end do
-            call flux_map3d_point(c%fm, c%base, d0, nv, gn, (k - 1)/real(c%nt, dp), profiles, rz, &
-                                  u, bb)
-        end subroutine side_field
     end subroutine fm3_interface_jump
 
     subroutine fm3_flux(c, profiles, flux, bmin, bmax)
