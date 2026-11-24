@@ -88,7 +88,7 @@ module milca_flux_map_3d
 
     real(dp), parameter :: two_pi = 2*acos(-1.0_dp)
     public :: flux_map3d_init, flux_map3d_gauge, flux_map3d_system, flux_map3d_solve, &
-              flux_map3d_point, flux_map3d_expand_symmetric
+              flux_map3d_point, flux_map3d_expand_symmetric, flux_map3d_section_basis
 
 contains
 
@@ -219,7 +219,7 @@ contains
         end do
     end subroutine locals
 
-    subroutine section_node_gradients(derham, quad, cell, v0, d0, gn)
+    subroutine flux_map3d_section_basis(derham, quad, cell, v0, d0, gn)
         type(spline_derham_t), intent(in) :: derham
         type(spline_quadrature_t), intent(in) :: quad
         integer, intent(in) :: cell
@@ -240,7 +240,7 @@ contains
             p = quad%point_offset(cell) + q - 1
             gn(:, :, q) = matmul(quad%chain(2:3, 2:3, p), transpose(jets(:, 2:3, q)))
         end do
-    end subroutine section_node_gradients
+    end subroutine flux_map3d_section_basis
 
     subroutine cache_axisymmetric_section(derham, quad, nodes, plan)
         type(spline_derham_t), intent(in) :: derham
@@ -256,7 +256,7 @@ contains
         !$omp private(q, point, f, inverse_transpose, determinant, position)
         do cell = 1, size(plan%section)
             associate (table => plan%section(cell))
-                call section_node_gradients(derham, quad, cell, table%basis, table%dofs, table%gradient)
+                call flux_map3d_section_basis(derham, quad, cell, table%basis, table%dofs, table%gradient)
                 allocate (table%radius(nq), table%weight(nq))
                 do q = 1, nq
                     point = quad%point_offset(cell) + q - 1
@@ -401,7 +401,7 @@ contains
                 v0 => hessian_plan%section(cell)%basis
                 d0 => hessian_plan%section(cell)%dofs
             else
-                call section_node_gradients(derham, quad, cell, v_work, d_work, gn)
+                call flux_map3d_section_basis(derham, quad, cell, v_work, d_work, gn)
                 v0 => v_work
                 d0 => d_work
             end if

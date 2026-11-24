@@ -24,7 +24,7 @@ module flux_map_sections
     use milca_spline_ale, only: spline_geometry_dofs, spline_set_geometry
     use milca_flux_map, only: flux_map_profiles
     use milca_flux_map_3d, only: flux_map3d_system, flux_map3d_t, flux_map3d_init, &
-        flux_map3d_point, flux_map3d_expand_symmetric
+        flux_map3d_point, flux_map3d_expand_symmetric, flux_map3d_section_basis
     implicit none
     private
 
@@ -595,7 +595,7 @@ contains
         bmax = -huge(1.0_dp)
         !$omp parallel do default(private) shared(c) reduction(+:flux) reduction(min:bmin) reduction(max:bmax)
         do cell = 1, size(c%quad%point_offset)
-            call clebsch_node_gradients(c%derham, c%quad, cell, v0, d0, gn)
+            call flux_map3d_section_basis(c%derham, c%quad, cell, v0, d0, gn)
             do q = 1, c%quad%points_per_cell
                 p = c%quad%point_offset(cell) + q - 1
                 do k = 1, c%nt
