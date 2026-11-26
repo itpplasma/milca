@@ -826,10 +826,25 @@ against 14.5 mm, 29 planes 18 against 15.3 mm, energy +2.8e-4 against
 ### Fourier wall sample angles
 
 For a boundary supplied as a Fourier series, uniformly spaced poloidal
-samples give a periodic boundary correspondence directly. Set
-`MILCA_FM3_SAMPLE_ANGLE=1` to map them to uniform angles on the unit disc,
-starting at the outboard anchor of each plane. Arc-length reparameterization
-can introduce higher harmonics before the wall is interpolated on the mesh.
+samples give a periodic boundary correspondence directly. The benchmark
+driver maps them to uniform angles on the unit disc, starting at the outboard
+anchor of each plane. `MILCA_FM3_SAMPLE_ANGLE=0` restores arc-length
+placement and `MILCA_FM3_GRADING=c` with c > 0 curvature grading. Both
+reparameterize the wall, which can introduce higher harmonics before it is
+interpolated on the mesh.
+
+Arc length against sample angles on the five standard decks, degree four,
+stages `2:2:9,3:4:21,4:6:21`, one sCluster core each. The distance is the
+RMS distance of the s = 0.5 surface from the VMEC++ reference, and η_B is
+the force ratio over the whole volume.
+
+| Deck | Distance, arc length [mm] | Distance, sample angle [mm] | η_B, arc length | η_B, sample angle | Wall time, sample angle [s] |
+|---|---|---|---|---|---|
+| QA | 0.28 | 0.055 | 0.51 | 3.6e-3 | 40 |
+| QH | 0.73 | 0.16 | 0.73 | 3.2e-2 | 55 |
+| CTH | 0.41 | 0.17 | 6.4e-2 | 3.3e-2 | 45 |
+| stellarator | 3.7 | 0.78 | 0.90 | 4.7e-2 | 65 |
+| li383 | 1.2 | 0.39 | 0.36 | 0.11 | 60 |
 
 On the quasi-axisymmetric vacuum deck with degree four, six cells and
 21 planes in the final stage, changing from curvature grading with $c=1$

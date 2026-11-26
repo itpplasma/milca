@@ -93,10 +93,13 @@ program test_flux_map_qa
     if (vlen > 0) read (arg, *) pscale
     call get_environment_variable('MILCA_FM3_GRADING', arg, vlen)
     if (vlen > 0) read (arg, *) grading
-    call get_environment_variable('MILCA_FM3_SAMPLE_ANGLE', length=vlen)
-    match_sample_angle = vlen > 0
+    ! Deck sample angles are the default: on every benchmark deck they cut
+    ! the half-flux distance to VMEC and the force ratio (docs/flux-map.md).
+    ! MILCA_FM3_SAMPLE_ANGLE=0 or a curvature grading restores arc length.
+    call get_environment_variable('MILCA_FM3_SAMPLE_ANGLE', arg, vlen)
+    match_sample_angle = grading <= 0
+    if (vlen > 0) match_sample_angle = trim(arg) /= '0'
     if (match_sample_angle .and. grading > 0) error stop 'sample angle excludes curvature grading'
-    if (match_sample_angle) print '(a)', 'Section wall angles follow the input samples'
     call get_environment_variable('MILCA_FM3_START_AXIS', arg, vlen)
     if (vlen > 0) read (arg, *) start_axis
     call get_environment_variable('MILCA_FM3_START_ANGLE', arg, vlen)
@@ -107,6 +110,9 @@ program test_flux_map_qa
     sheared = arg == 'landreman-sheared'
     manufactured = arg == 'landreman-integer' .or. sheared
     if (vlen > 0 .and. .not. manufactured) error stop 'unknown exact field'
+    ! the manufactured fields fix their own angle origin in every plane
+    if (manufactured) match_sample_angle = .false.
+    if (match_sample_angle) print '(a)', 'Section wall angles follow the input samples'
     if (sheared) then
         section_oracle%family = NESTED_SHEARED
         section_oracle%eps = 0.6_dp
