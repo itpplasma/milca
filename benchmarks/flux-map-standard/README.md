@@ -41,13 +41,12 @@ Diagnostic switches: `MILCA_FM3_PSCALE` (pressure factor),
 `MILCA_FM3_HESSIAN`, `MILCA_FM3_GRADING` (curvature grading of the section
 meshes, 0 = arc length), `MILCA_FM3_BANDS` (bands of s of the VMEC report).
 
-`MILCA_FM3_SAMPLE_ANGLE=1` uses the deck's poloidal sample spacing for the
-harmonic-disc boundary angles. It fixes the poloidal angle origin across
-the toroidal planes so that resampling the wall adds no toroidal harmonics.
-Omit curvature grading when using this option. For the quasi-axisymmetric
-vacuum deck, use stages `2:2:9,3:4:21,4:6:21` to compare this option with
-`MILCA_FM3_GRADING=1`.
-The finer 17-plane configuration uses `2:2:9,3:4:17,5:8:17:4`.
+The harmonic-disc boundary angles follow the deck's poloidal sample spacing
+by default. This fixes the poloidal angle origin across the toroidal planes,
+so resampling the wall adds no toroidal harmonics. `MILCA_FM3_SAMPLE_ANGLE=0`
+places the wall by arc length, and `MILCA_FM3_GRADING=c` with c > 0 by
+curvature grading. The standard stages are `2:2:9,3:4:21,4:6:21`, and the
+finer 17-plane configuration uses `2:2:9,3:4:17,5:8:17:4`.
 
 With `MILCA_FM3_VMEC=<wout>` the force balance of the VMEC state is printed
 first, on the same measure and without a mesh; the stages argument `vmec`

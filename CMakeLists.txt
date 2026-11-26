@@ -940,8 +940,7 @@ add_executable(test_flux_map_qa test/test_flux_map_qa.f90)
 target_link_libraries(test_flux_map_qa PRIVATE milca_eulerian_test milca_importers)
 add_test(NAME flux_map_benchmark_wall_toroidal_interpolation COMMAND test_flux_map_qa
     "${CMAKE_SOURCE_DIR}/benchmarks/flux-map-standard/w7x/input.w7x-iota" unused wall)
-set_tests_properties(flux_map_benchmark_wall_toroidal_interpolation PROPERTIES
-    ENVIRONMENT "MILCA_FM3_SAMPLE_ANGLE=1" TIMEOUT 20)
+set_tests_properties(flux_map_benchmark_wall_toroidal_interpolation PROPERTIES TIMEOUT 20)
 # gate A1 (docs/equilibrium-roadmap.md): label lane on an ALE mesh, one axis
 add_executable(test_label_ale_axisym test/test_label_ale_axisym.f90)
 target_link_libraries(test_label_ale_axisym PRIVATE milca_eulerian_test)
