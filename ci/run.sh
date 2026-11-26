@@ -15,7 +15,7 @@ else
     # the merge queue and pushes only report their required checks.
     case "${GITHUB_EVENT_NAME:-}" in
       pull_request|merge_group|push)
-        echo "native checks run nightly (ci/nightly-jobs.json); skipped for $GITHUB_EVENT_NAME"
+        echo "native checks run nightly (.fortyard/nightly); skipped for $GITHUB_EVENT_NAME"
         exit 0
         ;;
     esac
