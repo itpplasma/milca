@@ -10,6 +10,9 @@ file(WRITE "${WORK}/case.nml" "&hasegawa_wakatani
  sample_steps = 16, segment = 256, modes = 10, amplitude = 1.0e-2, seed = 3,
  rho_s_cm = 0.2, inverse_omega_ci_s = 1.0e-8, te_over_e_statvolt = 2.5 /
 ")
+# CMake before 4 dereferences quoted names in if() unless CMP0054 is NEW,
+# which would turn "APP" into the executable path.
+cmake_policy(SET CMP0054 NEW)
 foreach(step APP CHECK)
     if(step STREQUAL "APP")
         set(command "${APP}" --config case.nml)

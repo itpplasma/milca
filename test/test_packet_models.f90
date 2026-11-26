@@ -131,7 +131,7 @@ contains
             gk%alpha = (0.6_dp, -0.25_dp)
             gl%q = [-0.2_dp, 0.5_dp]; gl%kappa = [-0.5_dp, 0.4_dp]
             gl%alpha = (0.9_dp, 0.3_dp)
-            if (icase == 2) then     ! far from the origin: |T| > 36 branch
+            if (icase == 2) then ! far from the origin: |T| > 36 branch
                 gk%q = [5.0_dp, -6.0_dp]; gl%q = [5.5_dp, -5.0_dp]
             end if
             call one_case(gk, gl, err_s, err_t, err_v)
@@ -315,8 +315,11 @@ contains
         spec%metric_engine = .false.; spec%k = 4
         spec%rtol = 1.0e-10_dp; spec%atol = 1.0e-12_dp
         ! Tikhonov regularization is not variational: conservation is checked at
-        ! eps = 1e-10 (M4 production default 1e-6 trades it for step size).
-        spec%regularization = 1.0e-10_dp
+        ! eps = 1e-9 (M4 production default 1e-6 trades it for step size). The
+        ! filter amplifies eigensolver roundoff by about |M|^2/eps^2, so below
+        ! about 5e-10 the right-hand side depends on which backward-stable
+        ! eigensolver LAPACK provides, and the step size collapses.
+        spec%regularization = 1.0e-9_dp
         erre = 0; errn = 0
         do im = 1, 4
             spec%model = models(im)
