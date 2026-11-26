@@ -443,21 +443,16 @@ contains
         stiffness = original_k; mass = original_m
         call zggev('N', 'N', nb, stiffness, nb, mass, nb, diagnostic_alpha, &
             diagnostic_beta, dummy, 1, dummy_right, 1, work, size(work), rwork, info)
-        ! QZ may not converge on the unbalanced pencil, which is what the
-        ! balancing above avoids; the diagnostic then only reports it.
-        if (info /= 0) then
-            print '(a,i0)', 'diagnostic SI-unit pencil: QZ did not converge, info = ', info
-        else
-            diagnostic_reality = 0
-            do j = 1, nb
-                if (abs(diagnostic_beta(j)) < tolerance &
-                    *(abs(diagnostic_alpha(j)) + abs(diagnostic_beta(j)))) cycle
-                diagnostic_reality = max(diagnostic_reality, &
-                    abs(aimag(-(diagnostic_alpha(j)/diagnostic_beta(j))**2)))
-            end do
-            print '(a,es20.12)', 'diagnostic SI-unit omega^2 imaginary defect: ', &
-                diagnostic_reality
-        end if
+        call require(info == 0, 'diagnostic SI-unit pencil')
+        diagnostic_reality = 0
+        do j = 1, nb
+            if (abs(diagnostic_beta(j)) < tolerance &
+                *(abs(diagnostic_alpha(j)) + abs(diagnostic_beta(j)))) cycle
+            diagnostic_reality = max(diagnostic_reality, &
+                abs(aimag(-(diagnostic_alpha(j)/diagnostic_beta(j))**2)))
+        end do
+        print '(a,es20.12)', 'diagnostic SI-unit omega^2 imaginary defect: ', &
+            diagnostic_reality
         if (wave_count > 0) print '(a,*(es20.12))', &
             'positive angular frequencies [1/s], unsorted: ', positive(:wave_count)
         measured%reality = reality; measured%backward_error = backward_error
