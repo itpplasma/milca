@@ -884,6 +884,35 @@ gradient norm below 1e-9, one negative Hessian eigenvalue from c = 10).
 Jumping from 3:4:21 to c = 10 or 12 stops at the limit of 80 Newton steps
 with the same η_B. CTH also moves away from VMEC++ from 4:9:21 to 5:8:21.
 
+### Wall layer of the Lagrangian map in VMEC mode (2026-11-27)
+
+`nested_equilibrium` with `map_ntor > 0` and `angle_mpol = 4` (the field
+angle of `docs/ideal-seed-3d.md`), QA with prescribed iota, η_B =
+|F|/|∇B²/2| per band of s (`MILCA_NESTED_EXPORT`), degree 3 and map_ntor 7
+unless stated (nb = 96: map_ntor 9), `nb` boundary nodes:
+
+| run | s < 0.1 | 0.4–0.5 | 0.6–0.7 | 0.7–0.8 | 0.8–0.9 | 0.9–1 |
+|---|---|---|---|---|---|---|
+| nb 32 | 7.1e-4 | 1.5e-3 | 2.6e-3 | 5.0e-3 | 1.0e-2 | 3.0e-2 |
+| nb 48 | 3.5e-4 | 9.9e-4 | 1.5e-3 | 3.0e-3 | 4.8e-3 | 1.3e-2 |
+| nb 64 | 2.2e-4 | 6.7e-4 | 1.3e-3 | 1.9e-3 | 5.5e-3 | 8.1e-3 |
+| nb 96 | 1.2e-4 | 2.7e-4 | 6.3e-4 | 1.9e-3 | 4.9e-3 | 8.2e-3 |
+| nb 48, degree 2 | 4.9e-2 | 6.0e-2 | 6.8e-2 | 9.4e-2 | 1.6e-1 | 2.0e-1 |
+| nb 48, degree 4 | 3.9e-5 | 2.3e-4 | 7.9e-4 | 3.2e-3 | 3.7e-3 | 4.5e-3 |
+
+- The interior converges in nb and in the degree. From s = 0.7 outwards η_B
+  stalls in nb and does not fall from degree 3 to 4.
+- Of the twelve cells of largest η_B at nb = 48, twelve (degree 3, up to
+  2.0e-2) and eleven (degree 4, up to 8.0e-3) have an edge on the wall.
+- Not the cause: map_ntor 7, 9, 11 (η_B in every band within 1 %, also at
+  nb = 96); angle_mpol 8, 12, 16 and the field-angle toroidal order 5, 7, 9,
+  11 (within 1 %); iota raised by 0.002, which removes the surface
+  ι = 10/24 at s = 0.85 (within 2 % at nb = 48 and 6 % at nb = 96).
+- This matches the layer of the manufactured check above, where J_h = ∇×B_h
+  of the outer cells is of order |B − B_h|/h_r while e_B converges. η_B of
+  s > 0.7 is therefore not used as a convergence criterion of VMEC mode.
+  Energy, axis and the surfaces at s ≤ 0.5 are.
+
 ### Gauge constraint, one solver loop and continuation (P0c, 2026-11-23)
 
 What changed. `flux_map_solve` and `flux_map3d_solve` were two copies of one
