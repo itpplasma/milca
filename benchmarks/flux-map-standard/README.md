@@ -16,7 +16,6 @@ boundary coefficients are identical to the linked source.
 | `qa` | Landreman–Paul QA, [`input.LandremanPaul2021_QA` of SIMSOPT](https://github.com/hiddenSymmetries/simsopt/blob/424bc3756dbf443916a7f41ea417cc3ea0431430/tests/test_files/input.LandremanPaul2021_QA) | vacuum, NFP 2, weak shear |
 | `qh` | [`input.nfp4_QH_warm_start` of vmecpp](https://github.com/proximafusion/vmecpp/blob/994ead823a77d6bdecc381a81a378bdd53567f5d/examples/data/input.nfp4_QH_warm_start) | vacuum, NFP 4 |
 | `cth` | [`input.cth_like_fixed_bdy` of vmecpp](https://github.com/proximafusion/vmecpp/blob/994ead823a77d6bdecc381a81a378bdd53567f5d/examples/data/input.cth_like_fixed_bdy) | pressure, current, strong shear, NFP 5 |
-| `w7x` | [`input.w7x` of vmecpp](https://github.com/proximafusion/vmecpp/blob/994ead823a77d6bdecc381a81a378bdd53567f5d/examples/data/input.w7x) | W7-X standard, pressure, NFP 5; bean and triangle sections |
 | `li383` | [`input.li383_low_res` of vmecpp](https://github.com/proximafusion/vmecpp/blob/994ead823a77d6bdecc381a81a378bdd53567f5d/src/vmecpp/cpp/vmecpp/test_data/input.li383_low_res) | NCSX-like, pressure, current, NFP 3 |
 
 Each stage starts from the previous solution. Specify a stage as
@@ -26,8 +25,8 @@ it. Omit `radial` to use `cells` in both directions.
 
 ```sh
 cmake --build build --target test_flux_map_qa
-OMP_NUM_THREADS=8 build/test_flux_map_qa benchmarks/flux-map-standard/w7x/input.w7x-iota OUT 2:2:9,2:4:13
-python benchmarks/label-qa/compare.py OUT "$MILCA_DATA_DIR/benchmarks/flux-map-standard/w7x/reference"
+OMP_NUM_THREADS=8 build/test_flux_map_qa benchmarks/flux-map-standard/li383/input.li383-iota OUT 2:2:9,2:4:13
+python benchmarks/label-qa/compare.py OUT "$MILCA_DATA_DIR/benchmarks/flux-map-standard/li383/reference"
 ```
 
 The driver prints per stage the mesh report (wall samples, residual of the
@@ -57,8 +56,8 @@ first, on the same measure and without a mesh; the stages argument `vmec`
 stops after it:
 
 ```sh
-MILCA_FM3_VMEC="$MILCA_DATA_DIR/benchmarks/flux-map-standard/w7x/work/wout_w7x_iota.nc" \
-  build/test_flux_map_qa benchmarks/flux-map-standard/w7x/input.w7x-iota OUT vmec
+MILCA_FM3_VMEC="$MILCA_DATA_DIR/benchmarks/flux-map-standard/li383/work/wout_li383_iota.nc" \
+  build/test_flux_map_qa benchmarks/flux-map-standard/li383/input.li383-iota OUT vmec
 ```
 
 `checks/`: `desc_axis.py` (third-code axis with DESC),

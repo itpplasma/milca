@@ -103,7 +103,7 @@ and benchmarks: [drift-kinetics-extensions.md](drift-kinetics-extensions.md).
 ## Ambipolar transport on 3D equilibria (K1, K2)
 
 Decision, 2026-11-03: extend this steady operator in two stages for the
-ambipolar radial electric field E_r in W7-X. K1 is local three-dimensional
+ambipolar radial electric field E_r of a stellarator. K1 is local three-dimensional
 transport; K2 retains radial orbit coupling and determines the potential
 jointly with the species distributions. Both use the collision ladder, D7
 kinetic geometry view and equation-level derivatives below. This is planned
@@ -327,12 +327,6 @@ D11 then converge only once the resonant harmonic is resolved.
 Published fields (evidence runs; the field files stay outside the
 repository, the recipes are in [benchmarks/mono3d](../benchmarks/mono3d/README.md)):
 
-- W7-X standard configuration (EIM), s = 0.2, the Boozer file and MONKES
-  database distributed with MONKES (30 x 60 points per period, 160 Legendre):
-  with the normalisation above, MILCA at 25 x 25 points per period and 160
-  Legendre agrees to 2e-10 (nu = 0.1/m) and 4e-9 (nu = 0.01/m) in D11, D31
-  and D33. At nu = 1e-3/m, where D31 changes sign, 25 x 25 points give
-  D31 to 3e-3 and 33 x 33 points to 4e-5 (D11 1e-6, D33 2e-7).
 - Bootstrap coefficient against rabe (Grassler et al. 2026,
   [doi:10.1063/5.0332431](https://doi.org/10.1063/5.0332431)) on the
   quasi-helically symmetric Landreman-Paul (2022) reactor-scale equilibrium

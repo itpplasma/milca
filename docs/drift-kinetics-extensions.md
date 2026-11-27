@@ -233,7 +233,7 @@ NEO-2-PAR (stellarator transport, relativistic operator):
 | Feature | Status |
 |---|---|
 | monoenergetic and energy-coupled transport coefficients of a 3D surface, ripple trapping | in progress: monoenergetic D11, D31, D33 (`mono_coefficients_3d`) and the full-operator transport matrix of a 3D surface at E_r = 0 (`ntv_surface_coefficients`), exact against the axisymmetric solver under quasisymmetry; open: ICNTS, MONKES and NEO-2-PAR comparisons, E_r, see K1 in [drift-kinetics.md](drift-kinetics.md) |
-| bootstrap coefficient of stellarators, against rabe and the Shaing-Callen limit | in progress: monoenergetic D31 against rabe on the Landreman-Paul QH equilibrium within 0.2 % at nu* = 1e-3 to 1e-2 and MONKES on W7-X (K1 in [drift-kinetics.md](drift-kinetics.md)); thermal coefficients from monoenergetic ones with the Sugama-Nishimura correction (`mono_thermal_coefficients`), with its error against the full operator measured on the DIII-D helical core; open: lower nu*, ICNTS published values |
+| bootstrap coefficient of stellarators, against rabe and the Shaing-Callen limit | in progress: monoenergetic D31 against rabe on the Landreman-Paul QH equilibrium within 0.2 % at nu* = 1e-3 to 1e-2 (K1 in [drift-kinetics.md](drift-kinetics.md)); thermal coefficients from monoenergetic ones with the Sugama-Nishimura correction (`mono_thermal_coefficients`), with its error against the full operator measured on the DIII-D helical core; open: lower nu*, ICNTS published values |
 | relativistic Braams-Karney operator and the generalised Spitzer function (current drive) | open |
 
 NEO-RT (thin-orbit resonant transport in action-angle variables):
@@ -477,14 +477,13 @@ lists on the same block atlas and check each other:
 |---|---|---|
 | E0 | field-line fluid scrape-off layer with sheath boundary | two-point model, Stangeby sheath analytics |
 | E1 | 2D axisymmetric multi-fluid Braginskii with drifts and fluid neutrals | SOLPS-ITER, UEDGE |
-| E2 | 3D fluid on field-aligned or FCI blocks: RMP edges, stellarator island divertors | EMC3-EIRENE, W7-X |
+| E2 | 3D fluid on field-aligned or FCI blocks: RMP edges, stellarator island divertors | EMC3-EIRENE |
 | E3 | deterministic kinetic neutrals (discrete-velocity Boltzmann/BGK), hybrid with fluid neutrals by Knudsen number | EIRENE |
 | E4 | full-f drift kinetics in the edge blocks where fluid closures fail: nonlocal parallel heat flux, kinetic sheath | COGENT, analytic nonlocal heat-flux limits |
 | E5 | turbulence as spectrum term or resolved region | GENE-X, experiment |
 
 Divertor heat loads (convective, conductive, radiative and neutral), target profiles, impurity
-sources and detachment are the products, compared with infrared heat-load measurements on AUG
-and W7-X. Reactions are bookkept in species and reaction tables with a conservation ledger:
+sources and detachment are the products, compared with infrared heat-load measurements. Reactions are bookkept in species and reaction tables with a conservation ledger:
 atomic and molecular rates (ADAS, AMJUEL/HYDHEL), sputtering yields and fusion reaction cross
 sections. GORILLA Monte Carlo serves as one independent benchmark, not as the edge model.
 

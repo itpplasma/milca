@@ -552,7 +552,7 @@ contains
     end subroutine
 
     subroutine write_makegrid(path, nring)
-        ! W7-X style: fourth column = winding count, group on the terminator.
+        ! MAKEGRID style: fourth column = winding count, group on the terminator.
         character(len=*), intent(in) :: path
         integer, intent(in) :: nring
         real(dp), allocatable :: pts(:, :), turns(:)

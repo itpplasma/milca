@@ -767,7 +767,7 @@ the references state agreement, not these numbers.
 | RI3 | cylinder, then tokamak and stellarator, in the relaxed class | SPEC against M3D-C1 and Delta' in the cylinder [25]; against CAS3D and MISHKA-1 in tokamak and stellarator [26], published values only | OI1, OI4 | G2, G3 |
 | RI4 | large-aspect-ratio tokamak with an equilibrium island | ballooning near the X-point [29] | OI5 | G4 |
 | RI5 | W7-A, QA and QH: tearing, ballooning and interchange on nested states | NIMSTELL, JOREK and CASTOR3D published growth rates [31] | OI6 | P1b E2 |
-| RI6 | W7-X with edge islands at finite beta | none published; MILCA nested and island states for the same coils | OI1, OI5, OI7 | P1b E9 |
+| RI6 | stellarator with edge islands at finite beta | none published; MILCA nested and island states for the same coils | OI1, OI5, OI7 | P1b E9 |
 
 ### Verification ladder
 
@@ -781,7 +781,7 @@ one passes or its failure is recorded.
 | R2 | screw pinch | Newcomb criterion [16], Suydam [12], external kink of the uniform-current cylinder, all already in [linear-mhd-oracles.md](linear-mhd-oracles.md) and [ideal-free-boundary.md](ideal-free-boundary.md) | O1, O2, O7 |
 | R3 | axisymmetric torus | Bussac internal kink (existing oracle), published PEST cases [17], DCON in GPEC run on the same input [R2]; toroidal Alfven gap and its eigenmodes | O1, O2, O4, O5, O6, O7 |
 | R4 | low-shear stellarator, low-n and Mercier modes | TERPSICHORE published cases [7] and runs on the same VMEC input [R1] | O1, O2, O7 |
-| R5 | W7-X-type configurations | CAS3D published results [1,2,3] where the published inputs suffice | O1, O2, O3, O4 |
+| R5 | stellarator configurations with published CAS3D inputs | CAS3D published results [1,2,3] where the published inputs suffice | O1, O2, O3, O4 |
 | R6 | 3D tokamak, vertical and resistive wall modes | CASTOR3D and STARWALL published results [4,5,6] | O2, O8 |
 | R7 | compact quasi-axisymmetric stellarator | published TERPSICHORE results [18]; DCON3D [10] if P1e.0 finds it available | O1, O2, O6 |
 
