@@ -26,14 +26,19 @@ if(BUILD_TESTING)
             COMMAND test_geqdsk_adapter roundtrip ${polarity})
     endforeach()
     add_test(NAME geqdsk_native_resolve COMMAND test_geqdsk_adapter resolve)
-    add_test(NAME geqdsk_chease_resolve_legacy_equivalence COMMAND test_geqdsk_adapter
-        chease ${CMAKE_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk)
-    add_test(NAME geqdsk_chease_conditioning COMMAND test_geqdsk_adapter
-        conditioning ${CMAKE_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk)
+    if(milca_shield_torus_eqdsk)
+        add_test(NAME geqdsk_chease_resolve_legacy_equivalence COMMAND test_geqdsk_adapter
+            chease ${milca_shield_torus_eqdsk})
+        add_test(NAME geqdsk_chease_conditioning COMMAND test_geqdsk_adapter
+            conditioning ${milca_shield_torus_eqdsk})
+    endif()
     foreach(test geqdsk_solovev_polarity_1 geqdsk_solovev_polarity_2
             geqdsk_solovev_polarity_3 geqdsk_solovev_polarity_4
             geqdsk_native_resolve geqdsk_chease_resolve_legacy_equivalence
             geqdsk_chease_conditioning)
+        if(NOT TEST ${test})
+            continue()
+        endif()
         set_tests_properties(${test} PROPERTIES TIMEOUT 60 PROCESSORS 4
             ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;OMP_WAIT_POLICY=passive")
         milca_test_labels(${test} fast CLASSES mhd TARGETS test_geqdsk_adapter)

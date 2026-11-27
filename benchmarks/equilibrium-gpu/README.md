@@ -73,7 +73,7 @@ not remove that work. [H] A complete matrix-free element action can replace
 those quadratic coefficient contractions by gather/action/scatter work linear
 in local coefficient count, subject to chart chains and gauge constraints.
 
-[V] K6-mini GS (3,667 DOFs) took 61.26 s at one thread and 12.16 s at eight
+[V] The mini GS regression (3,667 DOFs) took 61.26 s at one thread and 12.16 s at eight
 (5.04x, the eight-thread run includes sampling overhead). The source-cell timer
 was 61.00/11.70 s. Sampling attributes 31.40% to `source_products`, 20.12% to
 `triangle_basis_jet`, 7.69% to profile evaluation and 7.34% to cut products.
@@ -203,7 +203,8 @@ The ABI is Fortran ISO_C_BINDING to a C CUDA wrapper; layout is
 `(sample, component)` in Fortran, with explicit dimensions, precision and status.
 
 [V] Medians for 32,768 samples and eight CPU threads follow. The full ranges,
-transfer costs and large 262,144-sample case are in `measurements.tsv`.
+transfer costs and large 262,144-sample case are in `measurements.tsv` in an
+external data directory (`MILCA_DATA_DIR`).
 CPU variability and shared GPU use limit generalization of the observed ratios.
 
 | Status | Action | Precision | CPU ms | GPU resident ms | Scaled error |
@@ -239,8 +240,8 @@ Tolerance is 2e-12 for FP64 and 3e-5 for FP32/mixed, below the requested few-per
 candidate target on these samples; neither tolerance is an enclosure theorem.
 
 [V] Before native-backend integration, derivative/rotation, normalized map
-residual, D3 upper-bound, layering and K6-mini gates passed. After integration,
-four gates pass, including K6-mini with its estimator scope/status and reference
+residual, D3 upper-bound, layering and mini GS regression gates passed. After
+integration, four gates pass, including the mini GS regression with its estimator scope/status and reference
 values. The normalized-map residual gate was explicitly stopped at the bounded
 task limit after 286.66 s; Fo records a signal failure, not acceptance. Its
 expensive solve is at `test/test_ideal_map_axisymmetric.f90:427`, on the native

@@ -595,14 +595,14 @@ degree two uses 2, 4 and 8. Field orders must exceed the approximation degree
 minus `0.2`, and the weak-defect order must exceed the thermodynamic degree
 minus `0.2`. Both the production residual and independent strong load are
 checked for angular refinement from 17 to 33 samples.
-The [retained errors](data/vrmhd-nonlinear-fourier.csv) can be plotted with
+The retained errors (`docs/data/vrmhd-nonlinear-fourier.csv` in `MILCA_DATA_DIR`) can be plotted with
 `python3 docs/plot_vrmhd_nonlinear_fourier.py --output /tmp/nonlinear.png`.
 These checks admit volume assembly; nonlinear boundary solves, harmonic time
 evolution and general stability remain unverified.
 
 ## Verification limits
 
-The [retained Fourier errors](data/vrmhd-mixed-fourier.csv) compare both
+The retained Fourier errors (`docs/data/vrmhd-mixed-fourier.csv` in `MILCA_DATA_DIR`) compare both
 families on the distorted `n=2` cases, against the analytic wave frequencies.
 Run `python3 docs/plot_vrmhd_mixed_fourier.py --output /tmp/fourier.png` to plot
 them. The mixed family raises the scalar-degree-one slow-wave final order
@@ -617,7 +617,7 @@ energy ledger and manufactured natural-norm projection use the same
 thresholds as the existing section. The separate harmonic tests above check
 its uniform-slab Fourier spectra. A solved mixed-family nonlinear boundary
 problem remains unverified.
-The retained [projection errors](data/vrmhd-mixed-section.csv) compare the
+The retained projection errors (`docs/data/vrmhd-mixed-section.csv` in `MILCA_DATA_DIR`) compare the
 existing degree-one section with both mixed degrees on the same
 nondimensional manufactured fields. Run
 `python3 docs/plot_vrmhd_mixed_section.py --output /tmp/vrmhd-mixed-section.png`
@@ -1006,7 +1006,7 @@ edges. This choice does not waive the structural spectral gate above.
 Here pairs are written **`(k_s,k_A)`**, with continuous Lagrange degree `k_s`
 for the fluid, and Nedelec order `k_A` for the planar vector potential and
 current. The `edge_kind` column names the edge family. The
-[complete table](data/vrmhd-pairings.csv) covers first-kind edges for degrees
+complete table (`docs/data/vrmhd-pairings.csv` in `MILCA_DATA_DIR`) covers first-kind edges for degrees
 one through four with `k_s >= k_A-1`, and second-kind edges for equal degrees
 one through three, on both meshes and both resolutions.
 On the structured first-kind mesh, every pairing retains energy-bearing static
@@ -1110,7 +1110,7 @@ eight OpenMP threads and one OpenBLAS thread:
 
 ```sh
 cmake --build build --target vrmhd_pairing_study -j 8
-OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=1 build/vrmhd_pairing_study docs/data/vrmhd-pairings.csv
+OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=1 build/vrmhd_pairing_study "$MILCA_DATA_DIR/docs/data/vrmhd-pairings.csv"
 python3 docs/plot_vrmhd_pairings.py --output /tmp/vrmhd-pairings.png
 ```
 

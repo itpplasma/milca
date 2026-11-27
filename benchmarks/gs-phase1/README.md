@@ -2,10 +2,9 @@
 
 Exact common-driver Solovev cases; MILCA `7951c6a`, GNU Fortran 16.2.1,
 CMake `cpu` (`-O3`, no fast math), AMD Ryzen 9 5950X, CPU 7, one thread.
-The [CSV](p2-p3.csv) contains every measured metric, settings, input/binary
+The CSV (`benchmarks/gs-phase1/p2-p3.csv` in `MILCA_DATA_DIR`) contains every measured metric, settings, input/binary
 hashes, source revisions and archived raw directories.
-The common driver is unchanged. Its MILCA producer includes the lane patch
-`iter_tc24-producer.patch` (SHA-256 `4cd6060261f699d379e80856b7712ef0f31f9a9ef4dcfd136d151e3713cf3259`).
+The common driver is unchanged.
 
 Each time is one mesh/assembly/solve measurement, matching the existing
 producer timing contract. Full driver time (including contours, native
@@ -89,8 +88,8 @@ not refine the radial interpolation used for q.
 ## Reproduction and validation
 
 Build with `cmake --preset cpu && cmake --build --preset cpu --target gs_phase1`.
-The TC24 producer must include degree selection. From that checkout, set
-`MILCA_BINARY` to this build and invoke its unchanged common driver:
+The common driver is outside the repository and must include degree selection.
+Set `MILCA_BINARY` to this build and invoke it:
 
 ```sh
 MILCA_BINARY=/path/to/milca/build/gs_phase1 uv run python -m equilibrium.phase1.driver \
@@ -102,8 +101,7 @@ MILCA_BINARY=/path/to/milca/build/gs_phase1 uv run python -m equilibrium.phase1.
 Use the CSV resolution and max_area for each repeat. Here max_area is
 `(2*pi*a/n)^2/2`, with a=R0/3 for A3 and a=eps*R0=1.984 m for Cerfon.
 Retained defaults: curved geometry, radial_points=257, angular_points=128.
-Register each repeat through TC24 `results/run_registry.json` and regenerate
-its table with `uv run python ops/run_registry.py`. Raw runs belong on disk.
+Raw runs belong on disk.
 
 Validation: all 31 Grad-Shafranov CTests pass in both cpu and debug; the
 producer suite passes 3/3. The P3 curved A3 CTest checks both refinement

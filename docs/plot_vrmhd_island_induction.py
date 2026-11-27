@@ -1,16 +1,26 @@
 """Native nondimensional initial-induction errors; see vrmhd-island-benchmark.md."""
 import argparse
 import csv
+import os
 from pathlib import Path
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return Path(root) / relative
+
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("output", type=Path)
 args = parser.parse_args()
-with Path(__file__).with_name("data").joinpath("vrmhd-island-induction.csv").open() as f:
+with milca_data("docs/data/vrmhd-island-induction.csv").open() as f:
     rows = list(csv.DictReader(f))
 fig, ax = plt.subplots(figsize=(6.2, 4.2))
 for family, color, marker, style in [

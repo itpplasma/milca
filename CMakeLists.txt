@@ -19,6 +19,14 @@ option(MILCA_ENABLE_OPENMP "Build with OpenMP threading" ON)
 if(MILCA_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED COMPONENTS Fortran)
 endif()
+# Device data, computed references and timing records live outside the
+# repository in a tree that mirrors it. Tests that need them are registered
+# only when this directory is given.
+set(MILCA_DATA_DIR "" CACHE PATH "External MILCA data directory")
+set(milca_shield_torus_eqdsk "")
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/fixtures/shield_torus_a10.eqdsk")
+    set(milca_shield_torus_eqdsk "${MILCA_DATA_DIR}/test/fixtures/shield_torus_a10.eqdsk")
+endif()
 set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
 include_directories(${CMAKE_Fortran_MODULE_DIRECTORY})
 # Dependency pins: one source used by FetchContent and by result provenance.
@@ -853,11 +861,14 @@ target_link_libraries(test_gs_coils PRIVATE milca)
 add_test(NAME gs_coils_independent_oracles COMMAND test_gs_coils)
 add_executable(test_gs_freegs test/test_gs_freegs.f90)
 target_link_libraries(test_gs_freegs PRIVATE milca_equilibrium)
-add_test(NAME gs_free_boundary_freegs_public_parity
-    COMMAND test_gs_freegs ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/freegs)
-set_tests_properties(gs_free_boundary_freegs_public_parity PROPERTIES
-    TIMEOUT 60 PROCESSORS 4
-    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/benchmarks/freegs/reference.dat")
+    add_test(NAME gs_free_boundary_freegs_public_parity
+        COMMAND test_gs_freegs ${MILCA_DATA_DIR}/benchmarks/freegs
+            ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/freegs/coils.dat)
+    set_tests_properties(gs_free_boundary_freegs_public_parity PROPERTIES
+        TIMEOUT 60 PROCESSORS 4
+        ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+endif()
 add_library(milca_gs_coupling_test STATIC test/support/gs_coupling_fixture.f90)
 target_link_libraries(milca_gs_coupling_test PUBLIC milca)
 foreach(coupling_test vacuum fixed_current structure)
@@ -1311,8 +1322,10 @@ target_link_libraries(test_surface_phi1 PRIVATE milca)
 add_test(NAME surface_phi1_closure COMMAND test_surface_phi1 closure)
 add_test(NAME surface_phi1_axisymmetric COMMAND test_surface_phi1 axisymmetric)
 add_test(NAME surface_phi1_continuity COMMAND test_surface_phi1 continuity)
-add_test(NAME surface_phi1_sfincs COMMAND test_surface_phi1 sfincs
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data/surface_phi1_sfincs.txt)
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/surface_phi1_sfincs.txt")
+    add_test(NAME surface_phi1_sfincs COMMAND test_surface_phi1 sfincs
+        ${MILCA_DATA_DIR}/test/data/surface_phi1_sfincs.txt)
+endif()
 foreach(check closure axisymmetric)
     milca_test_labels(surface_phi1_${check} fast CLASSES continuum
         TARGETS test_surface_phi1)
@@ -1323,9 +1336,14 @@ foreach(check continuity sfincs)
 endforeach()
 add_executable(test_surface_fluxes test/test_surface_fluxes.f90)
 target_link_libraries(test_surface_fluxes PRIVATE milca)
+foreach(check equilibrium ad)
+    add_test(NAME surface_fluxes_${check} COMMAND test_surface_fluxes ${check})
+endforeach()
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/surface_fluxes_sfincs.txt")
+    add_test(NAME surface_fluxes_sfincs COMMAND test_surface_fluxes sfincs
+        ${MILCA_DATA_DIR}/test/data/surface_fluxes_sfincs.txt)
+endif()
 foreach(check sfincs equilibrium ad)
-    add_test(NAME surface_fluxes_${check} COMMAND test_surface_fluxes ${check}
-        ${CMAKE_CURRENT_SOURCE_DIR}/test/data/surface_fluxes_sfincs.txt)
     milca_test_labels(surface_fluxes_${check} fast CLASSES continuum
         TARGETS test_surface_fluxes)
 endforeach()
@@ -1363,8 +1381,10 @@ foreach(check maxwellian_null rates jvp zero_jvp fp_moments conservation self_ad
     add_test(NAME dk_collop_${check} COMMAND test_dk_collop ${check})
     milca_test_labels(dk_collop_${check} fast CLASSES continuum TARGETS test_dk_collop)
 endforeach()
-add_test(NAME dk_collop_neo2_matrix COMMAND test_dk_collop neo2_matrix
-    ${CMAKE_SOURCE_DIR}/test/data/neo2_collop_aug30835.txt)
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/neo2_collop_aug30835.txt")
+    add_test(NAME dk_collop_neo2_matrix COMMAND test_dk_collop neo2_matrix
+        ${MILCA_DATA_DIR}/test/data/neo2_collop_aug30835.txt)
+endif()
 milca_test_labels(dk_collop_neo2_matrix fast CLASSES continuum TARGETS test_dk_collop)
 add_executable(test_dk_mono_thermal test/test_dk_mono_thermal.f90)
 target_link_libraries(test_dk_mono_thermal PRIVATE milca)
@@ -1382,8 +1402,10 @@ foreach(check manufactured structure tangent reciprocity rational local_characte
     milca_test_labels(dk_mono_exb_${check} fast CLASSES continuum TARGETS test_dk_mono_exb)
 endforeach()
 # Synthetic finite-electric-field reference with matched Lorentz collisions.
-add_test(NAME dk_mono_exb_sfincs COMMAND test_dk_mono_exb sfincs
-    ${CMAKE_SOURCE_DIR}/test/data/sfincs_mono_exb.txt)
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/sfincs_mono_exb.txt")
+    add_test(NAME dk_mono_exb_sfincs COMMAND test_dk_mono_exb sfincs
+        ${MILCA_DATA_DIR}/test/data/sfincs_mono_exb.txt)
+endif()
 milca_test_labels(dk_mono_exb_sfincs fast CLASSES continuum TARGETS test_dk_mono_exb)
 foreach(check collisionless banana pfirsch_schlueter plateau onsager jvp estimate
         factor_api coupling quasisymmetric_3d monkes)
@@ -1553,15 +1575,19 @@ set_tests_properties(pp_fusion_eft_export_contract PROPERTIES PROCESSORS 4)
 
 add_executable(test_pp_fusion_eft test/test_pp_fusion_eft.f90)
 target_link_libraries(test_pp_fusion_eft PRIVATE milca)
-add_test(NAME pp_fusion_eft_oracles COMMAND test_pp_fusion_eft
-    ${CMAKE_SOURCE_DIR}/test/reference/pp_fusion_eft.dat)
-set_tests_properties(pp_fusion_eft_oracles PROPERTIES PROCESSORS 4)
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/reference/pp_fusion_eft.dat")
+    add_test(NAME pp_fusion_eft_oracles COMMAND test_pp_fusion_eft
+        ${MILCA_DATA_DIR}/test/reference/pp_fusion_eft.dat)
+    set_tests_properties(pp_fusion_eft_oracles PROPERTIES PROCESSORS 4)
+endif()
 
 add_executable(test_pp_fusion test/test_pp_fusion.f90)
 target_link_libraries(test_pp_fusion PRIVATE milca)
-add_test(NAME pp_fusion_oracles COMMAND test_pp_fusion
-    ${CMAKE_SOURCE_DIR}/test/reference/pp_fusion_ode.dat)
-set_tests_properties(pp_fusion_oracles PROPERTIES PROCESSORS 4)
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/reference/pp_fusion_ode.dat")
+    add_test(NAME pp_fusion_oracles COMMAND test_pp_fusion
+        ${MILCA_DATA_DIR}/test/reference/pp_fusion_ode.dat)
+    set_tests_properties(pp_fusion_oracles PROPERTIES PROCESSORS 4)
+endif()
 
 add_executable(test_coulomb_encounter test/test_coulomb_encounter.f90)
 target_link_libraries(test_coulomb_encounter PRIVATE milca)
@@ -2193,11 +2219,15 @@ add_executable(dk_surface_profile app/dk_surface_profile.f90)
 target_link_libraries(dk_surface_profile PRIVATE milca_ntv_geometry)
 add_executable(test_dk_surface_device test/test_dk_surface_device.f90)
 target_link_libraries(test_dk_surface_device PRIVATE milca_ntv_geometry)
-add_test(NAME dk_surface_device_sfincs COMMAND test_dk_surface_device sfincs
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_sfincs.txt)
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/dk_surface_helical_sfincs.txt")
+    add_test(NAME dk_surface_device_sfincs COMMAND test_dk_surface_device sfincs
+        ${MILCA_DATA_DIR}/test/data/dk_surface_helical_sfincs.txt)
+endif()
 milca_test_labels(dk_surface_device_sfincs slow CLASSES apps TARGETS test_dk_surface_device)
-add_test(NAME dk_surface_device_sfincs_phi1 COMMAND test_dk_surface_device sfincs_phi1
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data/dk_surface_helical_ephi1_sfincs.txt)
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/dk_surface_helical_ephi1_sfincs.txt")
+    add_test(NAME dk_surface_device_sfincs_phi1 COMMAND test_dk_surface_device sfincs_phi1
+        ${MILCA_DATA_DIR}/test/data/dk_surface_helical_ephi1_sfincs.txt)
+endif()
 milca_test_labels(dk_surface_device_sfincs_phi1 slow CLASSES apps
     TARGETS test_dk_surface_device)
 foreach(check geometry helical)
@@ -2608,12 +2638,15 @@ add_test(NAME gs_free_app_contract COMMAND ${CMAKE_COMMAND}
     -P ${CMAKE_SOURCE_DIR}/test/gs_free_app.cmake)
 set_tests_properties(gs_free_app_contract PROPERTIES TIMEOUT 900
     ENVIRONMENT "OMP_NUM_THREADS=4")
-add_test(NAME gs_free_xpoint_refit COMMAND ${CMAKE_COMMAND}
-    -DAPP=$<TARGET_FILE:gs_free> -DFIXTURES=${CMAKE_SOURCE_DIR}/test/fixtures/gs_free_xpoint
-    -DWORK=${CMAKE_BINARY_DIR}/gs_free_xpoint
-    -P ${CMAKE_SOURCE_DIR}/test/gs_free_xpoint.cmake)
-set_tests_properties(gs_free_xpoint_refit PROPERTIES TIMEOUT 900
-    ENVIRONMENT "OMP_NUM_THREADS=4")
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/fixtures/gs_free_xpoint/seed.dat")
+    add_test(NAME gs_free_xpoint_refit COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:gs_free> -DFIXTURES=${CMAKE_SOURCE_DIR}/test/fixtures/gs_free_xpoint
+        -DSEED=${MILCA_DATA_DIR}/test/fixtures/gs_free_xpoint/seed.dat
+        -DWORK=${CMAKE_BINARY_DIR}/gs_free_xpoint
+        -P ${CMAKE_SOURCE_DIR}/test/gs_free_xpoint.cmake)
+    set_tests_properties(gs_free_xpoint_refit PROPERTIES TIMEOUT 900
+        ENVIRONMENT "OMP_NUM_THREADS=4")
+endif()
 # The comparison producer is optional; the native solver needs no Python.
 
 add_executable(test_gs_readback_order test/test_gs_readback_order.f90)
@@ -2715,13 +2748,17 @@ set_tests_properties(equilibrium_core_d3_upper_bound_p2 PROPERTIES TIMEOUT 60
     PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 # Synthetic Solov'ev inputs exercise the cubic-profile Newton, P3, direct
 # factor, current constraint, readback and majorant path on a coarse mesh.
-add_test(NAME gs_k6_mini_regression COMMAND ${CMAKE_COMMAND}
-    -DAPP=$<TARGET_FILE:gs_phase1> -DCHECK=$<TARGET_FILE:test_equilibrium_core>
-    -DFIXTURES=${CMAKE_SOURCE_DIR}/test/fixtures/gs_synthetic
-    -DWORK=${CMAKE_BINARY_DIR}/gs_k6_mini
-    -P ${CMAKE_SOURCE_DIR}/test/gs_k6_mini.cmake)
-set_tests_properties(gs_k6_mini_regression PROPERTIES TIMEOUT 300
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;MKL_NUM_THREADS=1")
+if(MILCA_DATA_DIR AND EXISTS
+        "${MILCA_DATA_DIR}/test/fixtures/gs_synthetic/reference_summary.dat")
+    add_test(NAME gs_k6_mini_regression COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:gs_phase1> -DCHECK=$<TARGET_FILE:test_equilibrium_core>
+        -DFIXTURES=${CMAKE_SOURCE_DIR}/test/fixtures/gs_synthetic
+        -DREFERENCES=${MILCA_DATA_DIR}/test/fixtures/gs_synthetic
+        -DWORK=${CMAKE_BINARY_DIR}/gs_k6_mini
+        -P ${CMAKE_SOURCE_DIR}/test/gs_k6_mini.cmake)
+    set_tests_properties(gs_k6_mini_regression PROPERTIES TIMEOUT 300
+        ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;MKL_NUM_THREADS=1")
+endif()
 
 # K-C1/L3: 3D polyline coils, per-n Fourier projection, vacuum b_mn (L3).
 target_sources(milca_equilibrium PRIVATE src/equilibrium/coils_3d.f90)
@@ -2852,46 +2889,52 @@ set_tests_properties(mhd_shielding_cylinder_limit_reciprocity PROPERTIES TIMEOUT
     ENVIRONMENT "OMP_NUM_THREADS=4")
 add_executable(gs_response_3d app/gs_response_3d.f90)
 target_link_libraries(gs_response_3d PRIVATE milca milca_continuum)
-add_test(NAME gs_response_3d_ampere_indicator_contract COMMAND ${CMAKE_COMMAND}
-    -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_check
-    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
-    -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_app.cmake)
-set_tests_properties(gs_response_3d_ampere_indicator_contract PROPERTIES TIMEOUT 60
-    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
-add_test(NAME gs_response_3d_kinetic_closure COMMAND ${CMAKE_COMMAND}
-    -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_kinetic
-    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
-    -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_kinetic.cmake)
-set_tests_properties(gs_response_3d_kinetic_closure PROPERTIES TIMEOUT 240
-    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
-add_test(NAME gs_response_3d_reconnected_closure COMMAND ${CMAKE_COMMAND}
-    -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_reconnected
-    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
-    -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_reconnected.cmake)
-set_tests_properties(gs_response_3d_reconnected_closure PROPERTIES TIMEOUT 240
-    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+if(milca_shield_torus_eqdsk)
+    add_test(NAME gs_response_3d_ampere_indicator_contract COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_check
+        -DEQDSK=${milca_shield_torus_eqdsk}
+        -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_app.cmake)
+    set_tests_properties(gs_response_3d_ampere_indicator_contract PROPERTIES TIMEOUT 60
+        ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+    add_test(NAME gs_response_3d_kinetic_closure COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_kinetic
+        -DEQDSK=${milca_shield_torus_eqdsk}
+        -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_kinetic.cmake)
+    set_tests_properties(gs_response_3d_kinetic_closure PROPERTIES TIMEOUT 240
+        ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+    add_test(NAME gs_response_3d_reconnected_closure COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:gs_response_3d> -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_reconnected
+        -DEQDSK=${milca_shield_torus_eqdsk}
+        -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_reconnected.cmake)
+    set_tests_properties(gs_response_3d_reconnected_closure PROPERTIES TIMEOUT 240
+        ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+endif()
 add_executable(test_mhd_ideal_n test/test_mhd_ideal_n.f90)
 target_link_libraries(test_mhd_ideal_n PRIVATE milca)
 add_test(NAME mhd_ideal_n_mde_force_free_identity COMMAND test_mhd_ideal_n)
 add_test(NAME mhd_ideal_n_final_state_error COMMAND test_mhd_ideal_n error)
 set_tests_properties(mhd_ideal_n_final_state_error PROPERTIES TIMEOUT 60
     ENVIRONMENT "OPENBLAS_NUM_THREADS=1")
-add_test(NAME gs_response_3d_ideal_error_contract COMMAND ${CMAKE_COMMAND}
-    -DAPP=$<TARGET_FILE:gs_response_3d>
-    -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_ideal_check
-    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
-    -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_ideal_error.cmake)
-# ~45 s serial (complex Ampere LU) on a 2026 workstation, ~60 s on sCluster.
-set_tests_properties(gs_response_3d_ideal_error_contract PROPERTIES TIMEOUT 240
-    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+if(milca_shield_torus_eqdsk)
+    add_test(NAME gs_response_3d_ideal_error_contract COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:gs_response_3d>
+        -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_ideal_check
+        -DEQDSK=${milca_shield_torus_eqdsk}
+        -P ${CMAKE_SOURCE_DIR}/test/check_gs_response_3d_ideal_error.cmake)
+    # ~45 s serial (complex Ampere LU) on a 2026 workstation, ~60 s on sCluster.
+    set_tests_properties(gs_response_3d_ideal_error_contract PROPERTIES TIMEOUT 240
+        ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+endif()
 set_tests_properties(mhd_ideal_n_mde_force_free_identity PROPERTIES TIMEOUT 900
     ENVIRONMENT "OMP_NUM_THREADS=4")
 add_executable(test_mhd_shield_torus test/test_mhd_shield_torus.f90)
 target_link_libraries(test_mhd_shield_torus PRIVATE milca)
-add_test(NAME mhd_shield_torus_nrad_convergence COMMAND test_mhd_shield_torus
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk)
-set_tests_properties(mhd_shield_torus_nrad_convergence PROPERTIES TIMEOUT 900
-    ENVIRONMENT "OMP_NUM_THREADS=4")
+if(milca_shield_torus_eqdsk)
+    add_test(NAME mhd_shield_torus_nrad_convergence COMMAND test_mhd_shield_torus
+        ${milca_shield_torus_eqdsk})
+    set_tests_properties(mhd_shield_torus_nrad_convergence PROPERTIES TIMEOUT 900
+        ENVIRONMENT "OMP_NUM_THREADS=4")
+endif()
 add_executable(test_flux_mesh_axis test/test_flux_mesh_axis.f90)
 target_link_libraries(test_flux_mesh_axis PRIVATE milca)
 add_test(NAME flux_mesh_axis_interpolation_order COMMAND test_flux_mesh_axis)
@@ -2902,13 +2945,15 @@ target_link_libraries(test_mhd_closure PRIVATE milca)
 add_test(NAME response_layer_all_rational_setup COMMAND test_mhd_closure setup)
 set_tests_properties(response_layer_all_rational_setup PROPERTIES TIMEOUT 30
     ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
-add_test(NAME gs_response_3d_frobenius_all_rational COMMAND ${CMAKE_COMMAND}
-    -DAPP=$<TARGET_FILE:gs_response_3d>
-    -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_frobenius_check
-    -DEQDSK=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/shield_torus_a10.eqdsk
-    -P ${CMAKE_SOURCE_DIR}/test/check_response_all_rational.cmake)
-set_tests_properties(gs_response_3d_frobenius_all_rational PROPERTIES TIMEOUT 180
-    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+if(milca_shield_torus_eqdsk)
+    add_test(NAME gs_response_3d_frobenius_all_rational COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:gs_response_3d>
+        -DWORK=${CMAKE_BINARY_DIR}/gs_response_3d_frobenius_check
+        -DEQDSK=${milca_shield_torus_eqdsk}
+        -P ${CMAKE_SOURCE_DIR}/test/check_response_all_rational.cmake)
+    set_tests_properties(gs_response_3d_frobenius_all_rational PROPERTIES TIMEOUT 180
+        ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+endif()
 add_test(NAME mhd_closure_tearing_delta_prime COMMAND test_mhd_closure)
 set_tests_properties(mhd_closure_tearing_delta_prime PROPERTIES TIMEOUT 1800
     ENVIRONMENT "OMP_NUM_THREADS=4")
@@ -3117,11 +3162,13 @@ target_link_libraries(milca_nn_vacuum_test PUBLIC milca)
 add_executable(nn1_spec_case test/nn1_spec_case.f90)
 target_link_libraries(nn1_spec_case PRIVATE milca)
 find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_FOUND)
+if(Python3_FOUND AND MILCA_DATA_DIR
+        AND EXISTS "${MILCA_DATA_DIR}/test/data/nn1_spec/grid_smoke.txt")
     add_test(NAME nn1_spec_case_smoke
         COMMAND ${CMAKE_COMMAND}
             -DEXE=$<TARGET_FILE:nn1_spec_case>
             -DDATA=${CMAKE_SOURCE_DIR}/test/data/nn1_spec
+            -DGRID=${MILCA_DATA_DIR}/test/data/nn1_spec/grid_smoke.txt
             -DCHECK=${CMAKE_SOURCE_DIR}/test/check_nn1_spec_case.py
             -DPY=${Python3_EXECUTABLE} -DOUT=${CMAKE_CURRENT_BINARY_DIR}/nn1_spec_smoke
             -P ${CMAKE_SOURCE_DIR}/test/run_nn1_spec_case.cmake)

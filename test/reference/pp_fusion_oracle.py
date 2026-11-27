@@ -1,12 +1,22 @@
 """Optional independent ODE/BVP oracle, never imported by production.
 Run from milca root: python test/reference/pp_fusion_oracle.py.
 Uses scipy 1.18.1 / numpy 2.5.4 / mpmath 1.4.1; no FEM-DVR or generated leaves.
-Writes a small frozen numeric table for the native Fortran test.
+Writes a small frozen numeric table for the native Fortran test to
+$MILCA_DATA_DIR/test/reference/pp_fusion_ode.dat.
 """
+import os
 from pathlib import Path
+import sys
 import numpy as np
 from scipy.integrate import solve_bvp, solve_ivp, quad
 import mpmath as m
+
+
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return Path(root) / relative
 m.mp.dps = 45
 hc, mp, mn, me, alpha = 197.3269804, 938.27208943, 939.56542194, .51099895069, .0072973525643
 kin = hc*hc/mp
@@ -74,7 +84,8 @@ f = quad(lambda x:x*np.sqrt(x*x-1)*(endpoint-x)**2 *
          (2*np.pi*alpha*x/np.sqrt(x*x-1))/np.expm1(2*np.pi*alpha*x/np.sqrt(x*x-1)),
          1,endpoint,epsabs=1e-12)[0]*1.0162
 S = 6*np.pi**2*mp*alpha*np.log(2)*6.582119569e-22/hc*1.2695**2*lam*f/(gamma**3*3071.4*100)
-out = Path('test/reference/pp_fusion_ode.dat')
+out = milca_data('test/reference/pp_fusion_ode.dat')
+out.parent.mkdir(parents=True, exist_ok=True)
 with out.open('w') as stream:
     stream.write(' '.join(f'{v:.16e}' for v in [B,PD,-1/K,lam,S,delta,f])+'\n')
     for r in [.1,.5,1.,2.,5.,10.,20.,40.]:

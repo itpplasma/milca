@@ -1,15 +1,24 @@
 """Render independent current-wall accounting and time-refinement checks."""
+import os
 from pathlib import Path
 import csv
+import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-root = Path(__file__).resolve().parent
-with (root / "data/vrmhd-island-ledgers.csv").open() as stream:
+
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return Path(root) / relative
+
+
+with milca_data("docs/data/vrmhd-island-ledgers.csv").open() as stream:
     accounting = list(csv.DictReader(stream))
-with (root / "data/vrmhd-island-time.csv").open() as stream:
+with milca_data("docs/data/vrmhd-island-time.csv").open() as stream:
     time = list(csv.DictReader(stream))
 fig, axes = plt.subplots(1, 2, figsize=(9, 3.7), layout="constrained")
 x = np.arange(len(accounting))

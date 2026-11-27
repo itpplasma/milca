@@ -8,7 +8,9 @@ eps=0.5, delta=1/64 and tau=0 or 0.4. All reported state bounds remain unavailab
 
 [V] `input.landreman-paul-qa` is the fixed-boundary, zero-pressure, zero-current
 Landreman–Paul QA input from
-[stellarator_multiobjective](https://github.com/mishapadidar/stellarator_multiobjective/blob/be13ff521f59f3f6430d2900f1a5ee399ad36946/vmec_input_files/input.LandremanPaul2021_QA).
+[stellarator_multiobjective](https://github.com/mishapadidar/stellarator_multiobjective/blob/be13ff521f59f3f6430d2900f1a5ee399ad36946/vmec_input_files/input.LandremanPaul2021_QA);
+its boundary coefficients are those of
+[`input.LandremanPaul2021_QA` of SIMSOPT](https://github.com/hiddenSymmetries/simsopt/blob/424bc3756dbf443916a7f41ea417cc3ea0431430/tests/test_files/input.LandremanPaul2021_QA).
 It is a cross-code case without an exact equilibrium oracle. Runtime settings
 in the adapter replace the original very tight iteration tolerances.
 

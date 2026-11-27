@@ -8,16 +8,20 @@
    label lane solves: chi = s, F = -PHIEDGE chi / (2 pi),
    G' = -iota PHIEDGE / (2 pi), p = 0.
 3. VMEC2000 (xvmec, optional: --xvmec PATH) on both decks.
-4. Plain-text reference of the prescribed-iota VMEC++ state in reference/.
+4. Plain-text reference of the prescribed-iota VMEC++ state in --out
+   (default $MILCA_DATA_DIR/benchmarks/label-qa/reference), wout files in
+   its sibling work/.
 
-Usage: python make_reference.py [--xvmec PATH] [--threads N] [--ns ...]
+Usage: python make_reference.py [--out DIR] [--xvmec PATH] [--threads N] [--ns ...]
 """
 import argparse
 import importlib.metadata as md
 import json
+import os
 import pathlib
 import re
 import subprocess
+import sys
 import time
 
 import netCDF4
@@ -26,8 +30,6 @@ import vmecpp
 
 HERE = pathlib.Path(__file__).resolve().parent
 DECK = HERE.parent / "nested" / "input.landreman-paul-qa"
-OUT = HERE / "reference"
-WORK = HERE / "work"
 NPHI, NTHETA, SURFACES, DEGREE = 64, 128, (0.25, 0.5, 1.0), 6
 
 ap = argparse.ArgumentParser()
@@ -35,8 +37,20 @@ ap.add_argument("--xvmec", default=None)
 ap.add_argument("--threads", type=int, default=8)
 ap.add_argument("--ns", type=int, nargs="+", default=[16, 51, 101])
 ap.add_argument("--ftol", type=float, default=1e-14)
+ap.add_argument("--out", type=pathlib.Path, default=None)
 a = ap.parse_args()
-OUT.mkdir(exist_ok=True)
+
+
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return pathlib.Path(root) / relative
+
+
+OUT = a.out or milca_data("benchmarks/label-qa/reference")
+WORK = OUT.parent / "work"
+OUT.mkdir(parents=True, exist_ok=True)
 WORK.mkdir(exist_ok=True)
 
 

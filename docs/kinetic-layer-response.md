@@ -12,7 +12,7 @@ the torus. The cylinder model is that of Markl, Kasilov and Albert (J. Plasma Ph
    `milca_ou_susceptibility`).
 2. **KL1, cylinder response**: charge and current kernels in radial wavenumber with the
    gyroaverage, Poisson solve, shielding current. Compared with KIM (integral and second-order
-   Larmor-radius runs) on ASDEX Upgrade 33353 and an ITER q = 3 surface.
+   Larmor-radius runs) on device data outside the repository.
 3. **KL2, toroidal response**: ions in canonical action-angle variables with the effective
    toroidal radius psi* (resonances of bounce, transit and precession frequencies), electrons
    from the drift-kinetic operator with the misalignment-field source, the finite-orbit kernel
@@ -93,12 +93,9 @@ and the ideal limit Phi = -i E_r B_r/(k_par B0) far from the resonance, whose
 remaining deviation is the ion Larmor-radius correction (rho_i k_s)^2 (3.4e-3 at
 k_s = 0.12/cm, 3.4e-5 at 0.012/cm).
 
-`kl_cylinder` solves one window from a text background. Given the window background
-that KIM writes for an ASDEX Upgrade pedestal case (harmonic (6, 2), 512 points,
-M = 225, inputs not public), Phi, the electron and ion parallel currents and the
-integrated shielding current agree with KIM's local periodic branch to 4e-5
-within 1.5 cm of the resonant surface; the Boltzmann gyroaverage that KIM omits
-changes the integrated current by 1.6e-4 there.
+`kl_cylinder` solves one window from a text background. Its comparison with the
+window background that KIM writes for a device pedestal case runs against data
+outside the repository.
 
 `milca_kinetic_layer_window` builds the window from radial profiles (n_e, T_e,
 T_i, q, E_r against the effective radius): cubic splines of the profiles, the
@@ -112,11 +109,9 @@ transition bands to B0. Collision frequencies follow KIM after KAMEL#399.
 `kl_profiles` runs the whole chain from profile files. Checks
 (`kinetic_layer_window`): closed-form B0 and wavenumbers for constant q
 without pressure, the given profiles on the core, continuity at the window
-edge and the diamagnetic drop 8 pi Delta p of B0^2. On the ASDEX Upgrade case
-the window matches KIM's to 1e-8 in the geometry and 1e-11 in the profiles
-and collision frequencies, and Phi, j_par and the integrated shielding
-current from the profiles agree with KIM to 2e-5. Next: the kinetic layer
-closure of the per-n torus response and an ITER case.
+edge and the diamagnetic drop 8 pi Delta p of B0^2. The comparison with KIM on
+a device case runs against data outside the repository. Next: the kinetic
+layer closure of the per-n torus response and a device demonstration case.
 
 ## KL closure: the kinetic layer in the per-n torus response (plan)
 
@@ -145,20 +140,15 @@ Checks before landing, in this order:
 
 1. Cylinder, end to end (done): KIM's electromagnetic run type solves
    Poisson's and Ampere's laws together with the kinetic current for a
-   prescribed B^r at the outer boundary. On ASDEX Upgrade 33353, (m, n) =
-   (6, 2), the jump of d(r B^r)/dr across the layer in that run equals
-   -2 i k_s I_par/(c r_s B^r) from its own current to 0.3 %, which fixes sign
-   and normalisation of Delta without orientation conventions (it required
-   the fix of KIM's Ampere operator, itpplasma/KAMEL#414). The constant-psi
-   Delta from the electrostatic current (B^r uniform across the layer) agrees
-   with the electromagnetic one to 2 % in the real and 18 % in the imaginary
-   part. This gap is not the variation of psi across the strongly shielded
-   layer (B^r(r_s) is 4 % of its edge value): MILCA's kernels driven by the
-   electromagnetic run's own B^r(r) give a net current within 2 % of the
-   constant-psi one, but 14 % below the current of that run in magnitude.
-   The electromagnetic run uses KIM's non-periodic kernels, the periodic
-   electrostatic branch (which MILCA reproduces to 2e-5) its periodic ones;
-   the difference between the two KIM branches on this case is open.
+   prescribed B^r at the outer boundary. On a device case outside the
+   repository, the jump of d(r B^r)/dr across the layer in that run equals
+   -2 i k_s I_par/(c r_s B^r) from its own current, which fixes sign and
+   normalisation of Delta without orientation conventions (it required the
+   fix of KIM's Ampere operator, itpplasma/KAMEL#414). The constant-psi Delta
+   from the electrostatic current (B^r uniform across the layer) differs from
+   the electromagnetic one. The electromagnetic run uses KIM's non-periodic
+   kernels, the electrostatic branch its periodic ones; the difference between
+   the two KIM branches is open.
    `milca_kinetic_layer_delta` (`kl_delta`) returns Delta and I_par per gauss
    for the profiles of one rational surface.
 2. Cylinder to torus (implemented as `closure = 'kinetic'` of
@@ -186,7 +176,7 @@ Checks before landing, in this order:
    On the A = 10 test torus the solution meets the matching condition to
    1e-14 (`gs_response_3d_kinetic_closure`).
 3. Ideal limit (shielding grows with |Delta|) and the comparison with
-   MEPHIT's kinetic hybrid on ASDEX Upgrade 33353; the ITER demonstration case.
+   MEPHIT's kinetic hybrid on a device case; a device demonstration case.
 
 ## Layers matched to a toroidal outer solution (KIM-1L)
 

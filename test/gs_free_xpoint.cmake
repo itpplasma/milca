@@ -11,9 +11,10 @@
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}")
 find_program(NCDUMP ncdump REQUIRED)
-foreach(name boundary.dat coils.txt profile.dat seed.dat)
+foreach(name boundary.dat coils.txt profile.dat)
     file(COPY "${FIXTURES}/${name}" DESTINATION "${WORK}")
 endforeach()
+file(COPY "${SEED}" DESTINATION "${WORK}")
 file(WRITE "${WORK}/input.nml" "&gs_free
  boundary_file = 'boundary.dat', boundary_nodes = 96, degree = 2, coil_file = 'coils.txt',
  profile_file = 'profile.dat', plasma_ellipse = 1.70, 0.5, 0.9, chain_nodes = 48,

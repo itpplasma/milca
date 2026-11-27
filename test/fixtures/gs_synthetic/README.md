@@ -22,10 +22,10 @@ Generate the inputs by compiling `test/support/generate_gs_synthetic.f90` with
 gfortran and running it in this directory. The source has 513 normalized knots;
 its constant derivative law is independent of the solved axis. The prescribed
 current is an independent periodic quadrature of the exact boundary integral.
-Query points lie on the half-radius analytic surface. Physical source data for
-K6 production runs remain in the private TC24 repository.
+Query points lie on the half-radius analytic surface.
 
-The reference files were captured from the unchanged production solver at
+The reference files (`reference_*.dat`) are kept under the same path in an
+external data directory (`MILCA_DATA_DIR`). They were captured from the unchanged production solver at
 6ac7bd4 on sCluster node4, job 3309757, with gfortran 12.2.0, OMP_NUM_THREADS=1
 and OPENBLAS_NUM_THREADS=1. The gs_phase1 executable SHA256 was
 262d0f2e407ec1dd206abdbdc53d51e4c715338c01569b8e6a423fe77b40b7b4.

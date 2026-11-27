@@ -28,7 +28,9 @@ The registered `dk_ntv_*` tests independently check the operator and derivatives
 timing does not replace them. A device time-to-accuracy claim additionally
 requires convergence in angle, pitch and energy and the full collision model.
 
-`timings.csv` retains the repeated local measurements; `measurement.json`
+`timings.csv`, `measurement.json` and `equivalence.json` are kept under the
+same path in an external data directory (`MILCA_DATA_DIR`). `timings.csv`
+retains the repeated local measurements; `measurement.json`
 records hardware, compiler, flags, baseline revision and scope. The `before`
 variant is the baseline, `after` replaces parameter-wise tangent solves by one
 torque adjoint, and `blas` also uses BLAS for the dense Schur products.

@@ -326,8 +326,7 @@ The whole-mesh volume and flux sums of the fixed-boundary path are not used ther
 the volume is 2 pi times the plasma current of a unit-dp/dpsi law on the same cut
 cells. `test_gs_readback_free` checks the free path against the fixed path (gauge
 shift, and an interior surface taken as the boundary) and the exact Solov'ev
-surfaces. The coil table, profile law and constraints for ITER
-(P12) stay in the iter_tc24 producer.
+surfaces.
 
 Tests: `gs_free_app_contract` (CTest; forward solve with refit, NetCDF values and
 provenance, `--evaluate` against the axis flux and stream parity, the three fit
@@ -351,7 +350,7 @@ physics, profile approximation or named-code mode is introduced.
 The reference uses FreeGS's existing direct-Green `freeBoundary` algorithm.
 This is an explicit numerical change from the example's Hagenow selection.
 The unmodified example was also run headlessly, and
-`benchmarks/freegs/hagenow-reference.dat` retains its tightened grid ladder.
+`benchmarks/freegs/hagenow-reference.dat` in `MILCA_DATA_DIR` retains its tightened grid ladder.
 The two boundary methods differ at 257 points by 6.41e-5 Wb/rad in axis flux
 and about 0.020 in q95, beyond their grid changes. In that release,
 `freegs/boundary.py:189,211-231` evaluates the Hagenow integral 1 cm outside
@@ -416,8 +415,10 @@ a rigorous continuous free-boundary certificate. The test assembles the
 pressure/current constraint Jacobian itself; production supplies only the
 state tangent.
 
-The optional oracle generator and small text fixtures are in
-`benchmarks/freegs/`; CMake/CTest need neither FreeGS nor a new Python runtime.
+The optional oracle generator and the coil table are in `benchmarks/freegs/`.
+The generator writes the reference tables to `$MILCA_DATA_DIR/benchmarks/freegs`,
+and CTest registers the parity test only when `MILCA_DATA_DIR` is configured.
+CMake/CTest need neither FreeGS nor a new Python runtime.
 Regenerate headlessly with Python 3.12 and the retained dependency pins:
 
 ```sh
@@ -430,8 +431,8 @@ env -u DISPLAY MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
 env -u DISPLAY MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
     "$parity_root/venv/bin/python" benchmarks/freegs/generate_reference.py \
     --boundary freeBoundaryHagenow --output "$parity_root/hagenow"
-cp "$parity_root/hagenow/reference.dat" benchmarks/freegs/hagenow-reference.dat
-cmake --preset cpu
+cp "$parity_root/hagenow/reference.dat" "$MILCA_DATA_DIR/benchmarks/freegs/hagenow-reference.dat"
+cmake --preset cpu -DMILCA_DATA_DIR="$MILCA_DATA_DIR"
 cmake --build --preset cpu --target test_gs_freegs -j8
 ctest --preset cpu -j4 -R '^gs_free_boundary_freegs_public_parity$'
 ```

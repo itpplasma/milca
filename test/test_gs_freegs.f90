@@ -53,12 +53,13 @@ program test_gs_freegs
     real(dp) :: root_start(2) = 1.0_dp
     real(dp), parameter :: law_shape(4) = [1.0_dp, -2.0_dp, 1.0_dp, 0.0_dp]
     integer :: unit, i, j, n, status, cell, nside, rung, failures, forward_solves
-    character(1024) :: path, argument, line
+    character(1024) :: path, coil_path, argument, line
 
     call get_command_argument(1, path)
+    call get_command_argument(2, coil_path)
     nside = 24
-    if (command_argument_count() > 1) then
-        call get_command_argument(2, argument)
+    if (command_argument_count() > 2) then
+        call get_command_argument(3, argument)
         read (argument, *) nside
     end if
     open (newunit=unit, file=trim(path)//'/reference.dat', status='old')
@@ -87,7 +88,7 @@ program test_gs_freegs
         read (line, *) seed(:, i)
     end do
     close (unit)
-    call gs_read_coil_table(trim(path)//'/coils.dat', coils, status, line)
+    call gs_read_coil_table(trim(coil_path), coils, status, line)
     if (status /= 0) print *, trim(line)
     call check(status, 'coil table')
     failures = 0
