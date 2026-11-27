@@ -22,7 +22,7 @@ general 3D.
 
 Nonlinear resistive MHD of the tokamak core on the resistive time scale is
 expensive in established codes. The published 3D JOREK simulation of flux
-pumping in a tokamak (Zhang et al., Nucl. Fusion 65 066001, 2025) used
+pumping in a medium-size tokamak (Zhang et al., Nucl. Fusion 65 066001, 2025) used
 about 0.5 M core-hours on Marconi for 700 ms, about 6000 core-seconds per time
 step.
 
@@ -39,10 +39,10 @@ The model, discretisation and solver choices are made for the parameters
 between present medium-size tokamaks and a DEMO-class reactor (core values,
 order-of-magnitude estimates).
 
-| quantity | a tokamak | ITER | DEMO |
+| quantity | medium-size tokamak | ITER | DEMO |
 |---|---|---|---|
 | Lundquist number S | ~3e9 | ~1e10-1e11 | ~1e11 |
-| tau_R/tau_A | >1e6 | >1e7 (Zhang et al. 2025: 10x tokamak) | 40x tokamak (Zhang et al. 2025) |
+| tau_R/tau_A | >1e6 | >1e7 (Zhang et al. 2025: 10x medium-size) | 40x medium-size (Zhang et al. 2025) |
 | chi_par/chi_perp (electrons), collisional | ~1e11 | ~1e13 | ~2e13 |
 | chi_par/chi_perp (electrons), flux-limited | ~1e9-1e10 | ~1e10 | ~1e10 |
 | magnetic Prandtl number | ~1e3 | ~1e2-1e3 | ~1e2-1e3 |
