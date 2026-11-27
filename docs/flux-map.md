@@ -757,9 +757,11 @@ grid data as differentiated twice, not to the evaluation.
   the interior converges and the wall layer does not: from 3:4:29 to
   3:8:21 the bands of s < 0.5 fall from 0.07–0.18 to 0.015–0.07 (order 2
   and above), the band s > 0.9 stays at 0.89 and 0.93. The volume number
-  is that layer. Cause not isolated (hypotheses: the unresolved tips of the
-  wall, the toroidal content of the wall; the graded meshes below lower
-  the band to 0.62).
+  is that layer. These runs placed the wall by arc length. The deck
+  sample angles removed most of it ("Fourier wall sample angles"). In a
+  manufactured check the rest falls under uniform refinement and grows
+  with the cells across the wall alone ("Wall layer and the resolution
+  of the VMEC++ references").
 - Parity with VMEC on this measure is therefore open, and it is the
   measure of the standing benchmark of the roadmap.
 
@@ -818,6 +820,69 @@ to the input sample angles reduced the maximum wall distance from
 710 to 0.86 µm and the volume-integrated force ratio fell from 0.145 to
 0.00351. The half-flux surface distance from stock VMEC fell from 342 to
 100 µm RMS. This run used the prescribed wall and profiles in both fits.
+
+### Wall layer and the resolution of the VMEC++ references (2026-11-26)
+
+Stages are `degree:cells:planes:radial`: `cells` along the wall and in the
+central block, `radial` across the outer blocks (equal to `cells` when
+omitted).
+
+Manufactured check with the exact sheared Landreman field
+(`MILCA_FM3_EXACT=landreman-sheared`, stages `2:2:7,2:4:7,2:4:13,3:c:13:r`),
+e_B the relative L² error of B:
+
+| c | r | e_B | η_B, s > 0.9 | Newton steps |
+|---|---|---|---|---|
+| 4 | 4 | 5.4e-4 | 3.3e-2 | 5 |
+| 6 | 6 | 1.3e-4 | 1.5e-2 | 3 |
+| 8 | 8 | 1.0e-4 | 1.9e-2 | 5 |
+| 10 | 10 | 4.6e-5 | 5.9e-3 | 6 |
+| 6 | 4 | 1.3e-4 | 1.1e-2 | 11 |
+| 6 | 8 | 1.4e-4 | 2.0e-2 | 5 |
+| 6 | 12 | 1.6e-4 | 3.1e-2 | 6 |
+
+- e_B falls under uniform refinement. At c = 6 it stays at 1.3e-4 to
+  1.6e-4 for r = 4 to 12, while η_B in s > 0.9 grows about in
+  proportion to r.
+- Consistent with this: the error of B_h does not shrink with r, and
+  in outer cells of radial width h_r its derivative in J_h = ∇×B_h is of
+  order |B − B_h|/h_r.
+- At c = 6 and r = 3, 10, 18 the stationary Newton solve (`stationary`,
+  "Integer-transform Landreman saddle") took 22 to 47 steps and ended at
+  another stationary point, e_B 6.6e-4 to 1.2e-3.
+
+The VMEC++ references were under-resolved. Ladder in (mpol, ntor, ns),
+VMEC++ force tolerance ftol 1e-14, rms change of the s = 0.5 surface to
+the finest level. The coarsest level was the former reference:
+
+| deck | levels | coarsest | middle |
+|---|---|---|---|
+| QA | (16, 12, 101), (20, 14, 201), (24, 16, 301) | 0.019 mm | 0.004 mm |
+| li383 | (10, 8, 101), (14, 10, 201), (18, 12, 301) | 1.20 mm | 0.31 mm |
+| CTH | (10, 8, 101), (14, 10, 201) | 0.53 mm | |
+
+The references of QA and li383 (`make_reference.py`, in `MILCA_DATA_DIR`)
+are now the finest level. QH keeps (12, 10, 101): its finer levels did
+not reach ftol within 2e5 iterations. The distances in the sample-angle
+table above are against the former references.
+
+CEMV against the finest VMEC++ level (CTH: the middle one), rms distance
+of the s = 0.5 surface, last stage of `2:2:9,3:4:21,…`:
+
+| deck | 4:6:21 | 4:9:21 | 5:8:21 |
+|---|---|---|---|
+| QA | 0.045 mm | 0.019 mm | 0.015 mm |
+| li383 | 0.85 mm | 0.36 mm | 0.31 mm |
+| CTH | 0.69 mm | 0.25 mm | 0.35 mm |
+
+On li383 the 5:8:21 state differs from VMEC++ by about as much
+as VMEC++ changes between its two finest levels.
+
+Open: on CTH, η_B in s < 0.1 rises with c, 1.5e-2, 2.9e-2, 6.1e-2, 6.8e-2
+at c = 6, 8, 10, 12 (`…,4:6:21:6,4:8:21:6,…`, every stage converged to a
+gradient norm below 1e-9, one negative Hessian eigenvalue from c = 10).
+Jumping from 3:4:21 to c = 10 or 12 stops at the limit of 80 Newton steps
+with the same η_B. CTH also moves away from VMEC++ from 4:9:21 to 5:8:21.
 
 ### Gauge constraint, one solver loop and continuation (P0c, 2026-11-23)
 
@@ -1059,8 +1124,10 @@ Each with the run that would settle it in the roadmap (P0a–P0c).
 - Pointwise force balance: the degree-2 states have J×B − ∇p of the order
   of ∇(B²/2) on the standard decks (VMEC++: 2e-3 to 3.5e-2), and on QA the
   wall layer s > 0.9 does not converge up to degree 3, 8 cells, 21 planes
-  ("Force-balance residual"). Owed: the cause in the wall layer, then
-  parity at degree 3 or 4. The floor of F2b beyond 4 cells (planes or
+  ("Force-balance residual"). The wall layer falls under uniform
+  refinement ("Wall layer and the resolution of the VMEC++ references"). Owed:
+  the rise of η_B near the CTH axis with the cells, then parity at
+  degree 3 or 4. The floor of F2b beyond 4 cells (planes or
   the saddle) is not isolated.
 - Gauge: done for the rotation, the one exact symmetry of W_h, on meshes
   without symmetry ("Gauge constraint, one solver loop and continuation").

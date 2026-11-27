@@ -183,15 +183,16 @@ record.update(time_iota_s=t_iota, mpol=wi.mpol, ntor=wi.ntor, ns_final=wi.ns, fs
 if wf is not None:
     record["iota_vs_as_given"] = compare(wi, wf)
 
-# radial resolution of the reference: ns 151 against the final ns
-p151 = WORK / f"wout_{a.name}_iota_ns151.nc"
-if not (a.reuse and p151.exists()):
-    vin.ns_array = np.array(a.ns + [151])
-    vin.ftol_array = np.full(len(a.ns) + 1, a.ftol)
-    vin.niter_array = np.full(len(a.ns) + 1, a.niter)
-    res = vmecpp.run(vin, max_threads=a.threads, verbose=False)
-    res.wout.save(str(p151))
-record["iota_ns151_vs_final"] = compare(Wout(p151), wi)
+# radial resolution of the reference: ns 151 against a final ns below it
+if max(a.ns) < 151:
+    p151 = WORK / f"wout_{a.name}_iota_ns151.nc"
+    if not (a.reuse and p151.exists()):
+        vin.ns_array = np.array(a.ns + [151])
+        vin.ftol_array = np.full(len(a.ns) + 1, a.ftol)
+        vin.niter_array = np.full(len(a.ns) + 1, a.niter)
+        res = vmecpp.run(vin, max_threads=a.threads, verbose=False)
+        res.wout.save(str(p151))
+    record["iota_ns151_vs_final"] = compare(Wout(p151), wi)
 
 W = wi.energy()
 record.update(energy_T2m3=W, wb_times_4pi2=wi.wb * (2 * np.pi) ** 2, volume=wi.volume,
