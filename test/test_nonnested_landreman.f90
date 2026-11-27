@@ -22,6 +22,7 @@ module nn_landreman_case
     implicit none
     real(dp), parameter :: eps = 0.02_dp, rc = 0.99_dp, rw = 0.3_dp
     real(dp), parameter :: pa = 0.25_dp, fvac = 1.0_dp, wref = 5.0_dp
+    real(dp), parameter :: newton_tol = 1.0e-10_dp
     integer, parameter :: nfine = 32 ! phi points of the exact Fourier projections
     real(dp) :: chi_perp = 1, shift = 0
     integer :: block = 1
@@ -453,11 +454,14 @@ contains
         call seed(0.05_dp, x)
         where (nc_fixed(field)) x = xe
         if (check_jacobian) call jacobian_check(x)
+        ! The Phi and V rows of a stage at ratio 1e6 reach their rounding
+        ! floor at backward errors of 2e-11 to 5e-11, so the Newton target
+        ! is newton_tol = 1e-10. The gates below decide the accuracy.
         ! Ratio > 1: continuation from ratio 1 (the Newton basin shrinks like
         ! 1/ratio). On the coarsest mesh a second path (twice the step)
         ! must reach the same discrete state.
         if (ratio > 1) xa = x
-        call nc_continue(field, problem, x, report, st, tol=1.0e-11_dp, &
+        call nc_continue(field, problem, x, report, st, tol=newton_tol, &
             decades=decades)
         print '(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,*(es9.1))', 'P', k, ' N=', modes, &
             ' nr=', nr, ' unknowns ', lay%n, ' stages ', report%stages, &
@@ -539,7 +543,7 @@ contains
         type(nc_report_t) :: rep2
         real(dp) :: d(4)
         integer :: lo(4), hi(4), b, st
-        call nc_continue(field, problem, x2, rep2, st, tol=1.0e-11_dp, &
+        call nc_continue(field, problem, x2, rep2, st, tol=newton_tol, &
             decades=2*decades)
         if (st /= 0) error stop 'continuation path'
         lo = [lay%ia, lay%ip, lay%iphi, lay%iv - 1] + 1
