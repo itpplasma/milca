@@ -608,7 +608,7 @@ set_tests_properties(ideal_fb_landreman_axisymmetric PROPERTIES
 # E3.3: the same cases through the full-surface R2 BEM exterior (24 rotated
 # sectors, block-circulant assembly, per-harmonic Steklov form), compared
 # with the per-n exterior. bem3d16 is the chain=16 level only; the two-level
-# gate with its refinement checks runs nightly (.fortyard/nightly).
+# gate with its refinement checks runs nightly (.github/ci/nightly).
 add_test(NAME ideal_fb_landreman_bem3d16_axisymmetric
     COMMAND test_landreman_free_boundary bem3d16)
 add_test(NAME ideal_fb_landreman_bem3d_axisymmetric
