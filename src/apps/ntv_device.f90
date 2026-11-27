@@ -114,7 +114,7 @@ module milca_ntv_device
         ! composite Gauss-Legendre panels in x = v^2/v_th^2 on [0, 25]
         ! (0: n_x Gauss-Laguerre nodes). The E x B and precession resonance
         ! puts kinks into the integrand that fixed rules do not resolve: on
-        ! AUG 30835 at T/10 the 24-node rule was off by a factor of 2.
+        ! a device case at T/10 the 24-node rule was off by a factor of 2.
         real(dp) :: x_tol = 1e-3_dp
         ! Finite orbit width (monoenergetic paths only) on the hp
         ! mesh of hp_default_mesh: element order, columns, bulk rows and the
@@ -842,7 +842,7 @@ contains
             if (.not. present(start)) then
                 ! Adaptation starts from at least 16 columns and rows: a p + 1
                 ! estimate does not see a resonance narrower than its element,
-                ! and from 4 rows the refinement settled 8 % off on AUG 30835.
+                ! and from 4 rows the refinement settled 8 % off on a device case.
                 if (res%hp_adapt > 0) then
                     call hp_default_mesh(g, res%hp_order, max(res%hp_columns, 16), &
                         max(res%hp_rows, 16), res%hp_delta, 0.3_dp, mesh)
@@ -1920,8 +1920,8 @@ contains
         call boozer_average(es, 2*res%n_theta, 1, grad_s, b2)
         dpsi_dr = psi_pol_s*grad_s
         if (present(g_cov)) g_cov = es%g_cov
-        ! NEO-2 counts Omega_tE and V_phi along phi_B of the file (ITER TC24 and
-        ! AUG 30835), where the covariant field is chart G.
+        ! NEO-2 counts Omega_tE and V_phi along phi_B of the file (device case and
+        ! a device case), where the covariant field is chart G.
         if (present(g_phi)) g_phi = es%chart*es%g_cov
         if (present(b2_avg)) b2_avg = b2
         if (present(b_ref)) b_ref = line%bref

@@ -1,7 +1,7 @@
 # Synthetic Grad–Shafranov regression
 
 These inputs are constructed analytically and contain no machine data.
-The historical CTest name `gs_k6_mini_regression` is retained. Its cubic-profile
+The historical CTest name `gs_mini_case_regression` is retained. Its cubic-profile
 Newton, P3 direct solve, current normalization, readback, field-query and majorant
 path is exercised by a Solov'ev solution with R0=3 m, a=0.6 m, C=0.25 and F=6 T m:
 

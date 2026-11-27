@@ -16,18 +16,18 @@ program test_response_strip_jets
     call get_command_argument(1, file)
     if (len_trim(file) > 0) then
         call eqdsk_read(trim(file), g, status)
-        call check(status == 0, 'read TC24')
+        call check(status == 0, 'read device case')
         radial = sqrt([0.15_dp, 0.4_dp, 0.65_dp, 0.85_dp, 0.999_dp])
         call strip_equilibrium_grid(g, radial, 9, 1.0e-6_dp, &
             1.0e-7_dp, grid, status)
-        call check(status == 0, 'TC24 grid jets')
-        print '(a,es12.4)', 'TC24 max label defect=', maxval(grid%label_defect)
-        print '(a,es12.4)', 'TC24 max Ampere defect [A/m^2]=', &
+        call check(status == 0, 'device case grid jets')
+        print '(a,es12.4)', 'device case max label defect=', maxval(grid%label_defect)
+        print '(a,es12.4)', 'device case max Ampere defect [A/m^2]=', &
             maxval(grid%ampere_defect)
-        print '(a,2es12.4)', 'TC24 retained outer pressure [Pa]=', &
+        print '(a,2es12.4)', 'device case retained outer pressure [Pa]=', &
             minval(grid(5, :)%fluid%p), maxval(grid(5, :)%fluid%p)
-        call check(maxval(grid%label_defect) < 2.0e-12_dp, 'TC24 level equation')
-        call check(minval(grid(5, :)%fluid%p) > 0, 'TC24 edge pressure retained')
+        call check(maxval(grid%label_defect) < 2.0e-12_dp, 'device case level equation')
+        call check(minval(grid(5, :)%fluid%p) > 0, 'device case edge pressure retained')
         h = 2.0e-6_dp
         err = 0
         do j = 1, 9
@@ -37,46 +37,46 @@ program test_response_strip_jets
                 jet = grid(i, j)
                 call strip_equilibrium_point(g, u + h, theta, 1.0e-6_dp, &
                     1.0e-7_dp, plus, status)
-                call check(status == 0, 'TC24 plus')
+                call check(status == 0, 'device case plus')
                 call strip_equilibrium_point(g, u - h, theta, 1.0e-6_dp, &
                     1.0e-7_dp, minus, status)
-                call check(status == 0, 'TC24 minus')
+                call check(status == 0, 'device case minus')
                 gp = matmul(jet%db(:, [1, 3]), jet%jac(:, 1))
                 err = max(err, norm2((plus%fluid%b0 - minus%fluid%b0)/(2*h) - gp) &
                     /max(1.0_dp, norm2(gp)))
                 gp = matmul(jet%fluid%hp(:, [1, 3]), jet%jac(:, 1))
                 call check(norm2((plus%fluid%gp - minus%fluid%gp)/(2*h) - gp) &
-                    /max(1.0_dp, norm2(gp)) < 2.0e-5_dp, 'TC24 pressure Hessian')
+                    /max(1.0_dp, norm2(gp)) < 2.0e-5_dp, 'device case pressure Hessian')
                 call check(maxval(abs((plus%x - minus%x)/(2*h) - jet%jac(:, 1))) &
-                    < 2.0e-5_dp, 'TC24 implicit map tangent')
+                    < 2.0e-5_dp, 'device case implicit map tangent')
                 call check(maxval(abs((plus%jac - minus%jac)/(2*h) &
                     - jet%hmap(:, 1:2)))/max(1.0_dp, maxval(abs(jet%hmap(:, 1:2)))) &
-                    < 2.0e-5_dp, 'TC24 implicit map Hessian radial column')
+                    < 2.0e-5_dp, 'device case implicit map Hessian radial column')
                 pp = dot_product(jet%fluid%gp([1, 3]), jet%jac(:, 1))
                 call check(abs((plus%fluid%p - minus%fluid%p)/(2*h) - pp) &
-                    /max(1.0_dp, abs(pp)) < 2.0e-5_dp, 'TC24 pressure tangent')
+                    /max(1.0_dp, abs(pp)) < 2.0e-5_dp, 'device case pressure tangent')
                 call strip_equilibrium_point(g, u, theta + h, 1.0e-6_dp, &
                     1.0e-7_dp, plus, status)
-                call check(status == 0, 'TC24 theta plus')
+                call check(status == 0, 'device case theta plus')
                 call strip_equilibrium_point(g, u, theta - h, 1.0e-6_dp, &
                     1.0e-7_dp, minus, status)
-                call check(status == 0, 'TC24 theta minus')
+                call check(status == 0, 'device case theta minus')
                 gp = matmul(jet%db(:, [1, 3]), jet%jac(:, 2))
                 err = max(err, norm2((plus%fluid%b0 - minus%fluid%b0)/(2*h) - gp) &
                     /max(1.0_dp, norm2(gp)))
                 call check(maxval(abs((plus%x - minus%x)/(2*h) - jet%jac(:, 2))) &
-                    < 2.0e-5_dp, 'TC24 implicit map angular tangent')
+                    < 2.0e-5_dp, 'device case implicit map angular tangent')
                 call check(maxval(abs((plus%jac - minus%jac)/(2*h) &
                     - jet%hmap(:, 2:3)))/max(1.0_dp, maxval(abs(jet%hmap(:, 2:3)))) &
-                    < 2.0e-5_dp, 'TC24 implicit map Hessian angular column')
+                    < 2.0e-5_dp, 'device case implicit map Hessian angular column')
                 gp = matmul(jet%fluid%hp(:, [1, 3]), jet%jac(:, 2))
                 call check(norm2((plus%fluid%gp - minus%fluid%gp)/(2*h) - gp) &
                     /max(1.0_dp, norm2(gp)) < 2.0e-5_dp, &
-                    'TC24 angular pressure Hessian')
+                    'device case angular pressure Hessian')
             end do
         end do
-        print '(a,es12.4)', 'TC24 B-jet difference error=', err
-        call check(err < 2.0e-5_dp, 'TC24 B jets independent differences')
+        print '(a,es12.4)', 'device case B-jet difference error=', err
+        call check(err < 2.0e-5_dp, 'device case B jets independent differences')
         stop
     end if
     call manufactured_grid(g)

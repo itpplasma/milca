@@ -40,7 +40,7 @@ end module test_equilibrium_core_fields
 program test_equilibrium_core
     ! Common equilibrium core (docs/equilibrium-core.md).
     !   chart              jet of the cylindrical chart against finite differences
-    !   compare WORK FIX   K6-mini regression: gs_phase1 outputs in WORK against
+    !   compare WORK FIX   mini-case regression: gs_phase1 outputs in WORK against
     !                      the fixture FIX to 1e-12 relative
     !   readback K         D7 on P_K Solov'ev: flux gauge shift and sign flip
     !                      leave q and s_tor unchanged; a plasma sub-mesh
@@ -72,7 +72,7 @@ program test_equilibrium_core
     case ('compare')
         call get_command_argument(2, work)
         call get_command_argument(3, fixtures)
-        call compare_k6_mini(trim(work), trim(fixtures))
+        call compare_mini_case(trim(work), trim(fixtures))
     case ('synthetic_analytic')
         call get_command_argument(2, work)
         call get_command_argument(3, fixtures)
@@ -178,7 +178,7 @@ contains
     end subroutine
 
     subroutine test_readback(order)
-        ! Gate of migration M2 beyond the K6-mini fixture: the readback reads
+        ! Gate of migration M2 beyond the mini-case fixture: the readback reads
         ! the state's own boundary flux and orientation, never psi = 0.
         integer, intent(in) :: order
         real(dp), parameter :: shift = 0.37_dp
@@ -300,7 +300,7 @@ contains
         print '(a)', 'PASS: chart jet'
     end subroutine
 
-    subroutine compare_k6_mini(work, fixtures)
+    subroutine compare_mini_case(work, fixtures)
         character(*), intent(in) :: work, fixtures
         real(dp), parameter :: tolerance = 1.0e-12_dp
         real(dp) :: worst
@@ -312,9 +312,9 @@ contains
         call compare_table(work//'/field.dat', &
             fixtures//'/reference_field.dat', 4, 0, worst)
         call check_synthetic_analytic(work, fixtures)
-        print '(a,es10.3)', 'K6-mini worst relative deviation: ', worst
-        if (worst > tolerance) error stop 'K6-mini regression exceeds 1e-12'
-        print '(a)', 'PASS: K6-mini regression'
+        print '(a,es10.3)', 'mini-case worst relative deviation: ', worst
+        if (worst > tolerance) error stop 'mini-case regression exceeds 1e-12'
+        print '(a)', 'PASS: mini-case regression'
     end subroutine
 
     subroutine check_synthetic_analytic(work, fixtures)
@@ -366,7 +366,7 @@ contains
             if (trim(key) == 'psi_axis') psi_scale = abs(expected)
             if (trim(key) == 'axis_R') radius_scale = abs(expected)
         end do
-        if (psi_scale == 0) error stop 'K6-mini reference lacks psi_axis'
+        if (psi_scale == 0) error stop 'mini-case reference lacks psi_axis'
         rewind (ref_unit)
         do
             read (ref_unit, '(a)', iostat=stat) line
@@ -387,7 +387,7 @@ contains
             close (unit)
             if (.not. found) then
                 print '(2a)', 'missing summary key: ', trim(key)
-                error stop 'K6-mini summary incomplete'
+                error stop 'mini-case summary incomplete'
             end if
             ! flux_consistency is a difference |a/b - 1| ~ 1e-4: absolute.
             if (trim(key) == 'axis_Z') then
@@ -428,7 +428,7 @@ contains
         integer :: j
         call read_table(path, columns, header, a)
         call read_table(reference, columns, header, b)
-        if (size(a, 2) /= size(b, 2)) error stop 'K6-mini table length differs'
+        if (size(a, 2) /= size(b, 2)) error stop 'mini-case table length differs'
         do j = 1, columns
             deviation = maxval(abs(a(j, :) - b(j, :)))/max(maxval(abs(b(j, :))), &
                 tiny(1.0_dp))
@@ -463,6 +463,6 @@ contains
             read (unit, *) table(:, i)
         end do
         close (unit)
-        if (n == 0) error stop 'empty K6-mini table'
+        if (n == 0) error stop 'empty mini-case table'
     end subroutine
 end program test_equilibrium_core

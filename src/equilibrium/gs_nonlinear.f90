@@ -551,7 +551,7 @@ contains
             ! The Jacobian entries (source derivative times shape products) are
             ! not in the units of the source: their absolute tolerance is
             ! relative to the largest entry of this cell, not to the source
-            ! scale (which left them 1e-2 accurate on TC24 at jtol 1e-3).
+            ! scale (which left them 1e-2 accurate on device case at jtol 1e-3).
             scr%epsabs(ndof + 1:) = jtol*max(maxval(abs(scr%high_values(ndof + 1:))), &
                                              epsilon(1.0_dp)*scale)
         end subroutine
@@ -1147,7 +1147,7 @@ contains
             ! A preconditioner is not the solve: it may only fall back, never
             ! silently accept an unusable candidate. The diagonal-CG inner
             ! loop keeps the baseline 1e-11 accuracy so the inverse decks
-            ! that reach it converge GMRES honestly; only the n>=320 TC24
+            ! that reach it converge GMRES honestly; only the n>=320 device case
             ! roundoff floor (~1.1e-10 relative at 95k DOF) that no
             ! iteration budget reaches down to 1e-11 retains its finite
             ! stalled iterate (stagnation_ok). The outer GMRES residual plus

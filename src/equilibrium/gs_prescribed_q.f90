@@ -92,7 +92,7 @@ contains
         ! and the flux equation are solved exactly). The exact moments ask the
         ! discrete forward model to reproduce q to better than its own
         ! discretization error; FF' modes that q barely sees (an alternating
-        ! edge mode on edge-graded knots, Jacobian cond 1.7e5 on TC24) then
+        ! edge mode on edge-graded knots, Jacobian cond 1.7e5 on device case) then
         ! absorb that error and the iteration ends at a fold. Regularized,
         ! the weighted q samples themselves are fitted (overdetermined least
         ! squares, w = sample weights normalized to unit sum) together with
@@ -504,7 +504,7 @@ contains
                 warm_psi = psi_good
                 ! An intermediate stage is only the warm start of the next:
                 ! it is accepted at max|r| <= 1e-3. Only the full law must
-                ! meet tol. On TC24 (16 graded intervals) the q moments of the
+                ! meet tol. On device case (16 graded intervals) the q moments of the
                 ! blended laws carry a component along the weakest Jacobian
                 ! direction (sigma_min/sigma_max ~ 6e-6, an alternating edge
                 ! FF' mode) that no nearby law removes; the stages stalled at
@@ -537,7 +537,7 @@ contains
             ! evaluated only at accepted iterates. A trial is the Newton step
             ! (mu = 0) or the minimizer of |r + J dx| + mu |dx| (mu relative to
             ! the largest diagonal of J^T J). Halving the Newton step instead
-            ! kept its direction: on TC24 the edge FF' coefficients are weakly
+            ! kept its direction: on device case the edge FF' coefficients are weakly
             ! determined by q, the Newton step there is huge, and every scaled
             ! copy of it left the forward problem's solution set. The forward
             ! solve of each trial starts from the last accepted field. Near
@@ -674,7 +674,7 @@ contains
                 end if
                 ! Three consecutive damped steps that together reduce the
                 ! merit by less than 1%: a nonzero residual minimum (singular
-                ! J, e.g. the unregularized TC24 floor max|r| 5.5e-4); stop.
+                ! J, e.g. the unregularized device case floor max|r| 5.5e-4); stop.
                 if (mu > 0) then
                     if (stalled == 0) stall_merit = merit
                     stalled = stalled + 1
@@ -956,7 +956,7 @@ contains
             ! The step moves the FF' coefficient (unit scale) and the field
             ! together: it is bounded in both. A column whose field response is
             ! small (edge FF' basis) took eps up to 1 and a 1e-2 difference
-            ! error on TC24.
+            ! error on device case.
             amplitude = maxval(abs(dpsi))
             eps = 1.0e-3_dp
             if (amplitude > 0) eps = min(1.0e-3_dp, 1.0e-3_dp*abs(base%axis)/amplitude)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Optional file adapter for the Fortran-owned TC24 qualification contract.
+"""Optional file adapter for the Fortran-owned device case qualification contract.
 
 Read the existing frozen ladder and raw references. Never execute or submit
 cases. Existing single-ring *_res.dat can be inspected, but cannot acquire

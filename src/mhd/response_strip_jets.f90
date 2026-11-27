@@ -1,5 +1,5 @@
 module milca_response_strip_jets
-    !! Imported TC24 candidate jets, in physical (R,phi,Z) at phi=0.
+    !! Imported device case candidate jets, in physical (R,phi,Z) at phi=0.
     !! u=sqrt(psin), theta=geometric angle about the supplied magnetic axis.
     !! Smooth spatial jets differentiate the represented spline and implicit
     !! level equation, never the root iterations. Input-data derivatives and

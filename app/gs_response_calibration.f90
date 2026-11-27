@@ -1,5 +1,5 @@
 program gs_response_calibration
-    !! Independent TC24 unit-sheet magnetic solve/readback. This executable
+    !! Independent device case unit-sheet magnetic solve/readback. This executable
     !! does not solve a pressure-retaining coupled plasma response.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite

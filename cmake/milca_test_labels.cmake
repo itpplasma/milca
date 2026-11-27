@@ -495,7 +495,7 @@ milca_test_labels(equilibrium_core_d7_readback_p3 fast CLASSES equilibrium
     TARGETS test_equilibrium_core)
 milca_test_labels(equilibrium_core_d3_solovev_p3 fast CLASSES equilibrium
     TARGETS test_equilibrium_core)
-milca_test_labels(gs_k6_mini_regression slow CLASSES equilibrium
+milca_test_labels(gs_mini_case_regression slow CLASSES equilibrium
     TARGETS gs_phase1 test_equilibrium_core)
 milca_test_labels(coils_3d_biot_savart_fourier_oracles fast CLASSES equilibrium
     TARGETS test_coils_3d)
@@ -771,10 +771,10 @@ endforeach()
 
 milca_test_labels(response_strip_equilibrium_jets fast CLASSES mhd
     TARGETS test_response_strip_jets)
-milca_test_labels(response_strip_tc24_jets fast CLASSES mhd
+milca_test_labels(response_strip_devcase_jets fast CLASSES mhd
     TARGETS test_response_strip_jets)
-milca_test_labels(response_strip_tc24_preconditioner slow CLASSES mhd
-    TARGETS test_response_strip_tc24_preconditioner)
+milca_test_labels(response_strip_devcase_preconditioner slow CLASSES mhd
+    TARGETS test_response_strip_devcase_preconditioner)
 foreach(check oracles negative limits)
     milca_test_labels(response_strip_preconditioner_${check} fast CLASSES mhd
         TARGETS test_response_strip_preconditioner)

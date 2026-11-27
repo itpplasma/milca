@@ -22,7 +22,7 @@ general 3D.
 
 Nonlinear resistive MHD of the tokamak core on the resistive time scale is
 expensive in established codes. The published 3D JOREK simulation of flux
-pumping in ASDEX Upgrade (Zhang et al., Nucl. Fusion 65 066001, 2025) used
+pumping in a medium-size tokamak (Zhang et al., Nucl. Fusion 65 066001, 2025) used
 about 0.5 M core-hours on Marconi for 700 ms, about 6000 core-seconds per time
 step.
 
@@ -39,10 +39,10 @@ The model, discretisation and solver choices are made for the parameters
 between present medium-size tokamaks and a DEMO-class reactor (core values,
 order-of-magnitude estimates).
 
-| quantity | ASDEX Upgrade | ITER | DEMO |
+| quantity | medium-size tokamak | ITER | DEMO |
 |---|---|---|---|
 | Lundquist number S | ~3e9 | ~1e10-1e11 | ~1e11 |
-| tau_R/tau_A | >1e6 | >1e7 (Zhang et al. 2025: 10x AUG) | 40x AUG (Zhang et al. 2025) |
+| tau_R/tau_A | >1e6 | >1e7 (Zhang et al. 2025: 10x medium-size) | 40x medium-size (Zhang et al. 2025) |
 | chi_par/chi_perp (electrons), collisional | ~1e11 | ~1e13 | ~2e13 |
 | chi_par/chi_perp (electrons), flux-limited | ~1e9-1e10 | ~1e10 | ~1e10 |
 | magnetic Prandtl number | ~1e3 | ~1e2-1e3 | ~1e2-1e3 |
@@ -514,7 +514,7 @@ a stationary helical core in a torus.
   tables,
   where sawteeth give way to a stationary 1/1 state above a threshold in
   beta (Krebs et al. 2017, appendix Tables 1 and 2; Jardin, Ferraro and Krebs
-  2015, not read for this plan), and JOREK runs of ASDEX Upgrade with states
+  2015, not read for this plan), and JOREK runs of a tokamak with states
   ordered by Hartmann number (Zhang et al. 2025, 2026), whose device inputs
   are not public.
 - Acceptance: rule 1 for the reductions; the proposed checks of the torus
@@ -689,7 +689,7 @@ Generated CUDA kernels sit behind the ISO_C_BINDING C ABI of
   these terms and linear drift-tearing and whistler dispersion oracles.
 - ELM cycles need, in addition, X-point geometry with scrape-off layer and
   sheath conditions, a free boundary with wall currents, neoclassical edge
-  flows and n up to 20-40, as in the JOREK ASDEX Upgrade ELM-cycle simulations
+  flows and n up to 20-40, as in the JOREK tokamak ELM-cycle simulations
   (Cathey et al., Nucl. Fusion 60 124007, 2020).
 - The L-H transition is turbulence physics and outside this model; it needs
   global edge turbulence (gyrokinetic or drift-reduced fluid), which may later

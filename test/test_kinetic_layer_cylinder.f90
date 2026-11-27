@@ -41,7 +41,7 @@ contains
         call close_to('product I0', s0, exp(-5.0_dp)*bessel_in(0, 3.0_dp), 1e-14_dp)
     end subroutine bessel_branches
 
-    !> Uniform deuterium-electron plasma near an AUG pedestal top.
+    !> Uniform deuterium-electron plasma near an tokamak pedestal top.
     subroutine uniform(bg, n, kpar, ks)
         type(kl_background_t), intent(out) :: bg
         integer, intent(in) :: n

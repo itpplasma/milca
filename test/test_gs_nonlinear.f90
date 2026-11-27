@@ -219,7 +219,7 @@ contains
         ! Independent closed sum of trapezoids for the integral of the
         ! piecewise linear interpolant to cos(frequency*s). Its primitive is
         ! C1, piecewise quadratic with a real second-derivative jump at every
-        ! internal knot of a 513-knot table, as in the TC24 source law.
+        ! internal knot of a 513-knot table, as in the device case source law.
         integral = knot_width*sin(frequency*t)/(2*tan(frequency*knot_width/2)) &
             + cos(frequency*t)*d + (cos(frequency*(t + knot_width)) &
                 - cos(frequency*t))*d*d/(2*knot_width)

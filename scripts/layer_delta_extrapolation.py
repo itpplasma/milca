@@ -11,7 +11,7 @@ outer flux that is not in this span enters S as
 pi_p the weight of t^p on the t^(1+eps) column (ratio, nfit); odd terms drop
 out because the rings are symmetric.  Mode 'model' checks this on the
 manufactured flux of test_mhd_closure layer_kink_finite_mu at three deltas
-and prints the fitted exponent.  Mode 'fit' reads prefix_layer.dat of TC24
+and prints the fitted exponent.  Mode 'fit' reads prefix_layer.dat of device case
 runs at several deltas and extrapolates S(delta) = J_inf + C delta^p for a
 given p (default 1, the mu = 1/2 form) per (phasing, rational, ratio).
 

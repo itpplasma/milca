@@ -69,7 +69,7 @@ program test_response_qualification
     rows(3, 3)%b = (4.0e-6_dp, 0.0_dp)
     call ladder_gate(rows(:, 3), 3, ok, d)
     call check(ok .and. abs(d(2) - 0.004_dp) < 1.0e-14_dp, 'vacuum scale floor')
-    print '(a)', 'frozen TC24 qualification rules: PASS'
+    print '(a)', 'frozen device case qualification rules: PASS'
 contains
     subroutine check(condition, message)
         logical, intent(in) :: condition

@@ -9,7 +9,7 @@ cannot answer this, because the pressure effects that matter near `q0 = 1` are
 toroidal: Bussac stabilisation of the ideal internal kink and the
 quasi-interchange come from the coupling of m = 1 to m = 2 through the
 toroidal metric and the Shafranov shift. Published context: 3D JOREK
-simulations of ASDEX Upgrade with flux pumping (Zhang et al., Nucl. Fusion 65,
+simulations of a tokamak with flux pumping (Zhang et al., Nucl. Fusion 65,
 066001, 2025) and M3D-C1 single-fluid runs in which sawteeth give way to a
 stationary 1/1 state above a threshold in beta (Krebs et al., Phys. Plasmas
 24, 102511, 2017).

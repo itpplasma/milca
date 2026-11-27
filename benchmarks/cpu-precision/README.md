@@ -43,7 +43,7 @@ REPEATS`. It profiles energy/gradient, Hessian assembly and the fp64 D3 residual
 on the existing Solovev fixture's initial candidate. It does not solve that
 candidate or claim an equilibrium error bound. `gs_load_bench` profiles the real
 2D load; use a quadrature tolerance such as 1e-3 and compare its output arrays
-with a tighter reference. The mini GS regression (`gs_k6_mini_regression`)
+with a tighter reference. The mini GS regression (`gs_mini_case_regression`)
 remains the native solved-state and estimator
 regression. [V] `benchmark_cpu_solve NR REPEATS` consumes unchanged precision/GMRES-IR
 source slices pinned to published FortNum and FortSparse main revisions.

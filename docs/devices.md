@@ -54,7 +54,6 @@ discharge or its species temperatures and densities.
 | Device | Published scale | Planned benchmark |
 |---|---|---|
 | TCV | Major radius 0.88 m; maximum toroidal field 1.54 T in the cited presentation | Low-field, strongly shaped tokamak; cheap reduced case before FK promotion |
-| ASDEX Upgrade | Major radius 1.6 m; magnetic field 3.2 T; plasma density up to 2e20 particles/m3; temperature about 100 million degrees | Axisymmetric core, then a selected RMP response |
 | SPARC | Major radius 1.85 m; on-axis field 12.2 T in the 2020 design | Compact high-field burning-plasma design case |
 | LHD | Major radius 3.9 m; field 3 T in the published machine table | Helical-coil geometry and transport |
 | ITER | Major radius 6.2 m; toroidal field up to 5.3 T in the cited design | Reactor-like axisymmetric core |
@@ -64,11 +63,9 @@ discharge or its species temperatures and densities.
 | Thea Helios | QA, two field periods; major radius 8 m; aspect ratio 4.5; on-axis field 6 T in revision v3 | Reactor-scale quasi-axisymmetric stellarator |
 | Additional compact stellarators | Public, versioned equilibria selected when available | Fill size/topology gaps without inventing unavailable inputs |
 
-The AUG scales come from its official technical description.
 These density entries are catalogue plasma densities, not automatically the
 electron density of a chosen case. The ITER values identify a published
 design envelope, not an available experimental discharge.
-[AUG](https://www.ipp.mpg.de/16208/einfuehrung),
 [ITER design presentation](https://www.iter.org/sites/default/files/media/2025-07/i-1_loarte.pdf)
 
 The other entries identify published experimental descriptions or specific
@@ -85,7 +82,7 @@ axisymmetry of the three-dimensional geometry.
 [Helios v3](https://arxiv.org/html/2512.08027v3)
 
 Maintain this envelope as a versioned set of physical missions, not merely
-optional validation names. The progression spans TCV/AUG/LHD,
+optional validation names. The progression spans TCV/LHD,
 SPARC/ITER/ARC/DEMO, and QA/QI reactor stellarators. A later design revision
 adds a new case rather than overwriting the archived design point.
 
@@ -125,7 +122,7 @@ through species and collision models, retaining earlier plots and intervals.
 
 A component reference milestone can pass its analytic continuous-model gate
 without solving a whole machine. Production promotion additionally requires
-a relevant AUG-like and stellarator benchmark at physical mass ratios and
+a relevant tokamak and stellarator benchmark at physical mass ratios and
 physical dimensionless parameters, with certified requested observables and
 meaningful plots. Local patches or surfaces are acceptable only when they
 match the capability's declared scientific scope. A claim of global operation

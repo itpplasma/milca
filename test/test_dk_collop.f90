@@ -35,7 +35,7 @@
 !!                    the field part for all pairs, l = 0, 1), and the lumped
 !!                    deflection rate has its closed form;
 !!   neo2_matrix FILE NEO-2's matrix elements for electrons and deuterons of
-!!                    the AUG 30835 benchmark (B-splines of order 3): the
+!!                    the a device case benchmark (B-splines of order 3): the
 !!                    operator projected on the same basis.
 program test_dk_collop
     use, intrinsic :: iso_fortran_env, only: dp => real64, real128, int64

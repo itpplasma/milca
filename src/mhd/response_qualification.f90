@@ -1,5 +1,5 @@
 module milca_response_qualification
-    !! Frozen TC24 RULE.md gates. These are empirical qualification tests,
+    !! Frozen device case RULE.md gates. These are empirical qualification tests,
     !! never deterministic certificates or fitted ideal-limit estimates.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite

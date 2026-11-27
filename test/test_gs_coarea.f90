@@ -210,7 +210,7 @@ contains
     subroutine near_vertex_contour_oracle(degree)
         ! A level passing 1e-11 m from an interior mesh vertex crosses the
         ! incident faces at distinct, qualified edge parameters, but within
-        ! 1e-10 rad of each other (TC24 readback status 18). The contour is
+        ! 1e-10 rad of each other (device case readback status 18). The contour is
         ! regular there; its coarea (and P2 tangent) must match the exact circle.
         integer, intent(in)::degree
         type(gs_state_t)::mesh

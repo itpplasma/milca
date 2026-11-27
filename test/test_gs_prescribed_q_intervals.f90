@@ -138,7 +138,7 @@ contains
 
     function graded_knots(intervals) result(knots)
         ! Knots refined (at most 2:1) toward the axis and a pedestal at s = 0.94 by
-        ! equidistributing a monitor function, as in the TC24 knot study.
+        ! equidistributing a monitor function, as in the device case knot study.
         integer, intent(in) :: intervals
         real(dp) :: knots(intervals + 1)
         real(dp), allocatable :: x(:), m(:), cumulative(:)

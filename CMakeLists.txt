@@ -1381,9 +1381,9 @@ foreach(check maxwellian_null rates jvp zero_jvp fp_moments conservation self_ad
     add_test(NAME dk_collop_${check} COMMAND test_dk_collop ${check})
     milca_test_labels(dk_collop_${check} fast CLASSES continuum TARGETS test_dk_collop)
 endforeach()
-if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/neo2_collop_aug30835.txt")
+if(MILCA_DATA_DIR AND EXISTS "${MILCA_DATA_DIR}/test/data/neo2_collop_devcase2.txt")
     add_test(NAME dk_collop_neo2_matrix COMMAND test_dk_collop neo2_matrix
-        ${MILCA_DATA_DIR}/test/data/neo2_collop_aug30835.txt)
+        ${MILCA_DATA_DIR}/test/data/neo2_collop_devcase2.txt)
 endif()
 milca_test_labels(dk_collop_neo2_matrix fast CLASSES continuum TARGETS test_dk_collop)
 add_executable(test_dk_mono_thermal test/test_dk_mono_thermal.f90)
@@ -2750,13 +2750,13 @@ set_tests_properties(equilibrium_core_d3_upper_bound_p2 PROPERTIES TIMEOUT 60
 # factor, current constraint, readback and majorant path on a coarse mesh.
 if(MILCA_DATA_DIR AND EXISTS
         "${MILCA_DATA_DIR}/test/fixtures/gs_synthetic/reference_summary.dat")
-    add_test(NAME gs_k6_mini_regression COMMAND ${CMAKE_COMMAND}
+    add_test(NAME gs_mini_case_regression COMMAND ${CMAKE_COMMAND}
         -DAPP=$<TARGET_FILE:gs_phase1> -DCHECK=$<TARGET_FILE:test_equilibrium_core>
         -DFIXTURES=${CMAKE_SOURCE_DIR}/test/fixtures/gs_synthetic
         -DREFERENCES=${MILCA_DATA_DIR}/test/fixtures/gs_synthetic
-        -DWORK=${CMAKE_BINARY_DIR}/gs_k6_mini
-        -P ${CMAKE_SOURCE_DIR}/test/gs_k6_mini.cmake)
-    set_tests_properties(gs_k6_mini_regression PROPERTIES TIMEOUT 300
+        -DWORK=${CMAKE_BINARY_DIR}/gs_mini_case
+        -P ${CMAKE_SOURCE_DIR}/test/gs_mini_case.cmake)
+    set_tests_properties(gs_mini_case_regression PROPERTIES TIMEOUT 300
         ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;MKL_NUM_THREADS=1")
 endif()
 
@@ -3602,9 +3602,9 @@ set_tests_properties(response_strip_equilibrium_jets PROPERTIES
 set(MILCA_STRIP_EQDSK_TEST "" CACHE FILEPATH
     "Optional imported equilibrium for independent strip-jet difference checks")
 if(MILCA_STRIP_EQDSK_TEST)
-    add_test(NAME response_strip_tc24_jets
+    add_test(NAME response_strip_devcase_jets
         COMMAND test_response_strip_jets ${MILCA_STRIP_EQDSK_TEST})
-    set_tests_properties(response_strip_tc24_jets PROPERTIES
+    set_tests_properties(response_strip_devcase_jets PROPERTIES
         ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1" TIMEOUT 60)
 endif()
 target_sources(milca_mhd PRIVATE src/mhd/response_strip_preconditioner.f90)
@@ -3612,12 +3612,12 @@ add_executable(test_response_strip_preconditioner
     test/test_response_strip_preconditioner.f90)
 target_link_libraries(test_response_strip_preconditioner PRIVATE milca)
 if(MILCA_STRIP_EQDSK_TEST)
-    add_executable(test_response_strip_tc24_preconditioner
-        test/test_response_strip_tc24_preconditioner.f90)
-    target_link_libraries(test_response_strip_tc24_preconditioner PRIVATE milca)
-    add_test(NAME response_strip_tc24_preconditioner
-        COMMAND test_response_strip_tc24_preconditioner ${MILCA_STRIP_EQDSK_TEST})
-    set_tests_properties(response_strip_tc24_preconditioner PROPERTIES
+    add_executable(test_response_strip_devcase_preconditioner
+        test/test_response_strip_devcase_preconditioner.f90)
+    target_link_libraries(test_response_strip_devcase_preconditioner PRIVATE milca)
+    add_test(NAME response_strip_devcase_preconditioner
+        COMMAND test_response_strip_devcase_preconditioner ${MILCA_STRIP_EQDSK_TEST})
+    set_tests_properties(response_strip_devcase_preconditioner PROPERTIES
         ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1;OMP_WAIT_POLICY=passive"
         PROCESSORS 2 TIMEOUT 180)
 endif()

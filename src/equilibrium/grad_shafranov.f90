@@ -1062,7 +1062,7 @@ contains
             else if (keep_stagnant .and. status == KRYLOV_MAX_ITERATIONS .and. &
                      all(ieee_is_finite(response))) then
                 ! Diagonal-CG bottoms out on a mesh-dependent roundoff floor
-                ! (measured at ~1e-10 relative for a 95k-DOF TC24 tangent). The
+                ! (measured at ~1e-10 relative for a 95k-DOF device case tangent). The
                 ! retained iterate is the best finite response available; this
                 ! mode is only for callers that certify the result by an exact
                 ! residual check, such as Newton preconditioning or solve_gs.

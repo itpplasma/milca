@@ -16,20 +16,20 @@ execute_process(COMMAND "${APP}" --config input.nml WORKING_DIRECTORY "${WORK}"
     OUTPUT_FILE "${WORK}/native.log" ERROR_FILE "${WORK}/native.err"
     RESULT_VARIABLE status)
 if(NOT status EQUAL 0)
-    message(FATAL_ERROR "K6-mini gs_phase1 failed (${status}); see ${WORK}/native.log")
+    message(FATAL_ERROR "mini-case gs_phase1 failed (${status}); see ${WORK}/native.log")
 endif()
 file(READ "${WORK}/summary.dat" summary)
 if(NOT summary MATCHES "majorant_method equilibrated-rt" OR
    NOT summary MATCHES "majorant_quadrature_status approximate" OR
    NOT summary MATCHES "majorant_scope frozen-source-energy-error" OR
    NOT summary MATCHES "majorant_status 4")
-    message(FATAL_ERROR "K6-mini estimator method or error scope changed")
+    message(FATAL_ERROR "mini-case estimator method or error scope changed")
 endif()
 execute_process(COMMAND "${APP}" --evaluate mesh.dat 6 0 profile-law.dat
     WORKING_DIRECTORY "${WORK}" INPUT_FILE "${WORK}/points.dat"
     OUTPUT_FILE "${WORK}/field.dat" RESULT_VARIABLE status)
 if(NOT status EQUAL 0)
-    message(FATAL_ERROR "K6-mini field query failed (${status})")
+    message(FATAL_ERROR "mini-case field query failed (${status})")
 endif()
 file(COPY "${FIXTURES}/points.dat" "${REFERENCES}/reference_summary.dat"
     "${REFERENCES}/reference_profiles.dat" "${REFERENCES}/reference_field.dat"
@@ -37,5 +37,5 @@ file(COPY "${FIXTURES}/points.dat" "${REFERENCES}/reference_summary.dat"
 execute_process(COMMAND "${CHECK}" compare "${WORK}" "${WORK}/expected"
     RESULT_VARIABLE status)
 if(NOT status EQUAL 0)
-    message(FATAL_ERROR "K6-mini outputs differ from the fixture")
+    message(FATAL_ERROR "mini-case outputs differ from the fixture")
 endif()
