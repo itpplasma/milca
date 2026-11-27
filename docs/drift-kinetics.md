@@ -25,8 +25,8 @@ programme stops before the full operator.
    |B|, grad B, the metric and a field-line label from one kinetic geometry
    view of [equilibrium-core.md](equilibrium-core.md) D7. Boozer data are an
    export for oracle codes only.
-5. Verification through the stage-1 NTV harness (external_case `ntv/`: frozen
-   field, full-spectrum bounce reference, `decision.py`) plus Onsager and
+5. Verification through a stage-1 NTV harness (frozen field, full-spectrum
+   bounce reference) plus Onsager and
    entropy-production checks ([adjoints-structure.md](adjoints-structure.md)).
    Derivations follow [theory-map.md](theory-map.md): reproduce, do not rely.
 
@@ -103,7 +103,7 @@ and benchmarks: [drift-kinetics-extensions.md](drift-kinetics-extensions.md).
 ## Ambipolar transport on 3D equilibria (K1, K2)
 
 Decision, 2026-11-03: extend this steady operator in two stages for the
-ambipolar radial electric field E_r in stellarator. K1 is local three-dimensional
+ambipolar radial electric field E_r of a stellarator. K1 is local three-dimensional
 transport; K2 retains radial orbit coupling and determines the potential
 jointly with the species distributions. Both use the collision ladder, D7
 kinetic geometry view and equation-level derivatives below. This is planned
@@ -166,7 +166,7 @@ flux, kinetic-energy flux, parallel flow, total radial current and species
 toroidal field torque. Gradients use toroidal flux divided by \(2\pi\).
 The [moment and torque derivation](../theory/derivations/surface-flux-normalization.md)
 defines geometric factors and signs. Its independent
-[SI reference](../test/data/surface_fluxes_sfincs.md) uses the public
+SI reference (`test/data/surface_fluxes_sfincs.md` in `MILCA_DATA_DIR`) uses the public
 BSD 2-Clause SFINCS revision below, with Lorentz and full self-collisions.
 This conversion retains the surface model's trajectory approximations.
 
@@ -175,7 +175,7 @@ Its synthetic coefficient reference is
 8df5453472e982df0f6ae005243ce38d57a83711 (BSD 2-Clause), using the
 incompressible trajectory model of
 [Landreman et al. (2014)](https://arxiv.org/html/1312.6058v2).
-The retained `test/data/sfincs_mono_exb.txt` contains its native matrix for
+The reference `test/data/sfincs_mono_exb.txt` in `MILCA_DATA_DIR` contains its native matrix for
 `RHSMode=3`, `collisionOperator=1`, `nuPrime=0.1`, `EStar=+/-0.05`,
 `Ntheta=31`, `Nzeta=17`, `Nxi=64`, spectral angular derivatives and
 `solverTolerance=1e-10`. Both electric velocity-space switches, `includePhi1`
@@ -327,12 +327,6 @@ D11 then converge only once the resonant harmonic is resolved.
 Published fields (evidence runs; the field files stay outside the
 repository, the recipes are in [benchmarks/mono3d](../benchmarks/mono3d/README.md)):
 
-- stellarator standard configuration (EIM), s = 0.2, the Boozer file and MONKES
-  database distributed with MONKES (30 x 60 points per period, 160 Legendre):
-  with the normalisation above, MILCA at 25 x 25 points per period and 160
-  Legendre agrees to 2e-10 (nu = 0.1/m) and 4e-9 (nu = 0.01/m) in D11, D31
-  and D33. At nu = 1e-3/m, where D31 changes sign, 25 x 25 points give
-  D31 to 3e-3 and 33 x 33 points to 4e-5 (D11 1e-6, D33 2e-7).
 - Bootstrap coefficient against rabe (Grassler et al. 2026,
   [doi:10.1063/5.0332431](https://doi.org/10.1063/5.0332431)) on the
   quasi-helically symmetric Landreman-Paul (2022) reactor-scale equilibrium
@@ -458,7 +452,7 @@ Verification (`test_surface_phi1`):
 
 - `sfincs`: the local \(u_\parallel(\theta,\zeta)\) and \(\langle Bu_\parallel\rangle\)
   of the \(\Phi_1\) response against SFINCS
-  ([fixture](../test/data/surface_phi1_sfincs.md)). Maximum local error
+  (fixture (`test/data/surface_phi1_sfincs.md` in `MILCA_DATA_DIR`)). Maximum local error
   relative to \(\max|u_\parallel|\): \(4.1\times10^{-4}\) and
   \(6.4\times10^{-5}\) with pitch-angle scattering (forces 1, 2),
   \(1.9\times10^{-4}\) and \(1.7\times10^{-3}\) with the full operator (the
@@ -494,7 +488,7 @@ relative to \(\langle Bu_\parallel\rangle\) without \(\Phi_1\), is
 \(9.9764\times10^{-5}\) and \(8.3812\times10^{-4}\) against SFINCS
 \(9.9760\times10^{-5}\) and \(8.3845\times10^{-4}\) (pitch-angle scattering,
 full operator; local values to the same relative error,
-[fixture](../test/data/dk_surface_helical_ephi1_sfincs.md)). SFINCS 8df5453
+fixture (`test/data/dk_surface_helical_ephi1_sfincs.md` in `MILCA_DATA_DIR`)). SFINCS 8df5453
 omits the Boltzmann factor of the inductive drive. The reference supplies it
 through `EParallelHatSpec_bcdatFile`. Without it, SFINCS gives
 \(1.3976\times10^{-4}\) and \(8.7845\times10^{-4}\).
@@ -559,7 +553,7 @@ is 3.982 (matrix) and 3.960 (bootstrap current) at \(\delta=0.01\), and 3.999
 and 3.998 at \(\delta=0.0025\).
 
 Against SFINCS (`geometryScheme=12`) on the same file at \(\delta=0.03\)
-(`dk_surface_device_sfincs`, [fixture](../test/data/dk_surface_helical_sfincs.md)):
+(`dk_surface_device_sfincs`, fixture (`test/data/dk_surface_helical_sfincs.md` in `MILCA_DATA_DIR`)):
 particle flux, kinetic-energy flux and \(\langle Bu_\parallel\rangle\) for a
 density gradient agree to \(1.2\times10^{-5}\) and \(5.6\times10^{-5}\) with
 pitch-angle scattering and \(6.1\times10^{-4}\) and \(2.4\times10^{-4}\) with
@@ -1100,15 +1094,9 @@ and linearised heat exchange between drifting or heated Maxwellians agree
 with the closed rates to 3e-14 and 1e-12 (`dk_collop_exchange_pair`). The
 temperature tangent of the field-particle part includes the boundary term of
 the moving split point y = v/v_tb, where the derivative of the kernel jumps.
-Against NEO-2's matrix elements for electrons and deuterons of the a device case
-benchmark run (`collop.h5`, T_i/T_e = 0.70, quadratic B-splines on knots
-0:0.8:4, which lie exactly in cubic elements on the same knots; test
-`dk_collop_neo2_matrix`, data in `test/data`): Lorentz and energy-scattering
-elements agree to 2e-12, the field part to 2e-6 for self-collisions and to
-8e-4 of the largest element for the electron-on-deuteron block at l = 0,
-whose elements are 1e-4 of the Lorentz ones; that block is where the two
-quadratures differ most, and which of them is closer is not established
-beyond the MILCA conservation and exchange-rate checks. Intrinsic
+The comparison with NEO-2's matrix elements of a device run (test
+`dk_collop_neo2_matrix`) runs against data in an external data directory
+(`MILCA_DATA_DIR`). Intrinsic
 ambipolarity and the kinetic solve with energy scattering follow.
 
 The primal field-particle assembly evaluates two scaled moment sweeps, below
@@ -1313,9 +1301,9 @@ Implementation starts after the generators move to the reworked FortSym API
   1. Axisymmetric neoclassical (n = 0, monoenergetic then Maxwellian
      weighted): bordered null space; D_11, D_31, D_33 against NEO-2 and the
      analytic limits; V0 operator checks.
-  2. Stage-1 frozen-field NTV on the circular torus (external_case `ntv/`):
+  2. Stage-1 frozen-field NTV on the circular torus:
      1/nu and superbanana plateau against the full-spectrum bounce
-     reference, scored by `decision.py` (|ratio - 1| <= max(0.10, 3 eps),
+     reference (|ratio - 1| <= max(0.10, 3 eps),
      trend intercept |a - 1| <= max(0.05, 2 sigma_a), >= 4 gated rows with
      eps < 0.05).
   3. The claim: beat NEO-2 where it failed. NEO-2's superbanana-plateau error

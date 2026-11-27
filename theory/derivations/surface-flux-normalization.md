@@ -131,7 +131,7 @@ drive against SFINCS, test a two-species Boltzmann equilibrium and the
 receiving-density factor, and check generated derivatives by centered
 differences and tangent-adjoint duality. The fixture's source, normalizations
 and refinement evidence are recorded in
-[its reference note](../../test/data/surface_fluxes_sfincs.md).
+its reference note (`test/data/surface_fluxes_sfincs.md` in `MILCA_DATA_DIR`).
 
 The conversion does not add electric velocity-space terms, tangential
 magnetic drift, global orbit losses or a rotation-evolution equation to the

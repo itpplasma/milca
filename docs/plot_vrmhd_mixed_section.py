@@ -5,19 +5,28 @@ eight natural-norm errors at each printed symmetry and refinement level.
 The analytic fields and strong sources are in gen/gen_vrmhd_mms.f90.
 """
 import argparse
+import os
 from pathlib import Path
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return Path(root) / relative
+
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--data", type=Path,
-                    default=Path(__file__).parent / "data/vrmhd-mixed-section.csv")
+parser.add_argument("--data", type=Path, default=None)
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
-data = np.genfromtxt(args.data, delimiter=",", names=True, dtype=None, encoding="utf-8")
+data = np.genfromtxt(args.data or milca_data("docs/data/vrmhd-mixed-section.csv"), delimiter=",", names=True, dtype=None, encoding="utf-8")
 fig, axes = plt.subplots(1, 3, figsize=(10, 3.5), sharey=True)
 for kind, (ax, title) in enumerate(zip(axes, ["Rotation", "Translation", "Screw"]), 1):
     for family, label, marker in [("equal1", "Existing: velocity P₁", "o"),

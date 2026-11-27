@@ -305,7 +305,7 @@ Gates of the frozen lane:
 | B3 DIII-D coarse | 48 boundary nodes, one level | 65 iterations with the watchdog today | at most 10 Newton steps, same energy |
 | B4 3D nested | Landreman–Paul QA free boundary, coarse | VMEC++ on the same coils and profiles | E4 observables within the error estimate |
 | B2b two vacua | DIII-D (2D) and Landreman–Paul QA (3D), coarse | V1 shell against V2 sheet | same equilibrium within the discretisation error; wall time per variant at matched accuracy |
-| B6 fast sheet | sheet self-energy on the stellarator boundary, 10³ to 10⁵ points | FMM against direct pair sum | energy, gradient and Hessian-vector product agree to 10⁻¹⁰ relative; cost O(N log N); faster than direct above 5·10³ points |
+| B6 fast sheet | sheet self-energy on a stellarator boundary, 10³ to 10⁵ points | FMM against direct pair sum | energy, gradient and Hessian-vector product agree to 10⁻¹⁰ relative; cost O(N log N); faster than direct above 5·10³ points |
 | B5 fixed-topology islands | classical stellarator with 1/2 islands | SIESTA ideal steps, SPEC with prescribed current | E7 observables |
 
 ## 5. Work by repository

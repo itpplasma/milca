@@ -2,7 +2,9 @@
 """Plot the Fortran pairing study; matplotlib is an optional documentation tool."""
 import argparse
 import csv
+import os
 from pathlib import Path
+import sys
 
 import matplotlib
 
@@ -12,13 +14,19 @@ from matplotlib.colors import LogNorm, Normalize
 import numpy as np
 
 
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return Path(root) / relative
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", type=Path, default=Path(__file__).resolve().parents[1]
-                        / "docs/data/vrmhd-pairings.csv")
+    parser.add_argument("--data", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=Path("vrmhd-pairings.png"))
     args = parser.parse_args()
-    with args.data.open() as stream:
+    with (args.data or milca_data("docs/data/vrmhd-pairings.csv")).open() as stream:
         table = list(csv.DictReader(stream))
     # The heat maps compare Lagrange pairings on first-kind edges; the
     # second-kind rows are equal-degree comparisons listed in the document.

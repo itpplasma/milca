@@ -61,10 +61,8 @@ large Ω may remain an independent verification oracle.
 [H] Prioritise I3/I4 after I1: matrix-free generated JVPs, mode-block
 preconditioning and FFT tiles gate all machine work. P2/P3 remain the verified
 reference path, with P3 the minimum for the existing high-anisotropy gates.
-Start machines with stellarator vacuum 5/5 (EIM), then 5/4, 5/6 and
-edge-island candidates, then finite beta. Use Davies et al.'s public normalised
-currents with synthetic/private filaments outside the public repo. LHD n=1 RMP
-follows only with an LHD-lane calibrated RMP coil set and I11 gates.
+The LHD n=1 RMP machine case follows only with an LHD-lane calibrated RMP coil
+set and I11 gates.
 
 [H] Chris's design decision of 2026-10-22 is to retain general FEM,
 non-nested fields and explicit error control as MILCA's purpose, with G-axis
@@ -603,7 +601,7 @@ quadrature degree 96.
 [H] Close generic coincident-pair quadrature and any further high-order trace
 gaps in FortFEM, without duplicating BEM in MILCA. Add a compressed operator
 (H-matrix/FMM/ACA) there only if measured dense memory and solve/assembly cost
-at stellarator surface sizes require it. Consumer accuracy gates remain unchanged.
+at machine surface sizes require it. Consumer accuracy gates remain unchanged.
 A prescribed coil normal trace on a large coil-free Ω is an optional
 verification oracle, exact for vacuum with the harmonic/flux data retained.
 At finite beta, estimate its plasma-response trace defect against the coupled
@@ -719,32 +717,16 @@ actual allocations and preconditioner scratch before requesting a node.
 
 | target | retained Fourier ladder K; physical n_max | M at middle K | one vector | 70-vector floor | one dense E(dM)² double-block estimate |
 |---|---|---:|---:|---:|---:|
-| stellarator, nfp=5 | K=8,16,24; n_max=40,80,120 | 33 | 0.264 GB | 18.48 GB | 2.18 TB |
 | LHD RMP, nfp=1 | K=24,32,48; n_max=24,32,48 | 65 | 0.520 GB | 36.40 GB | 8.45 TB |
 
 [H] Values use decimal GB/TB and omit sparse factors, geometry, BEM and
 quadrature buffers. They are memory floors for the matrix-free route and
 illustrations of the dense-block problem, not job requests. At Q=25 the
-middle grids have 82.5/162.5 million element-quadrature-mode samples per
-residual/JVP before padding. With 3/2 padding these are roughly 125/245
+middle grid has 162.5 million element-quadrature-mode samples per
+residual/JVP before padding. With 3/2 padding these are roughly 245
 million samples. Measure bytes/sample and operations/sample on the verified
 cylinder before converting to seconds. Reuse factors only while coefficient
 changes preserve the declared preconditioning quality.
-
-[H] Machine order is stellarator vacuum 5/5 (EIM), then 5/4, 5/6 and edge-island
-candidates, then finite beta, including internal-island cases. Use public
-normalised currents with synthetic or privately held filaments, and run
-private geometry outside the public repository. Use the convention n/m
-in these machine names, so ι=n/m, while the helical phase below is mθ−nφ.
-The meridian mesh must resolve m=4,5,6 chains and local widths independently
-of the Fourier ladder. Fivefold periodic runs exclude symmetry-breaking
-responses by construction, so a full-torus check is needed if the input or
-solution under investigation breaks that symmetry.
-
-[V] Davies et al., [arXiv:2607.14722](https://arxiv.org/html/2607.14722v1),
-§4.2/Table 2, gives normalised filament currents, including EIM's unit NPC
-and zero planar currents. Body checked after a local Zotero identifier query
-found no match. Currents do not supply geometry.
 
 [H] LHD uses the l=2, toroidal-period-10 main helix with an n=1 RMP. Retain
 physical toroidal harmonics at least through 2×10 and their sidebands:
@@ -856,7 +838,7 @@ For exact smooth Pk cases require B order ≥k−0.3 and falling D3 with order
 | G7 | Island W, phase and p for A, B and C, with h/p/K/ratio and trace ladders | Finest two widths differ ≤1%, phases ≤0.02 rad, independent trace contribution ≤0.2% of W; normalised pressure error ≤1% where an oracle exists |
 | G8 | Synthetic free boundary with non-axisymmetric Γ_c and full 3D exterior DtN coupling versus direct coil/vacuum and virtual-casing oracles | Field/trace error ≤1e−3, interface/Γ_c defect ≤1e−6, displaced seed returns within 1e−3 minor radii; independent geometry/trace/quadrature ladders and changing Γ_c in the vacuum collar keep observables within estimated errors |
 | G9 | Matched nonlinear saturated tearing cylinder from T23, not an inferred “Huang JPP 2022” case | Freeze current/helicity/flux and closure comparison before running; W agreement ≤2% in the small-island regime, report large-island closure discrepancy rather than retuning |
-| G10 | stellarator 5/5, 5/4, 5/6 and LHD n=1 RMP, after G0–G9 | All model/residual statuses retained, numerical W and pressure uncertainty ≤1%, phase ≤0.02 rad where defined, extended mode/mesh ladder required if a gate fails |
+| G10 | LHD n=1 RMP, after G0–G9 | All model/residual statuses retained, numerical W and pressure uncertainty ≤1%, phase ≤0.02 rad where defined, extended mode/mesh ladder required if a gate fails |
 
 [V] For G4 an independent local field-line Hamiltonian
 H(x,α)=a x²/2+ε cos α has separatrix full width W=4 sqrt(|ε/a|),
@@ -915,7 +897,6 @@ optional charts nor a DOF reduction establishes either gate.
 | I7 | Free-B Γ_c coupling through D6 with full non-axisymmetric 3D BEM and exterior DtN from the start, reusing PR #47 (`bem3d5`) | I4/I6, M4 and accepted FortFEM/consumer adapter with coincident-pair quadrature resolved, G8 plus coil and casing checks; optional large-Ω prescribed-trace oracle, no duplicate exterior solver |
 | I8 | Marked regional Taylor interface coupled to A/B exterior pressure closure | I2/I5a/I7, interface MMS and traction/jump gates of G5/G8, helicity/flux compatibility checked |
 | I9 | Small-island nonlinear saturation comparison and machine-size synthetic memory trial | I6–I8, G9 plus measured action/preconditioner memory and cost; no production machine claim |
-| I10 | stellarator vacuum 5/5 EIM, then 5/4, 5/6, edge-island candidates, then finite beta | I9 and prior required gates including I7 full 3D BEM/DtN, G10 per case; public currents, synthetic/private filaments outside public repo |
 | I11 | Full-torus LHD helix plus n=1 RMP and sidebands | I9 and prior required gates plus calibrated RMP coil set owned by LHD lane, G10 with K≥24,32,48 extended as needed; no symmetry reduction to nfp=10 |
 
 ### Execution order and status, 9 November 2026
@@ -946,29 +927,27 @@ gate named in the table above; a failed gate is reported, not relaxed.
    current profiles as for VMEC/SIESTA.
 5. **I4 and IH1/IH3** to machine resolution, with measured memory and time
    against SPECTRE at matched island observables.
-6. **I10 stellarator vacuum 5/5 (EIM)**, then finite beta for the 2022 control-coil
-   programmes, cross-checked against SPECTRE.
-7. **Stochastic regions:** connection-length and Lyapunov diagnostics next to
+6. **Stochastic regions:** connection-length and Lyapunov diagnostics next to
    the island diagnostics; benchmark a stochastic edge (HINT CFQS cases, also
    reported by NTEC) and the LHD ergodic layer.
-8. **Open field lines:** wall/sheath boundary data for pressure where field
-   lines reach the wall; needed for stellarator edge islands and the LHD ergodic
+7. **Open field lines:** wall/sheath boundary data for pressure where field
+   lines reach the wall; needed for the LHD ergodic
    layer.
-9. **Shielding and penetration:** static A+D has no flow, so a driven
+8. **Shielding and penetration:** static A+D has no flow, so a driven
    resonant field is not screened. Flow screening, diamagnetic and viscous
    effects come from the nonlinear visco-resistive lane
    ([nonlinear-resistive-mhd.md](nonlinear-resistive-mhd.md)) coupled to the
    same exterior; bootstrap current and its loss inside islands follow the
    kinetic closures. I8 (stepped-pressure regions) is only needed to
    reproduce SPECTRE exactly and stays last.
-10. **I11 LHD** n = 1 island with calibrated LID coils.
+9. **I11 LHD** n = 1 island with calibrated LID coils.
 
 [H] Open mathematical risks are the smooth ideal limit at dense resonances,
 closed-line/chaotic averaging without a uniform finite trace bound, and loss
 of invertibility near bifurcations. Open computational risks are anisotropy-
 uniform preconditioning, Fourier aliasing, factor memory and scalable BEM.
 They are reported as failed or unavailable gates, not removed by changing
-tolerances. No stellarator/LHD result, continuous certificate or speed advantage is
+tolerances. No LHD result, continuous certificate or speed advantage is
 established by this document. Controller design acceptance does not promote
 an implementation or machine campaign without its required gates.
 

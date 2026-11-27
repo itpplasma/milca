@@ -31,7 +31,10 @@ execute_process(COMMAND "${APP}" --evaluate mesh.dat 6 0 profile-law.dat
 if(NOT status EQUAL 0)
     message(FATAL_ERROR "mini-case field query failed (${status})")
 endif()
-execute_process(COMMAND "${CHECK}" compare "${WORK}" "${FIXTURES}"
+file(COPY "${FIXTURES}/points.dat" "${REFERENCES}/reference_summary.dat"
+    "${REFERENCES}/reference_profiles.dat" "${REFERENCES}/reference_field.dat"
+    DESTINATION "${WORK}/expected")
+execute_process(COMMAND "${CHECK}" compare "${WORK}" "${WORK}/expected"
     RESULT_VARIABLE status)
 if(NOT status EQUAL 0)
     message(FATAL_ERROR "mini-case outputs differ from the fixture")

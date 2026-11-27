@@ -4,9 +4,20 @@ Run from the repository root: python3 test/reference/pp_fusion_eft_oracle.py
 Uses E1 (not production's Coulomb integral), unreduced C0/C2 matching, and
 adaptive beta-decay phase-space quadrature (not production's Gauss rule).
 Sources/equations and units: docs/pp-fusion-eft.md.
+Writes $MILCA_DATA_DIR/test/reference/pp_fusion_eft.dat.
 """
+import os
 from pathlib import Path
+import sys
 import mpmath as m
+
+
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return Path(root) / relative
+
 
 m.mp.dps = 70
 hc, hb = m.mpf('197.3269804'), m.mpf('6.582119569e-22')
@@ -86,7 +97,8 @@ for la in map(m.mpf, ['0', '3.9']):
     slopes = [mp/hc**2*((4*half-3*base-full)/p2step)/base+phase_slope
               for base, full, half in zip(rates, rates_at_step, rates_at_half)]
     rows.append(amps+rates+[prefactor*x for x in rates]+slopes)
-path = Path('test/reference/pp_fusion_eft.dat')
+path = milca_data('test/reference/pp_fusion_eft.dat')
+path.parent.mkdir(parents=True, exist_ok=True)
 with path.open('w') as out:
     for row in rows:
         out.write(' '.join(m.nstr(x, 40) for x in row)+'\n')

@@ -8,7 +8,7 @@ appears.
 
 | Page | Physics area | Campaign |
 |---|---|---|
-| [Drift-kinetic transport](drift-kinetic-transport.md) | NTV torque, axisymmetric transport matrix, finite orbit width | agreement with NEO-2-QL, NEO-RT and POTATO on device case and a device case, November 2026 |
+| [Drift-kinetic transport](drift-kinetic-transport.md) | NTV torque, axisymmetric transport matrix, finite orbit width | agreement with NEO-2-QL, NEO-RT and POTATO on device data outside the repository, November 2026 |
 | [Global ideal-MHD stability](ideal-mhd-stability.md) | delta W, hybrid radial spaces, spectra | P1e, from November 2026 |
 | [Free-boundary equilibrium](free-boundary-equilibrium.md) | Grad-Shafranov free boundary against VMEC2000 on DIII-D, reference-code flaws | November 2026 |
 

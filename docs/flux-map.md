@@ -328,8 +328,7 @@ needed (the dump).
   spectrum belongs to this case (pressure, ι crossing 5 with weak shear).
 - Open: a physical pressure-driven instability with an unstable spectrum
   unbounded in n, or a defect of the pressure term. Deciding case: a
-  standard configuration with pressure (stellarator, which does not mesh yet,
-  below).
+  standard configuration with pressure.
 
 QA driver (`test_flux_map_qa`, opt-in, not a registered test): the
 Landreman–Paul QA deck of [benchmarks/label-qa](../benchmarks/label-qa/README.md),
@@ -385,12 +384,6 @@ was met on this vacuum case, where the label lane did not converge. It is not ye
   (2 (p + 1)² nt)²) and is factorised directly: 22 s at 3536 unknowns, 99 s
   at 14416. A toroidal basis with local support or a Krylov solver is
   needed before a time comparison means anything.
-- stellarator standard (`benchmarks/flux-map-standard/stel5`, pressure, ι 0.878 to
-  0.943 prescribed from VMEC++) does not mesh: `spline_quadrature_build`
-  reports a singular block map on the bean plane φ = 0 (the O-grid corner
-  quadrilaterals are valid; the interior folds). A smaller core does not
-  help. This contradicts the flux map's premise of robustness on shaped
-  sections and is the first open item of the section discretisation.
 - Not run: degree 2, 8 cells, 25 planes from the polar start (stopped
   unfinished), QH and QI decks.
 
@@ -534,19 +527,18 @@ is exact (`preserve_area`, the default; MILCA_FM3_FREE_AREA switches it
 off) it is +5.3e-5 and +2.9e-5, and the axis does not move (4 cells: +0.031
 against +0.035 mm; 8 cells: −0.782 against −0.780 mm). The wall distance
 stays large on coarse meshes where a tip is not resolved (4 cells: QA
-17 mm, stellarator 30 mm, li383 33 mm, CTH 2 mm): a harmonic map spreads cells
+17 mm, li383 33 mm, CTH 2 mm): a harmonic map spreads cells
 away from convex tips, and no grading is implemented.
 
 Standard decks, degree 2, stages 2:2:9 then 2:4:13 from u = G, against
 VMEC++ (`benchmarks/flux-map-standard`; the former meshes fail to build on
-stellarator and li383):
+li383):
 
 | deck | Newton steps | energy | axis max dR | s = 0.25 rms, \|B\| rms | s = 0.50 rms, \|B\| rms | negative eigenvalues |
 |---|---|---|---|---|---|---|
 | QA (vacuum) | 15 + 16 | +5.3e-5 | 0.11 mm | 0.76 mm, 0.18 % | 1.02 mm, 0.39 % | 0 |
 | QH (vacuum) | 12 + 10 | +3.6e-4 | 1.66 mm | 1.01 mm, 0.44 % | 1.37 mm, 0.91 % | 0 |
 | CTH (pressure, shear) | 11 + 10 | −3.0e-5 | 0.76 mm | 1.2 mm, 0.22 % | 1.4 mm, 0.37 % | 0 |
-| stellarator standard (pressure) | 12 + 13 | +4.9e-4 | 14.9 mm | 4.4 mm, 0.33 % | 5.8 mm, 0.55 % | 0 |
 | li383 (pressure, current) | 13 + 11 | −1.7e-4 | 1.8 mm | 2.4 mm, 0.42 % | 1.8 mm, 0.68 % | 0 |
 
 QA axis (mean dR against VMEC++ ns 101, mm). References: VMEC++ MPOL/NTOR
@@ -617,7 +609,7 @@ MILCA_FM3_PSCALE).
   4 cells: none (lowest +3.9e-3); 2 cells: 2 negative; 8 cells and α = −1:
   Newton did not converge from u = G. The gauge rows act in plane 1 only
   and mix n = 0 with ±1, so the n = 0 label is not clean.
-- CTH (p₀ 432 Pa, strong shear), stellarator standard and li383 at α = 1: no
+- CTH (p₀ 432 Pa, strong shear) and li383 at α = 1: no
   negative eigenvalue on 2:2:9 and 2:4:13.
 - Read: the negative eigenvalues of both analytic cases are driven by the
   pressure, in cases whose pressure energy equals or exceeds the magnetic
@@ -738,13 +730,12 @@ VMEC++ states (ns 101) on the same measure, over s > 0.1:
 | QA | 0.73 | 0.57, 0.43 | 1.8e-3 | | | 8.9e-3 |
 | QH | 0.82 | 0.71, 0.38 | 1.7e-3 | | | 1.5e-2 |
 | CTH | 0.48 | 0.36, 0.30 | 4.3e-3 | 31 | 0.24 | 7.7e-3 |
-| stellarator standard | 0.83 | 0.71, 0.42 | 2.8e-2 | 4.3 | 0.073 | 1.9e-2 |
 | li383 | 0.66 | 0.57, 0.33 | 3.5e-2 | 3.0 | 0.11 | 1.8e-2 |
 
 (The parts are of the whole volume.) VMEC++'s own residuals of these
 states: FSQR, FSQZ, FSQL at 1e-14 to 1e-15 (the discrete equations are
 solved); `equif`, the surface-averaged radial balance, rms over s > 0.1:
-CTH 4.2e-4, stellarator 3.7e-6, li383 1.1e-4 (undefined for the vacuum decks).
+CTH 4.2e-4, li383 1.1e-4 (undefined for the vacuum decks).
 Inside s = 0.1 the VMEC states have η_B of order one, confined to the six
 grid surfaces next to the axis (QA: s < 0.06 at ns 101, s < 0.04 at
 ns 151; the whole volume gives 0.33 and 0.23); the exact vacuum state
@@ -776,13 +767,11 @@ Sign of the map and winding of the wall, at convergence (reported per
 stage by both drivers; not a step-acceptance rule). ∇φ·(∇x×∇y) has one
 sign at all quadrature points (section points times toroidal points) of
 every run above: Solov'ev −0.77 to −0.22; Landreman −8.86 to −4.13; QA
-−60.3 to −24.8; QH −68.7 to −28.1; CTH −99.4 to −20.3; stellarator −0.90 to
-−0.54; li383 −10.6 to −4.0 (2:4:13). The wall angle winds once on every
+−60.3 to −24.8; QH −68.7 to −28.1; CTH −99.4 to −20.3; li383 −10.6 to
+−4.0 (2:4:13). The wall angle winds once on every
 plane (1.000000) and is monotone: the smallest step between neighbouring
 wall points is 0.39 to 0.58 of the mean step on the decks. The gates F2a
-and F2b check one sign and winding one. A folded state was met once, on
-purpose: stellarator on the graded mesh with c = 2 (below), where the range is
-−1.36 to +0.33.
+and F2b check one sign and winding one.
 
 ### Mesh grading towards tips (2026-11-23)
 
@@ -795,33 +784,11 @@ still a diffeomorphism and the certificate is unchanged. Opt-in here
 (`MILCA_FM3_GRADING=c`, argument `grading` of `fm3_build`); the default
 stays the arc length.
 
-Prediction: at 4 cells the stellarator wall distance falls at least 3 times and
-the axis approaches the 8-cell value (4 mm). stellarator, 2:2:9 then 2:4:13:
-
-| c | wall distance | certified ratio | axis max dR | energy | η_B (s > 0.1) |
-|---|---|---|---|---|---|
-| 0 | 30 mm | 0.038 | 14.9 mm | +4.9e-4 | 0.83 |
-| 0.5 | 6.9 mm | 0.084 | 47 mm | +1.7e-3 | 0.73 |
-| 1 | 8.7 mm | 0.12 | 66 mm | +4.1e-3 | 0.80 |
-| 2 | 7.1 mm | 0.089 | 61 mm | +8.1e-3 | 0.91 (folded) |
-
-c = 4: the mesh is refused. The first half holds (3.4 to 4.3 times), the
-second is ruled out: the axis is 3 to 4 times worse. With the planes (4
-cells, c = 0.5 against c = 0): 13 planes 47 against 14.9 mm, 21 planes 24
-against 14.5 mm, 29 planes 18 against 15.3 mm, energy +2.8e-4 against
-+3.1e-4 on 29 planes. So:
-
-- the graded correspondence follows the tips as they move along the wall
-  with φ, the meshes slide along the wall between the planes, and 13
-  planes do not carry that (isolated by the plane scan);
-- with enough planes the graded mesh is not better either: the stellarator axis
-  error at 4 cells is not set by the distance of the mesh wall from the
-  wall curve. What 8 cells improve (4.0 mm) is not the wall fit.
-- QA, 3:4:21: wall distance 15 → 4.4 mm (c = 0.5), 2.9 mm (c = 1); η_B
-  over s > 0.1 0.46 → 0.26, 0.39; band s > 0.9 1.02 → 0.62, 1.05; axis max
-  dR 0.63 → 0.45, 0.34 mm; energy +5.2e-5 → −1.4e-5, −8.9e-6. Here the
-  grading helps, c = 0.5 most in the residual; prediction (band s > 0.9
-  at least halved) not met.
+On QA, 3:4:21: wall distance 15 → 4.4 mm (c = 0.5), 2.9 mm (c = 1); η_B
+over s > 0.1 0.46 → 0.26, 0.39; band s > 0.9 1.02 → 0.62, 1.05; axis max
+dR 0.63 → 0.45, 0.34 mm; energy +5.2e-5 → −1.4e-5, −8.9e-6. Here the
+grading helps, c = 0.5 most in the residual; prediction (band s > 0.9
+at least halved) not met.
 
 ### Fourier wall sample angles
 
@@ -833,7 +800,7 @@ placement and `MILCA_FM3_GRADING=c` with c > 0 curvature grading. Both
 reparameterize the wall, which can introduce higher harmonics before it is
 interpolated on the mesh.
 
-Arc length against sample angles on the five standard decks, degree four,
+Arc length against sample angles on the four standard decks, degree four,
 stages `2:2:9,3:4:21,4:6:21`, one sCluster core each. The distance is the
 RMS distance of the s = 0.5 surface from the VMEC++ reference, and η_B is
 the force ratio over the whole volume.
@@ -843,7 +810,6 @@ the force ratio over the whole volume.
 | QA | 0.28 | 0.055 | 0.51 | 3.6e-3 | 40 |
 | QH | 0.73 | 0.16 | 0.73 | 3.2e-2 | 55 |
 | CTH | 0.41 | 0.17 | 6.4e-2 | 3.3e-2 | 45 |
-| stellarator | 3.7 | 0.78 | 0.90 | 4.7e-2 | 65 |
 | li383 | 1.2 | 0.39 | 0.36 | 0.11 | 60 |
 
 On the quasi-axisymmetric vacuum deck with degree four, six cells and
@@ -886,7 +852,7 @@ in the runs below).
 | Hypothesis and prediction | Result |
 |---|---|
 | The KKT matrix with the gauge row is factorised without shift or penalty; prediction: gates unchanged, inertia reliable, linear solves at most 1.5 times as long | confirmed for the row on the wall functions of one plane (0.56 s against 0.48 s without a row, F2b at 3536 unknowns); ruled out for a row over the whole volume (4.14 s) and over the section of one plane (0.89 s) |
-| On symmetric meshes the constraint reproduces the numbers of the symmetry rows | confirmed: F1 B 2.42e-2, 7.11e-3, 1.93e-3 and 14, 17, 23 steps (rows: 14, 18, 23); F2a identical with inertia 2, 2, 4; F2b on the symmetric planes 3.658e-2, 7.064e-3, 9 + 16 steps, 6 negative eigenvalues; the five decks below |
+| On symmetric meshes the constraint reproduces the numbers of the symmetry rows | confirmed: F1 B 2.42e-2, 7.11e-3, 1.93e-3 and 14, 17, 23 steps (rows: 14, 18, 23); F2a identical with inertia 2, 2, 4; F2b on the symmetric planes 3.658e-2, 7.064e-3, 9 + 16 steps, 6 negative eigenvalues; the decks below |
 | The same accuracy on meshes without symmetry, without symmetry rows (the gate) | confirmed: F1 with the centre 10 % above the midplane B 2.42e-2, 7.11e-3, 1.93e-3, axis 4.8e-3, 1.2e-4, 1.3e-5, rates 1.77, 1.88; F2b on planes shifted by 0.37 of their spacing B 3.658e-2, 7.066e-3 (rate 2.37), 10 + 19 steps, 6 negative eigenvalues, axis 1.6e-3, 3.4e-3 |
 | Constraining several k_j(s) is harmless below the radial resolution and removes the slow steps | ruled out as stated (table below) |
 
@@ -938,7 +904,7 @@ test with an identity shift) and the stationary point next to the start
 | A second-order correction (the simplified correction added to the refused trial point) rescues the refused steps | ruled out: none accepted at R B_φ = 300 |
 | The steps refused at a strong guide field are refused for the curvature of the constraint R τ det ∇u = f(s) | ruled out: the matrix is indefinite there. Negative eigenvalues on the gauge constraint along the cold path at R B_φ = 300, 4 cells, at the first trial shift of steps 2, 6, 10, 14, 30: 72, 17, 5, 1, 51; the accepted shift stays at 1e-3 of the smallest diagonal, which grows with B_φ², for 25 steps. At R B_φ = 3 (2 cells) it falls to 1e-5 within 14 steps |
 | The gradient-norm line search of the stationary mode can be replaced by the natural monotonicity test | ruled out: F2b stops after 3 steps on the second level |
-| Relaxed steps (watchdog: a refused step on a positive matrix is taken on trial and judged with the next one; FortFEM `NEWTON_ACCEPT_ENERGY_RELAXED`) reduce the steps | confirmed on a curved stiff valley (FortFEM test: 568 → 109 steps at stiffness 1e6) and on F1 without symmetry (pointwise, 8 cells: 68 → 38); ruled out on the decks (QA second stage 16 → 23 to 27 steps, stellarator first stage 12 → 14, QA wall time +20 %). Off by default (`relaxed_steps`) |
+| Relaxed steps (watchdog: a refused step on a positive matrix is taken on trial and judged with the next one; FortFEM `NEWTON_ACCEPT_ENERGY_RELAXED`) reduce the steps | confirmed on a curved stiff valley (FortFEM test: 568 → 109 steps at stiffness 1e6) and on F1 without symmetry (pointwise, 8 cells: 68 → 38); ruled out on the decks (QA second stage 16 → 23 to 27 steps, QA wall time +20 %). Off by default (`relaxed_steps`) |
 
 So no acceptance rule tested makes the cold start at a strong guide field
 direct; the obstacle is the indefinite Hessian far from the solution
@@ -989,7 +955,6 @@ table of "Section meshes by harmonic maps"):
 | QA | 15 + 16 | +5.33e-5 | 0.109 mm | 7.9 s (7.4) |
 | QH | 12 + 10 | +3.64e-4 | 1.66 mm | 6.5 s (5.9) |
 | CTH | 11 + 10 | −3.0e-5 | 0.76 mm | 6.3 s (5.8) |
-| stellarator standard | 12 + 13 | +4.91e-4 | 14.9 mm | 6.7 s (6.4) |
 | li383 | 13 + 11 | −1.67e-4 | 1.77 mm | 6.6 s (6.2) |
 
 Steps, energies (QA to 11 digits) and axes are unchanged, no negative

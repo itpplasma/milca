@@ -23,10 +23,12 @@ python compare.py MILCA_OUTPUT_DIR
 
 `make_reference.py` runs VMEC++ (Python package) and VMEC2000 on both decks
 (ns 16, 51, 101; FTOL 1e-14; MPOL 16, NTOR 12 as in the deck; VMEC++ 8
-threads), writes the prescribed-iota deck and the files in `reference/`
-from the prescribed-iota VMEC++ state; wout files go to `work/` (ignored).
+threads), writes the prescribed-iota deck and, from the prescribed-iota
+VMEC++ state, the reference files to `benchmarks/label-qa/reference/` of an
+external data directory (`MILCA_DATA_DIR`, or `--out`); wout files go to the
+sibling `work/`. `compare.py` reads the reference from there.
 
-## Reference files (`reference/`)
+## Reference files
 
 | file | content |
 |---|---|

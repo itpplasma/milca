@@ -249,8 +249,9 @@ The schedule uses bounded O(N_q) scratch, O(N_q²) rule setup and O(N_q)
 OpenMP quadrature work. No global matrix or per-node allocation is introduced.
 
 CTest `pp_fusion_eft_oracles` checks independent E1 values, neutral and unit
-limits, KR/BC/Ando published comparisons, an optional 70-digit mpmath oracle
-using unreduced C_0,C_2 and adaptive phase space, finite-energy principal-value
+limits, KR/BC/Ando published comparisons, a 70-digit mpmath oracle (its table
+kept in an external data directory, `MILCA_DATA_DIR`; without it the test is
+not registered) using unreduced C_0,C_2 and adaptive phase space, finite-energy principal-value
 integrals for the slope, all five rate-input derivatives, transpose pairing,
 and agreement with a freshly solved Reid68 result inside the EFT estimate.
 `pp_fusion_eft_export_contract` checks JSON/native output and invalid input.
@@ -269,8 +270,8 @@ cmake --build build --target gen_pp_fusion_eft -j 8
 build/gen_pp_fusion_eft
 # Export only the requested interchange file to fusion-skript:
 OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1 build/pp_fusion_eft_export \
-  --json docs/data/pp_fusion_eft.json
-cp docs/data/pp_fusion_eft.json \
+  --json "$MILCA_DATA_DIR/docs/data/pp_fusion_eft.json"
+cp "$MILCA_DATA_DIR/docs/data/pp_fusion_eft.json" \
   ~/proj/fusion-skript/derivations/chapters/data/pp_fusion_eft.json
 ```
 

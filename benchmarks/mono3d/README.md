@@ -4,9 +4,6 @@ Recipes behind the MONKES and rabe comparisons of `mono_coefficients_3d` in
 [drift-kinetics.md](../../docs/drift-kinetics.md) (K1). The field files stay
 outside the repository:
 
-- stellarator standard configuration (EIM): `boozmn_wout_stel5_std_v_0.0.txt.nc` and
-  the MONKES database of `examples/stellarator-EIM/boozer_xform_input` in MONKES
-  (Escoto et al., Nucl. Fusion 64, 076030, 2024), commit add6c3f;
 - Landreman-Paul (2022) reactor-scale QH equilibrium
   `wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc` and rabe's
   golden output `test/golden/expected/rabe.nc` in rabe, commit 3282d65.
@@ -38,4 +35,3 @@ Results (faepmac1, 8 threads):
 |---|---|---|---|---|
 | QH s = 0.5, nu* = 1e-2 to 1e-4 | 33 x 41 | 240 | 294 s | 7.1 GB |
 | QH s = 0.5, nu* = 1e-3 | 41 x 51 | 240 | 314 s | 14 GB |
-| stellarator s = 0.2, nu = 1e-3 to 1/m | 25 x 25 | 160 | 142 s (workstation) | 1.0 GB |

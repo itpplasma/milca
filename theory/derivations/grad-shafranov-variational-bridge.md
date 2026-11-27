@@ -123,7 +123,7 @@ p'(\psi)=\frac{2\pi q}{\Phi_{edge}}\frac{dp}{ds}.
 
 ## Source and literature anchors
 
-- MILCA inspected base: `5d75dfc6d9a43b0c3af1f61b44163a08f8c0a2a4`; generated source and exact FortSym pin are hashed in the device case closure receipt.
+- MILCA inspected base: `5d75dfc6d9a43b0c3af1f61b44163a08f8c0a2a4`.
 - [GS source ledger](https://github.com/itpplasma/writeups/blob/main/theory/gs_solver_source_correspondence.md): KIN, FreeGS and CHEASE pins, routine paths and weak/source normalizations.
 - [Original VMEC ledger](https://github.com/itpplasma/writeups/blob/main/theory/vmec2000_equilibrium_source_correspondence.md): native magnetic field, shell pressure energy, profile families and flux/current constraints.
 - [DESC ledger](https://github.com/itpplasma/writeups/blob/main/theory/desc_equilibrium_source_correspondence.md): collocation residual, native signed flux, axisymmetric reduction and separate Energy objective.

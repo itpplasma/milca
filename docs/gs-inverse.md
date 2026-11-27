@@ -111,14 +111,6 @@ so the result does not depend on the thread count.
 The secant path costs 2(n+1) full forward solves per iteration (89 against 8
 solves in the 4-interval comparison test).
 
-device case-size measurement (sCluster, 48 threads, I0 boundary and q table, 400
-graded FFprime intervals, 96 boundary nodes, scalar pprime = -1e4): the exact
-Jacobian of 401 columns takes 24 s (60 thread-s load, 1.3 response, 580
-readback; before the direct path 127 s with 560 thread-s of response). The
-forward solves of the line search dominate: 260 to 620 s per iteration, most of
-them non-converging trial solves. The run did not converge within 30 min
-(three Newton iterations, max|r| about 0.5, steps 0.125, 0.031, 0.016).
-
 Pressure homotopy. The seed field is built with the mean p'. For a strongly
 structured p'(s) (the I0 pedestal law) the first forward solve stalls under
 line-search damping, and when it does converge the field has no readable q
@@ -128,25 +120,15 @@ previous one with step halving (`test_gs_prescribed_q_pedestal`, which fails
 with status 101/102 without it). Intermediate stages are accepted at
 max|r| <= 1e-3; only the full law must meet the tolerance.
 
-device case with the I0 pressure law (sCluster, 48 threads, 96 boundary nodes, 16
-graded FF' intervals): blend 0.5 is reached in about 2 min and blend 0.97 within
-14 min (before: blend 0.25 in 30 min), but the full law stops at max|r|
-5.5e-4 and the run ends with status 105. The outer
-Jacobian agrees with Richardson differences to 8e-6 there; the limit is
-conditioning. At the mean-p' solution its singular values span 4.7 to 2.7e-5
-(cond 1.7e5); the weakest direction is an alternating edge FF' mode led by
-the last coefficient, and the remaining residual lies along the matching
-alternating moment combination, which no nearby law removes (a nonzero
-residual minimum with singular J). The edge FF' coefficients on this knot
-vector are not determined by the interior-weighted q moments.
+On edge-graded knots the edge FF' coefficients are not determined by the
+interior-weighted q moments: the weakest direction of the outer Jacobian is an
+alternating edge FF' mode, and an exact-moment solve can stop at a nonzero
+residual minimum with singular J.
 
 Regularized inverse (`regularization='discrepancy'`, namelist
 `inverse_regularization`, `inverse_q_accuracy`). The exact moments ask the
 discrete forward model to reproduce q to better than its own discretization
-error: the reference NS640 law itself, solved on the device case meshes, misses the
-q table by a rho-weighted rms of 4.1e-4 (96 boundary nodes) and 6.1e-5 (192),
-with maxima 2.9e-3 and 7.3e-4 at the edge. Weakly seen FF' modes absorb that
-error. The regularized form fits the q samples (weights uniform in sqrt(s),
+error. Weakly seen FF' modes absorb that error. The regularized form fits the q samples (weights uniform in sqrt(s),
 reaching axis and edge) and the flux equation in least squares, plus
 lambda^2 integral (d^2 FF'/ds^2)^2 ds (FF' in seed units; F_edge free), by
 Levenberg-Marquardt-damped Gauss-Newton. lambda follows the Morozov
@@ -174,9 +156,7 @@ source defect, without an inverse-equilibrium stability bound.
 `profile-law.dat` contains the recovered pprime/FFprime law and signed F_edge.
 The native field reader consumes that file; `profiles.dat` contains the actual
 q, p, F, pprime and FFprime. NetCDF retains the literal/resolved namelist,
-input q table, Phi constraint, solved law and provenance. The external_case
-producer extension uses the Phase 3 `prescribed_q` schema without using the
-case's forward FFprime or nominal F_edge as constraints.
+input q table, Phi constraint, solved law and provenance.
 
 `grad_shafranov_prescribed_q_variable_p` verifies a manufactured circular
 solution psi=psi_axis(1-rho^2) with cubic pp(s), ff(s) and an analytic forcing,

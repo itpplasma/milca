@@ -1,4 +1,4 @@
-# Direct spot calibration and held device case qualification
+# Direct spot calibration and frozen response qualification
 
 The response calibration path reads a derivative jump directly from sampled
 resonant fluxes on both sides of the GPEC spot. It uses no Frobenius coefficient,
@@ -37,7 +37,7 @@ integral, independently of FEEC/BEM. Another test reads an actual resolved
 single-ring R-B1 strip and checks its spot jump and integrated current against
 the closed ideal step-profile solution, retaining a complex drive.
 
-## device case magnetic calibration executable
+## Magnetic calibration executable
 
 `gs_response_calibration --config FILE [--validate]` reads `/spot_calibration/`:
 `eqdsk`, `n`, `qabs`, `nrad`, `nth_max`, `order`, `nfine`, `spot`,
@@ -55,12 +55,13 @@ normalization in a qualified coupled response.
 
 ## Frozen qualification harness
 
-`response_qualify --config qualification.nml` is the Fortran authority for the
-predeclared device case gates in the held root's `RULE.md`. It reads `/qualification/`
-with up to 288 records: three cuts, eight axes, three levels, two phasings and
-two target rationals. Integer identities are cut (c0995,c0997,full), axis
+`response_qualify --config qualification.nml` is the Fortran authority for
+predeclared qualification gates of a device response case whose data stay
+outside the repository. It reads `/qualification/` with up to 288 records:
+three cuts, eight axes, three levels, two phasings and two target rationals.
+Integer identities are cut, axis
 (radial,core,grading,harmonic,poloidal,extent,resistivity,frequency), level,
-phase (000,010), and target (3,10/3). Missing records remain unavailable;
+phase and target. Missing records remain unavailable;
 duplicate/out-of-range identities are errors.
 
 Each record carries complex b, vacuum b, total resonant flux and layer current;
@@ -86,8 +87,8 @@ fail, all verdicts are suppressed and the lane reports `STOP_NO_TIEBREAK`.
 The NetCDF output preserves input, provenance, gate status and ladder changes.
 
 The optional `scripts/prepare_response_qualification.py ROOT --output FILE`
-serializes the existing frozen `ladder.json` and six raw GPEC references to
-this namelist. It executes no solver or scheduler. Legacy
+serializes a frozen `ladder.json` and raw GPEC references to this
+namelist. It executes no solver or scheduler. Legacy
 `runs/<case>/<case>_res.dat` gives diagnostic single-ring b and vacuum b;
 `runs/<case>/qualification.json` can supply coupled records after integration.
 That JSON must declare unchanged `controls`, `cut`, `spot`, and records with
@@ -97,6 +98,3 @@ or fits them. Direct namelist use needs no Python.
 
 `--calibration-decks DIR` emits unit-sheet validation decks for the frozen
 outer mesh controls and both targets. These are not coupled solver decks.
-The held registry proposal and production root must remain blocked until the
-coupled executable/decks, device case resources and every frozen physics ladder are
-actually available. The controller alone registers and launches the root.

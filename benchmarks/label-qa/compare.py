@@ -1,7 +1,8 @@
-"""Compare a MILCA label-lane result with the VMEC++ reference in reference/
-(or in the directory given as second argument).
+"""Compare a MILCA label-lane result with the VMEC++ reference in
+$MILCA_DATA_DIR/benchmarks/label-qa/reference (or in the directory given as
+second argument).
 
-MILCA writes, in a directory DIR, the layout of reference/:
+MILCA writes, in a directory DIR, the layout of that reference:
   axis.txt             phi R Z           on the 64 reference planes
   surface_s0.25.txt    phi theta R Z |B| (any theta, the same planes)
   surface_s0.50.txt, surface_s1.00.txt
@@ -13,15 +14,20 @@ the reference curve of its plane (max and rms, m), the relative |B| difference
 at the closest reference point (max and rms); max |iota difference|; relative
 energy difference.
 
-Usage: python compare.py DIR
+Usage: python compare.py DIR [REFERENCE_DIR]
 """
 import json
+import os
 import pathlib
 import sys
 
 import numpy as np
 
-REF = pathlib.Path(__file__).resolve().parent / "reference"
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return pathlib.Path(root) / relative
 SURFACES = ("0.25", "0.50", "1.00")
 
 
@@ -109,7 +115,9 @@ def main(out):
 
 if __name__ == "__main__":
     # optional second argument: another reference directory in the same
-    # layout (e.g. benchmarks/flux-map-standard/<case>/reference)
+    # layout (e.g. $MILCA_DATA_DIR/benchmarks/flux-map-standard/<case>/reference)
     if len(sys.argv) > 2:
         REF = pathlib.Path(sys.argv[2]).resolve()
+    else:
+        REF = milca_data("benchmarks/label-qa/reference")
     main(sys.argv[1])

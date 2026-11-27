@@ -50,7 +50,7 @@ pointwise errors.
 For stochastic cases, include the sampling/confidence target explicitly.
 
 Follow the [error-control strategy](error-control-strategy.md) and its
-[fixed-input measurements](../benchmarks/error-control/baseline.csv). Target
+fixed-input measurements (`benchmarks/error-control/baseline.csv` in `MILCA_DATA_DIR`). Target
 10–20% incremental overhead for always-on indicators and roughly 2–5 times
 solve-only total for large-run deterministic checks. A factor 100 may be
 acceptable on tiny strict reference cases, not as the production norm.

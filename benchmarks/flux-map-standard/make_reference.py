@@ -10,8 +10,9 @@ functions of s (normalized toroidal flux). For a deck with prescribed current
 3. runs VMEC++ on the prescribed-iota deck (the problem the flux map solves);
 4. writes, for that state, plain-text references in the layout of
    benchmarks/label-qa (axis, surfaces s = 0.25, 0.5, 1 with |B|, iota,
-   summary.json) and keeps both wout files in OUT/work (ignored by git) for
-   MILCA's residual check of the VMEC state.
+   summary.json) in OUT/reference and keeps both wout files in OUT/work for
+   MILCA's residual check of the VMEC state. OUT defaults to
+   $MILCA_DATA_DIR/benchmarks/flux-map-standard/NAME.
 
 Usage: python make_reference.py DECK NAME [--out DIR] [--ns ...] [--degree 6]
        (python with vmecpp and netCDF4, e.g. ~/code/bench-venv)
@@ -19,15 +20,16 @@ Usage: python make_reference.py DECK NAME [--out DIR] [--ns ...] [--degree 6]
 import argparse
 import importlib.metadata as md
 import json
+import os
 import pathlib
 import re
+import sys
 import time
 
 import netCDF4
 import numpy as np
 import vmecpp
 
-HERE = pathlib.Path(__file__).resolve().parent
 NPHI, NTHETA, SURFACES = 64, 128, (0.25, 0.5, 1.0)
 
 ap = argparse.ArgumentParser()
@@ -43,7 +45,16 @@ ap.add_argument("--reuse", action="store_true", help="reuse wout files present i
 ap.add_argument("--mpol", type=int, default=None, help="override MPOL of the deck (reference resolution)")
 ap.add_argument("--ntor", type=int, default=None, help="override NTOR of the deck")
 a = ap.parse_args()
-OUT = a.out or HERE / a.name
+
+
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return pathlib.Path(root) / relative
+
+
+OUT = a.out or milca_data(f"benchmarks/flux-map-standard/{a.name}")
 WORK = OUT / "work"
 REF = OUT / "reference"
 for d in (OUT, WORK, REF):

@@ -260,7 +260,9 @@ No Python or CAS runtime is needed to build, run or test the checked-in
 scientific code. The optional independent oracle is
 `test/reference/pp_fusion_oracle.py`: SciPy BVP for the coupled bound state,
 DOP853 for scattering, mpmath Coulomb matching and adaptive overlap/phase
-quadrature. Its committed numeric output is consumed by the Fortran test.
+quadrature. Its numeric output, kept in an external data directory
+(`MILCA_DATA_DIR`), is consumed by the Fortran test, which CTest registers
+only when that directory is configured.
 It deliberately shares neither DVR assembly nor generated potential code.
 
 ```sh
@@ -271,11 +273,11 @@ OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1 ctest --test-dir build -j 4 \
   --output-on-failure
 # Equivalent focused ordinary Fo entry point:
 fo test pp_fusion_oracles
-mkdir -p docs/data
+mkdir -p "$MILCA_DATA_DIR/docs/data"
 OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1 build/pp_fusion_export \
-  --json docs/data/pp_fusion_milca.json
+  --json "$MILCA_DATA_DIR/docs/data/pp_fusion_milca.json"
 mkdir -p ~/proj/fusion-skript/derivations/chapters/data
-cp docs/data/pp_fusion_milca.json \
+cp "$MILCA_DATA_DIR/docs/data/pp_fusion_milca.json" \
   ~/proj/fusion-skript/derivations/chapters/data/pp_fusion_milca.json
 ```
 

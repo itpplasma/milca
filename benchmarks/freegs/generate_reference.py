@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Retain public FreeGS 01-freeboundary.py data; never needed by CTest.
+"""Retain public FreeGS 01-freeboundary.py data for CTest.
+
+Writes to --output, by default $MILCA_DATA_DIR/benchmarks/freegs.
 
 Run with the pinned environment in requirements.txt. All quantities are SI;
 psi is Wb/rad, zero on the symmetry axis. No FreeGS implementation is copied.
@@ -7,7 +9,9 @@ psi is Wb/rad, zero on the symmetry axis. No FreeGS implementation is copied.
 
 import argparse
 from importlib.metadata import version
+import os
 from pathlib import Path
+import sys
 import time
 import platform
 from functools import partial
@@ -183,10 +187,16 @@ def write_data(out, solutions, boundary="freeBoundary"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=Path(__file__).parent)
+    parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--boundary", choices=["freeBoundary", "freeBoundaryHagenow"],
                         default="freeBoundary")
     args = parser.parse_args()
+    if args.output is None:
+        if not os.environ.get("MILCA_DATA_DIR"):
+            sys.exit("set MILCA_DATA_DIR to the external MILCA data directory "
+                     "or give --output")
+        args.output = Path(os.environ["MILCA_DATA_DIR"]) / "benchmarks/freegs"
+    args.output.mkdir(parents=True, exist_ok=True)
     if version("freegs") != "0.8.2":
         raise RuntimeError("reference requires FreeGS 0.8.2")
     write_data(args.output, [(n, *solve(n, args.boundary)) for n in [65, 129, 257]],

@@ -403,7 +403,7 @@ Chris&AI
 
 Verified measurements, 2026-10-15: Release `-O3`, GNU Fortran 16, OpenMP MUMPS,
 Ryzen 9 5950X (16 physical cores, 32 logical CPUs), shared host. The
-[raw ledger](../benchmarks/error-control/production-consumers.tsv) retains both
+raw ledger (`benchmarks/error-control/production-consumers.tsv` in `MILCA_DATA_DIR`) retains both
 samples at every size/thread point, the baseline and optimized revisions,
 and a three-repeat paired NN2 comparison. These are modest toroidal
 production-path cases, not a large-device scaling limit. No production

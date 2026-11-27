@@ -108,7 +108,7 @@ converter on the VMEC twin of each case:
 
 | Case | Boundary distance (m) | Profiles |
 |---|---|---|
-| GVEC ellipstell_lowres, stel5, current_profile, bspline_profiles, advanced_control | <= 1.8e-15 | equal |
+| GVEC ellipstell_lowres, current_profile, bspline_profiles, advanced_control | <= 1.8e-15 | equal |
 | GVEC tilted_elliptok_hmap_RZ (boundary file) | 1.8e-11 | not compared |
 | GVEC wout of test-signgs-{neg,pos}-asym{F,T}, d23p4_tm | <= 1.6e-15 | wout profiles |
 | DESC DSHAPE, QSC_r2_5.5 | 1.8e-15, 5.5e-9 | equal, current sign included |

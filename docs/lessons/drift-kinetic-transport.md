@@ -12,9 +12,8 @@ References: [NEO-2](https://github.com/itpplasma/NEO-2) in its quasilinear
 tokamak version NEO-2-QL for the collisional NTV and axisymmetric transport,
 and [NEO-RT](https://github.com/itpplasma/NEO-RT) for collisionless resonant
 transport with thin orbits; the POTATO orbit code in the NEO-RT repository for
-exact guiding-centre orbits. All three are MIT-licensed. Devices: the ITER
-scenario device case and a tokamak (tokamak) discharge devcase2, whose Boozer files and
-profiles stay outside the repository.
+exact guiding-centre orbits. All three are MIT-licensed. Device cases run
+against data outside the repository.
 
 Notation: s is the normalised toroidal flux, theta and phi the Boozer angles,
 b = B/B_0 with B_0 the (0, 0) harmonic, xi = v_par/v the pitch, nu the
@@ -27,11 +26,7 @@ on exact orbits (`milca_ntv_orbit_geometry`). The *thin* kernel neglects the
 orbit width. f_10 is the axisymmetric (n = 0) solution that the perturbed
 operator acts on. Test names in backticks are ctest names.
 
-Outcome: on device case, torque, heat flux, flows, bootstrap current and E_r
-agree with NEO-2-QL within 0.2 to 5 % once the causes below were removed. On
-a device case the electron torque agrees within 2 to 6 % and the ion torque summed
-over the profile within 4 %, while the ion torque on single flux surfaces near
-energy resonances still differs by up to 70 %. Of the 30 causes below, six
+Of the 30 causes below, six
 were wrong or missing terms in MILCA, seven were conventions or switches of
 the reference, five were resolution, three were checks against the wrong
 limit, three were input data and six were implementation defects.
@@ -61,7 +56,7 @@ limit, three were input data and six were implementation defects.
   angles b.grad theta = k b, and a flux-surface average weights with
   1/(b b.grad theta) = 1/(k b^2). The hp kernel already carried 1/(k b) in its
   phase-space measure but lacked the further 1/b in the torque weight: 2 %
-  against the Legendre kernel. It was hidden inside the tokamak finite-width
+  against the Legendre kernel. It was hidden inside a device finite-width
   comparison until constant and Boozer streaming were compared separately.
   `dk_hp_ntv_reference` now checks Boozer streaming to 2e-9 relative.
 - **Boundary term of a moving quadrature split** (#237). The collision
@@ -109,7 +104,7 @@ limit, three were input data and six were implementation defects.
   (G + iota I) (#309).
 - **Toroidal direction**: NEO-2 counts Omega_tE and the toroidal rotation
   V_phi along the direction in which the covariant toroidal field component is
-  -G of the Boozer file (#310), on both devices.
+  -G of the Boozer file (#310).
 - **Perturbation convention**: the perturbation files hold
   delta B = Re sum_m (bmnc - i bmns) e^{i(m theta + n phi)}, the kernel
   Re sum_m c_m e^{i(m theta - n phi)}, so c_{-m} = (bmnc + i bmns)/B_0 and the
@@ -120,9 +115,9 @@ limit, three were input data and six were implementation defects.
 
 - **Energy resonances** (#273): in strong rotation the resonance of E x B and
   magnetic precession enters and leaves the trapped region inside the ion
-  energy range and puts kinks into the energy integrand. The tokamak deuterium
-  torque changed by up to 57 % between 48 and 96 Gauss-Laguerre nodes;
-  adaptive panels converge it to 2e-3 relative.
+  energy range and puts kinks into the energy integrand. On a device case the
+  deuterium torque changed between 48 and 96 Gauss-Laguerre nodes; adaptive
+  panels converge it.
 - **Kink detection** (no pull request): the first speed grid aligned to these
   kinks for the energy-coupled collision operator found no kinks, because the
   detection threshold was too strict, and silently reproduced the uniform
@@ -140,33 +135,28 @@ limit, three were input data and six were implementation defects.
 ## 5. Wrong limit or reference in a check
 
 - **Paired sources** (#323): the finite-width kernel at small orbit width was
-  compared with the thin kernel with only the drift source on and gave 0.78 of
-  its torque on tokamak at s = 0.5. With both sources off the two agree to 2e-7
-  relative; switching both on changes the thin torque by only 0.2 %.
+  compared with the thin kernel with only the drift source on and disagreed.
+  With both sources off the two agree.
 - **Scaling to the thin-orbit limit** (#323): scaling the mass at fixed
   temperature keeps the poloidal Mach number v_E B/(v B_pol) fixed, so the
   E x B energy change across the orbit never vanishes and the two kernels
-  differed by 5 to 10 % at any mass. The thin limit scales temperature and
-  E_r together. The relative deviation then falls linearly with the orbit
-  width over the minor radius: 6e-4 at 1e-2 and 3e-5 at 1e-3, for both signs
-  of the rotation.
+  differed at any mass. The thin limit scales temperature and E_r together.
+  The relative deviation then falls linearly with the orbit width over the
+  minor radius, for both signs of the rotation.
 - **Sign of the rotation**: on the up-down symmetric test equilibrium the
   thin torque barely depends on the sign of Omega_tE (4.049e-11 and
   4.061e-11), so agreement for both signs there does not fix the sign of
-  E x B in the orbits. On a device case at s = 0.5 the thin torque changes by
-  0.76 % between the two signs; the finite-width kernel matches it to 2e-4
-  with the device's sign convention and misses it by 0.76 % with the opposite
-  one.
+  E x B in the orbits. A device case whose thin torque changes with the sign
+  does: the finite-width kernel matches it only with the device's sign
+  convention.
 
 ## 6. Inconsistent input data
 
-- **tokamak Boozer file** (no pull request): |B| computed from the file's
-  geometry and the tabulated |B| differ by 1.4 to 9.5 %, and G by up to 9 %, so
-  dB/ds cannot be validated on this file.
-- **device case** (#240): <B^2> from the geometric Jacobian is 8e-4 below the
-  flux-Jacobian average of the same file.
-- **Cancelling outputs** (#309): at s = 0.975 the ion flows cancel to 1 % of
-  their terms, so relative differences there do not measure agreement.
+- **Device Boozer file** (no pull request): |B| computed from the file's
+  geometry and the tabulated |B| differ, and so does G, so dB/ds cannot be
+  validated on such a file.
+- **Cancelling outputs** (#309): where the ion flows cancel to a small
+  fraction of their terms, relative differences do not measure agreement.
 
 ## 7. Implementation and toolchain defects
 

@@ -108,8 +108,9 @@ vector tests `w`,
   connectivity and `/gs_reference/ r0,c,edge,f,mu0,pp,depth`.
 - Printed current/force intervals are `[0, upper_bound]`; field-energy
   intervals enclose the corresponding actual reference-error norm.
-- device case repository retains the three exact-case inputs, receipts and optional
-  independent 8/12-order triangle-quadrature replay. No production PDE rerun.
+- The three exact-case inputs, receipts and an optional independent
+  8/12-order triangle-quadrature replay are kept outside the repository. No
+  production PDE rerun.
 
 ## Affine P2 reconstruction
 

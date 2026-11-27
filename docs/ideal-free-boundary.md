@@ -3,7 +3,7 @@
 Superseded for new work by the [free boundary on a moving spline mesh](free-boundary-ale.md) (2026-11-20).
 
 Status: first implementation on branch `gs-3d-free-boundary` (built on the N1
-map lane and the L4 per-n BEM). Design: external_design DESIGN §7.3, row N4;
+map lane and the L4 per-n BEM). Design:
 [equilibrium-core.md](equilibrium-core.md) D3, D6, D8. Module
 `milca_ideal_free_boundary` (`src/mhd/ideal_free_boundary.f90`), vacuum leaves
 `gen/gen_vacuum_shell.f90`, driver `app/gs_free_3d.f90`.
@@ -132,8 +132,7 @@ and p is measured from p_edge, since the map lane sees absolute pressure at
   1.0e-2 (P2).
 - `gs_free_3d_nl3a_fixture_return_{r0,rp,rm,zp,zm,el,gzm}` (one test per start case): NL-3a on the gs_free fixture (see below).
 
-## NL-3a results (2026-10-13, sCluster, MUMPS, unregistered dev runs in
-`~/N4work/runs`)
+## NL-3a results (2026-10-13)
 
 Distances are the gauge-invariant boundary distance of the mapped Γ_p nodes to
 the 2D boundary (max / rms) and the interior surface defect. "Return"
@@ -144,71 +143,23 @@ compares each offset start with the unshifted start r0.
 | fixture P3 (limiter, 340 kA), r0 | 0.007 / 0.005 | 0.007 |
 | fixture ±15 mm R, ±15 mm Z | ≤ 0.020 / 0.014 | ≤ 0.037 |
 | fixture +2 % elongation (150 it) | 0.020 / 0.014 | 0.022 |
-| ITER FB-cut 0.997 v2 (gs_free P3 L2, 15.52 MA), r0 | 0.94 / 0.085 | 0.61 |
-| ITER ±15 mm R, ±15 mm Z | 0.95–1.17 / 0.085–0.094 | 0.42–0.60 |
-| ITER +2 % elongation (150 it) | 8.4 / 1.1 | 11.9 (not converged) |
 
-ITER runs: 219k unknowns, about 100 s for 40 iterations on 16 threads.
+Device free-boundary states, their mode probes and RMP ladders run against
+data outside the repository.
 
-- The ITER r0 distance is the map-lane/ψ-lane discretisation difference,
-  largest near the X-point side of the 0.997 cut. All four R/Z offsets return
-  to the r0 state within about 0.2 mm.
-- Rigid stiffness on ITER: K_R = +2.5e8 and K_Z = −5.4e6 J/m² per period,
-  vertically unstable with fixed currents.
-- The circulation from the 2D field matches −μ0 I_p to 1e-6, and the vacuum
-  shell field matches the 2D field to 7e-4 (relative L2).
+## Solver revision (2026-10-13)
 
-Historical mode probe (`stability=.true.`, shifted inverse iteration on the
-Schur complement, metric |diag H|) at the ITER r0 state. [V] The n > 0 result
-below used an incomplete real-phase block and is superseded by the
-[harmonic-pair audit](#harmonic-pair-stability-audit):
-
-- n = 0: negative eigenvalues down to −3.9e-7 (the vertical mode);
-- n = 3: none negative for shifts 0 … −0.1, smallest +3.7e-5.
-
-DCON reports this FB-cut state n = 3 unstable without a wall (−0.097). The
-historical comparison does not establish disagreement between the physical
-models: the MILCA probe omitted the sine partner. [H] Resolution of the
-edge-current drive and differences between the supplied equilibria still need
-the corrected resolution ladder.
-
-RMP stage. The ELM coils (bl2, R ≈ 7.7–8.7 m) lie inside the P12 coupling
-ellipse, which violates the formulation (coils must be outside Γ_c). The first
-scan used that ellipse and is invalid. `gamma_c_scale = 1.08` (the 2D boundary
-scaled about the axis, 0.31 m coil clearance) is the RMP setting.
-
-FB-taper(0.997, w = 0.0228), the adopted stable family. Reference: MILCA 2D
-`milca_fbtaper0997_w023n_fwdref_20261013_01/cases/fwd_p3_l3`.
-
-- Resolution limits accuracy and convergence. With 128 chain and 192 Γ_c
-  nodes, r0 sits 1.77 mm (max) from the 2D boundary and Newton creeps at
-  2e-5 σV. With 256 and 384 nodes (863k unknowns, 8 min on 32 threads) it sits
-  0.066 mm max / 6 µm rms, with surface defect 0.03 mm.
-- At 128/192, the ±15 mm R and +15 mm Z starts return to the r0 state (≈ 1.9
-  mm max, 0.17 mm rms). −15 mm Z and +2 % elongation are not converged.
-- Historical n = 3 cosine-only probe: smallest eigenvalue +3.7e-5; this
-  does not establish stability (DCON +0.206).
-- The RMP ladder (0.25 … 0.005 × 90 kAt, Γ_c = 1.08 × LCFS, coil clearance
-  0.31 m) at 128/192 is not converged (merit ratio 0.05–0.9 after 60
-  iterations). Response/amplitude is 8.2e-3 m at 0.25 and a noisy
-  2.9–5.1e-3 m below. The small-amplitude limit must be rerun at 256/384
-  (about 2.6M unknowns at N = 1).
-
-## Solver revision (2026-10-13, FB-taper at 256/384 nodes)
-
-Where the iterations went, and the fixes:
+Where the iterations of a device free-boundary run went, and the fixes:
 
 1. **Tangential continuum null.** The position gauge still has one null family
    at n = 0: tangential flow on each surface weighted by 1/B_φ, which keeps
    the surfaces, the poloidal flux and the toroidal-flux 2-form. Newton
-   directions of 2–7 cm along it were cut back to about 1 mm.
+   directions along it were cut back by the line search.
    - Fix: `tangential_damping` adds μ_t |H| t tᵀ to the plasma node blocks of
      the Newton matrix only (the gradient is untouched, so the equilibrium is
      unchanged).
-   - μ_t = 1e-7 lies below the vertical eigenvalue (about 4e-7 in this metric);
-     the ±15 mm Z starts still return.
-   - Effect on r0: residual 1.0e-6 → 3.1e-9 σV in 40 iterations; Γ_p distance
-     6.9e-5 m either way.
+   - μ_t lies below the vertical eigenvalue in this metric, so the offset
+     Z starts still return.
 2. **Toroidal-field-scale mesh-motion rows.** The shell-map rows carry
    toroidal-field-scale forces on shell nodes that the multipliers absorb
    exactly. Their O(ε²) change after an RMP step outweighed the whole linear
@@ -217,55 +168,28 @@ Where the iterations went, and the fixes:
      trial step λ is re-solved, those rows are zero, and the Γ_p plasma rows
      carry the corrected boundary force.
 3. **One MUMPS handle with `sparse_refactor`** (fortsparse 7300414): the
-   analysis is kept on 39 of 40 factorisations. Per iteration at 863k
-   unknowns, N = 0: assembly 2.2 s, factor+solve 2.6 s; the line search is
-   negligible. The first try of each later Newton step is FGMRES on the
+   analysis is kept across factorisations. The first try of each later Newton step is FGMRES on the
    current KKT matrix preconditioned by the previous factor (relative
-   residual 1e-10 within 20 iterations, else refactorise); on the NL-3a
-   +15 mm return start this takes SuperLU from 5 to 3 factorisations.
+   residual 1e-10 within 20 iterations, else refactorise).
 4. **Restart and the ε → 0 limit.** `save_state`/`load_state` restart from a
    converged axisymmetric state. `linear_response` makes one exact Newton step
    restricted to n ≠ 0; at an axisymmetric state that is the exact ε → 0 limit
    of this discrete system.
 5. **Γ_c for in-vessel coils.** `gamma_c_scale` and `gamma_c_modes` give a
    scaled 2D boundary with low-pass Fourier smoothing; the driver checks coil
-   clearance and plasma margin. The production setting is 1.10 with M = 12:
-   coil clearance 0.27 m, plasma margin 0.18 m. Pass `max_area` explicitly so
+   clearance and plasma margin. Pass `max_area` explicitly so
    the plasma mesh does not follow the Γ_c spacing.
 
-FB-taper 0.997 results (fwd_p3_l3 reference, 256/384, μ_t = 1e-7):
+Device-state results of these fixes run against data outside the repository.
+Two options remain:
 
-- N = 0: r0 6.9e-5 m (max) / 5.9e-6 m (rms) from the 2D boundary.
-- ±15 mm Z starts return to 7.1e-5 / 6.9e-5 m.
-- RMP n = 3 ladder (bl2, phasing (0,0,0), restarted from the converged base):
-  Γ_p normal amplitude per unit scale (90 kAt = 1) is 1.449e-2, 1.464e-2,
-  1.466e-2, 1.472e-2, 1.468e-2 and 1.484e-2 m at 0.25, 0.1, 0.05, 0.02, 0.01
-  and 0.005. The ε → 0 limit (linearised step) is 1.511e-2 m. Residuals are
-  4–7e-8 σV after 40 iterations.
-- The 0.25 point is 1.4 % below the small-amplitude values (finite-amplitude
-  physics, reported separately). The remaining 2 % gap at the smallest scales
-  sits at the N = 0 floor, where the vertical position still creeps by about
-  2e-5 m per step.
 - `rigid_vertical = .true.` applies dZ = -F_Z/K_Z (rigid n = 0 Z shift,
   K_Z from `ideal_fb_rigid_stiffness`, shell map, vacuum and multipliers
-  re-solved) after every accepted step, kept only if the merit decreases. On
-  the base state F_Z = -9 J/m and K_Z = -5.2e6 J/m^2 give dZ = -1.7e-6 m, which
-  the merit rejects; the Gamma_p mean Z still creeps by +9.5e-6 m per step
-  against that sign. The creep is therefore not the rigid vertical mode but a
-  soft shape/gauge direction; the rigid correction is a no-op there.
+  re-solved) after every accepted step, kept only if the merit decreases.
 - **Poloidal-slide gauge (`tangential_gauge`; historical, removed from the
-  code on 2026-10-19, see below).** Over the 40-iteration ladder
-  the Γ_p shape was fixed (normal change 0.26 µm rms) while the nodes slid
-  along it (tangential rms 0.5 mm, mean 0.7 mm), and the n = 3 tangential
-  content was still converging; the slow decay (0.6 % per step) is the
-  λ/(λ + μ_t) relaxation of that null. With `tangential_gauge = 100` the n = 0
+  code on 2026-10-19, see below).** With `tangential_gauge = 100` the n = 0
   tangential component of every plasma node is penalised in the Newton matrix
-  and removed from the gradient of the merit. Result (rigid_vertical, restart
-  from the converged base): s = 0.01 gives 1.51144e-2 m per unit scale against
-  the linear limit 1.51140e-2 m (3e-5 relative, 54 iterations, residual
-  9.7e-13 σV); s = 0.05 gives 1.50206e-2 m (-0.6 %, finite amplitude, 50
-  iterations, 9.1e-13 σV). The old 2–4 % gap (1.4685e-2 at 40 iterations)
-  was the gauge slide.
+  and removed from the gradient of the merit.
 - The merit with the gauge projected out is nearly blind to the near-null
   vertical mode (a 15 mm Z start converged at iteration 1 with the base
   stopping rule). With `rigid_vertical` and the gauge the solve is therefore
@@ -589,14 +513,14 @@ has positive energy (about +0.235 C at R/a = 160). This provides a concrete
 counterexample to the old phase restriction. The q = 1.5 check concerns the
 named rigid displacement; it is not a full-spectrum stability claim.
 
-### ITER and DCON comparison limits
+### DCON comparison limits
 
-[V] The original DCON FB-cut output reports plasma -0.2374, vacuum +0.1399,
-total -0.09743 (imaginary part 1.21e-5). Its input has `wall = .false.`.
+[V] DCON's free-boundary output for a device state reports plasma, vacuum and
+total energies. Its input has `wall = .false.`.
 DCON constructs W_T = W_P + W_V in `dcon/free.f`, normalizes boundary response
 vectors with `jmat/v1`, and contracts both matrices with the same eigenvector.
 It does not use a volume kinetic-energy norm. MILCA uses |diag H|, so the
-magnitudes -0.09743 and a MILCA Rayleigh quotient cannot be compared directly.
+DCON energies and a MILCA Rayleigh quotient cannot be compared directly.
 The MILCA ledger prints raw plasma, vacuum, exterior, constraint and total
 half-quadratic forms for the same converged vector. Exterior is the negative
 potential co-energy trace term; vacuum includes it and shell geometry work.
@@ -607,17 +531,17 @@ Gamma_c is a transparent coupling surface, not a perfectly conducting wall.
 an explicit incompressibility constraint or mass-density operator. The
 cylinder displacement above is incompressible, so its comparison does not
 rely on interpreting gamma = 0 as incompressibility. [H] Equivalence of the
-full ITER regular displacement space and DCON's minimized singular-surface
+full regular displacement space of a device case and DCON's minimized singular-surface
 response space needs a separate comparison on matched equilibrium data and
 the same boundary displacement. The 2D MILCA re-solve and the imported DCON
-state must not be assumed identical merely because both are called FB-cut.
+state must not be assumed identical merely because both share a name.
 
 [V] FB-D2 relates physical Morse index to bordered KKT inertia only under
 vacuum-block negativity and full rank of the constraints plus slide rows.
 `ideal_fb_hypotheses` tests these numerically on small states; the shifted
-probe does not establish either hypothesis or an inertia count at ITER size.
+probe does not establish either hypothesis or an inertia count at device size.
 The verified error is in the old MILCA stability inference. [H] The corrected
-ITER n = 3 sign, term parity on matched vectors and resolution convergence
+device n = 3 sign, term parity on matched vectors and resolution convergence
 remain pending cluster evidence; no defect in DCON is established here.
 
 ## Harmonic inertia and near-zero Schur probes

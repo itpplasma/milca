@@ -285,7 +285,7 @@ events in a norm where those operations are continuous. The fixed-source
 energy norm alone does not do this. In particular, zero moment residuals do
 not control the off-moment q profile; its independent defect remains necessary.
 No such continuous coupled inverse constant is supplied by the current code
-or the E1/E2/device case finite-reference effectivity measurements.
+or the finite-reference effectivity measurements.
 
 ## Native exact controls
 
