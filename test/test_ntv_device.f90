@@ -28,45 +28,45 @@ program test_ntv_device
     integer :: failures = 0
     character(32) :: only
 
-    ! The coupled finite-width kernel takes minutes: a test of its own.
+    ! Each check is a test case of its own, so none runs for minutes; no
+    ! argument runs them all.
     only = ''
     if (command_argument_count() > 0) call get_command_argument(1, only)
-    if (only == 'orbit_width_slow_node') then
-        call orbit_width_slow_node()
-        if (failures > 0) error stop 'FAIL'
-        print '(a)', 'All tests passed!'
-        stop
-    end if
-    if (only == 'orbit_width_edge_node') then
-        call orbit_width_edge_node()
-        if (failures > 0) error stop 'FAIL'
-        print '(a)', 'All tests passed!'
-        stop
-    end if
-    if (only == 'chart_invariance') then
-        call chart_invariance()
-        if (failures > 0) error stop 'FAIL'
-        print '(a)', 'All tests passed!'
-        stop
-    end if
-    if (only == 'orbit_width_coupled') then
-        call orbit_width_coupled()
-        if (failures > 0) error stop 'FAIL'
-        print '(a)', 'All tests passed!'
-        stop
-    end if
-    call lorentz_limit()
-    call preconditioned_sweep()
-    call energy_coupled()
-    call offset_rotation()
-    call failed_surface()
-    call force_balance()
-    call indicators()
-    call hp_thin_matches_legendre()
-    call hp_adaptive()
-    call orbit_width_thin()
-    call orbit_width_lost()
-    call orbit_width_deposit()
+    select case (only)
+    case ('orbit_width_slow_node'); call orbit_width_slow_node()
+    case ('orbit_width_edge_node'); call orbit_width_edge_node()
+    case ('chart_invariance'); call chart_invariance()
+    case ('orbit_width_coupled'); call orbit_width_coupled()
+    case ('lorentz_limit'); call lorentz_limit()
+    case ('preconditioned_sweep'); call preconditioned_sweep()
+    case ('energy_coupled'); call energy_coupled()
+    case ('offset_rotation'); call offset_rotation()
+    case ('failed_surface'); call failed_surface()
+    case ('force_balance'); call force_balance()
+    case ('indicators'); call indicators()
+    case ('hp_thin_matches_legendre'); call hp_thin_matches_legendre()
+    case ('hp_adaptive'); call hp_adaptive()
+    case ('orbit_width_thin'); call orbit_width_thin()
+    case ('orbit_width_lost'); call orbit_width_lost()
+    case ('orbit_width_deposit_thin'); call orbit_width_deposit(1)
+    case ('orbit_width_deposit_adaptive'); call orbit_width_deposit(2)
+    case ('orbit_width_deposit_narrow'); call orbit_width_deposit(3)
+    case ('')
+        call lorentz_limit()
+        call preconditioned_sweep()
+        call energy_coupled()
+        call offset_rotation()
+        call failed_surface()
+        call force_balance()
+        call indicators()
+        call hp_thin_matches_legendre()
+        call hp_adaptive()
+        call orbit_width_thin()
+        call orbit_width_lost()
+        call orbit_width_deposit(0)
+    case default
+        error stop 'unknown check'
+    end select
     if (failures > 0) error stop 'FAIL'
     print '(a)', 'All tests passed!'
 
@@ -637,18 +637,24 @@ contains
     !> on fixed nodes and on adaptive panels alike. Thin orbits (temperature
     !> scaled down) stay on their surface: the real-space profile is then the
     !> psi* profile; physical orbits leave a narrow bin around it.
-    subroutine orbit_width_deposit()
-        character(*), parameter :: eq_name = 'ntv_dep_eq.bc', pert_name = 'ntv_dep_pert.bc'
+    subroutine orbit_width_deposit(part)
+        ! part 1: thin orbits, 2: adaptive energy panels, 3: narrow bins,
+        ! 0: all three.
+        integer, intent(in) :: part
+        character(16) :: eq_name, pert_name
         type(boozer_file_t), target :: eq, pert
         type(ntv_species_t) :: sp(1)
         type(ntv_profile_t) :: prof
         type(ntv_resolution_t) :: res
         type(ntv_species_result_t), allocatable :: out(:, :)
         integer :: status, i
-        call write_file(eq_name, .false.)
-        call write_file(pert_name, .true.)
-        call load_boozer_file(eq_name, eq, status)
-        call load_boozer_file(pert_name, pert, status)
+        ! Own files per part: the parts run as concurrent test cases.
+        write (eq_name, '(a,i0,a)') 'ntv_dep', part, '_eq.bc'
+        write (pert_name, '(a,i0,a)') 'ntv_dep', part, '_pert.bc'
+        call write_file(trim(eq_name), .false.)
+        call write_file(trim(pert_name), .true.)
+        call load_boozer_file(trim(eq_name), eq, status)
+        call load_boozer_file(trim(pert_name), pert, status)
         sp(1) = ntv_species_t(1.0_dp, 3.3435837768e-27_dp)
         prof%s = [0.45_dp, 0.5_dp, 0.55_dp]
         allocate (prof%density(3, 1), prof%temperature(3, 1), prof%density_s(3, 1), &
@@ -662,28 +668,33 @@ contains
         res%hp_columns = 16
         res%hp_rows = 6
         call deposit_profile(prof, 1e-4_dp)
-        call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
-        call check('thin deposit profile', status == DEVICE_OK)
-        if (failures > 0) return
-        do i = 1, 3
-            call check('deposit has a bin per surface', allocated(out(i, 1)%deposit))
+        if (part == 0 .or. part == 1) then
+            call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+            call check('thin deposit profile', status == DEVICE_OK)
             if (failures > 0) return
-            call close_to('deposit sums to the torque', sum(out(i, 1)%deposit), &
-                out(i, 1)%torque, 1e-12_dp)
-            call close_to('thin orbits deposit on their surface', out(i, 1)%deposit(i), &
-                out(i, 1)%torque, 1e-12_dp)
-            call close_to('thin orbits: real space is psi*', out(i, 1)%torque_real, &
-                out(i, 1)%torque, 1e-12_dp)
-        end do
-        ! Adaptive energy panels deposit the same way.
-        res%x_tol = 0.3_dp
-        call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
-        call check('adaptive deposit profile', status == DEVICE_OK)
-        if (failures > 0) return
-        do i = 1, 3
-            call close_to('adaptive deposit sums to the torque', sum(out(i, 1)%deposit), &
-                out(i, 1)%torque, 1e-12_dp)
-        end do
+            do i = 1, 3
+                call check('deposit has a bin per surface', allocated(out(i, 1)%deposit))
+                if (failures > 0) return
+                call close_to('deposit sums to the torque', sum(out(i, 1)%deposit), &
+                    out(i, 1)%torque, 1e-12_dp)
+                call close_to('thin orbits deposit on their surface', out(i, 1)%deposit(i), &
+                    out(i, 1)%torque, 1e-12_dp)
+                call close_to('thin orbits: real space is psi*', out(i, 1)%torque_real, &
+                    out(i, 1)%torque, 1e-12_dp)
+            end do
+        end if
+        if (part == 0 .or. part == 2) then
+            ! Adaptive energy panels deposit the same way.
+            res%x_tol = 0.3_dp
+            call ntv_device_profile(eq, pert, 3, sp, prof, res, out, status)
+            call check('adaptive deposit profile', status == DEVICE_OK)
+            if (failures > 0) return
+            do i = 1, 3
+                call close_to('adaptive deposit sums to the torque', sum(out(i, 1)%deposit), &
+                    out(i, 1)%torque, 1e-12_dp)
+            end do
+        end if
+        if (part /= 0 .and. part /= 3) return
         ! Physical orbits of the middle surface in bins of +-1e-3 around it.
         res%x_tol = 0
         prof%s = [0.5_dp]
