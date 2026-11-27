@@ -1086,18 +1086,20 @@ contains
         integer(int64) :: begin, finish, rate
         if (degree < 4) error stop 'shapedho needs degree >= 4'
         ! Meshes n, 2n, 4n with the error above the Newton floor. A relative
-        ! gradient of 1e-7 leaves an exact-flux error of about 2e-7, above the
-        ! 1.5e-8 that degree 5 reaches at n = 64, so degree 5 solves to 1e-9
-        ! (1e-10 stalls on the near-null relabelling directions).
+        ! gradient of 1e-7 leaves an exact-flux error of about 2e-7 (the end
+        ! point in the near-null relabelling valley), above the 1.5e-8 that
+        ! degree 5 reaches at n = 64. That mesh alone solves to 1e-9; on the
+        ! coarse meshes, far above the floor, 1e-9 can stall in the valley.
         base = merge(24, merge(16, 12, degree == 5), degree == 4)
         if (degree == 6) base = 8
         ! Degree 7 underintegrates the energy of degree >= 4 maps: Newton then
         ! exploits J ~ 0 between quadrature points. Take 2k + 1.
         if (command_argument_count() < 4) quadrature_order = 2*degree + 1
-        solve_tolerance = merge(1.0e-9_dp, 1.0e-7_dp, degree == 5)
+        solve_tolerance = 1.0e-7_dp
         print '(a)', 'case k n dof newton wall_s d3D_exact seed'
         do mesh = 1, 3
             n = base*2**(mesh - 1)
+            if (degree == 5 .and. mesh == 3) solve_tolerance = 1.0e-9_dp
             call make_mesh(n, degree, gs)
             call system_clock(begin, rate)
             call build_map(gs, 1, 0, map, field)
