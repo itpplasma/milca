@@ -64,4 +64,7 @@ MILCA_FM3_VMEC="$MILCA_DATA_DIR/benchmarks/flux-map-standard/li383/work/wout_li3
 `vmec_iota_scale.py` (VMEC++ with a scaled transform),
 `hessian_toroidal_content.py` (lowest Hessian modes and their toroidal
 harmonics), `harmonic_map_check.py` (the harmonic map in numpy, independent
-of the Fortran implementation). Measured numbers: `docs/flux-map.md`.
+of the Fortran implementation), `desc_reference.py` and
+`gvec_reference.py` (third-code references of a prescribed-iota deck as a
+resolution ladder, written in the layout of `make_reference.py` through
+`refio.py`; DESC 0.17.4 and GVEC 1.5.0). Measured numbers: `docs/flux-map.md`.
