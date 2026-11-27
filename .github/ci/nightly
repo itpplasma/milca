@@ -1,8 +1,13 @@
 #!/bin/sh
-# Nightly run: every test, the slow ones included, run again. The log ends
-# with the slowest tests, which survive when the server cuts the middle of a
-# long log.
+# Nightly run: every test, the slow ones included, run again. The workflow
+# splits it over parallel jobs and sets CI_SHARD=K/N, and this job runs part K,
+# balanced by the tests' declared TIMEOUT times PROCESSORS. The log ends with
+# the slowest tests, which survive when the server cuts the middle of a long
+# log.
 set -eu
 export OPENBLAS_NUM_THREADS=1 MPLBACKEND=Agg FO_TEST_RERUN=1
 fo build
+if [ -n "${CI_SHARD:-}" ]; then
+    exec fo test --all --durations 60 --partition "cost:$CI_SHARD"
+fi
 exec fo test --all --durations 60
