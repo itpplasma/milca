@@ -1,5 +1,5 @@
 #!/bin/sh
-# Landing check on fortyard: build everything, then run the tests the landed
+# Merge-queue check: build everything, then run the tests the landed
 # change affects, fo test --since its base. A changed source selects its
 # users; a moved dependency pin selects the users of what the dependency
 # changed between the pins; an edit that only registers tests selects those;

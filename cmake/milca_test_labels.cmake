@@ -1167,7 +1167,7 @@ milca_test_labels(eulerian_clebsch_free_boundary_3d_exterior slow CLASSES equili
 
 # A landing waits for the tests it affects, so those stay under a minute; a
 # longer test runs nightly, where a failure is bisected to its change. Each
-# test here took over 60 s in the fortyard nightly of 2026-11-25.
+# test here took over 60 s in the nightly run of 2026-11-25.
 foreach(test eulerian_clebsch_landreman_newton_gate_e4 label_ale_3d_gate_a1
         vrmhd_harmonics_mixed_decoupling vrmhd_stationary_solve
         vrmhd_fourier_nonlinear_manufactured_equal vrmhd_section_mixed_mms_p2
