@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
+# fo and plain `cmake -S . -B build` configure without a build type, which
+# compiles without optimisation; milca is validated as Release (CMakePresets).
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 project(milca LANGUAGES Fortran C)
 
 # gfortran < 13 mis-optimizes an allocatable left-hand side of `x = matmul(...)`
