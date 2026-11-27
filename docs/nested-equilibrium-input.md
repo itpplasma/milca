@@ -30,6 +30,7 @@ this namelist from GVEC, DESC, SPECTRE and VMEC inputs
 | `angle_mpol` | poloidal modes of the boundary field-line angle; -1 pins the boundary angle | -1 |
 | `tolerance`, `max_iterations` | free reduced-gradient reduction and Newton limit per level | 1e-8, 200 |
 | `stationary` | solve for a stationary point at fixed boundary and prescribed rotational transform | false |
+| `chart` | `cylindrical`: the map in (R, Z, phi); `deck`: the curve chart along the boundary's m = 0 curve ([chart](#chart)) | `cylindrical` |
 | `prescribe_current` | match the enclosed toroidal current `current(k)` (A, coefficients of s^k) instead of keeping `iota` | false |
 | `max_current_iterations`, `current_tolerance` | Newton steps on iota and the largest iota increment of the last step; with automatic resolution at most a tenth of the active `fourier_tolerance`, `mesh_tolerance` and `iota_tolerance` | 30, 1e-5 |
 | `iota_nodes`, `iota_tolerance` | Chebyshev-Gauss surfaces of the matched iota polynomial, 2 to 32, or -1 to raise them from 6 under error control | -1, 1e-4 |
@@ -112,6 +113,34 @@ mesh ladder runs first at the boundary's modes, then the toroidal ladder and
 the iota-node ladder, and the active ladders alternate until each is met by
 its first refinement. Axisymmetric data
 (`ntor = 0`) keep `map_ntor = 0`.
+
+## Chart
+
+`chart = 'deck'` solves the map in the curve chart of `milca_deck_chart`
+([ideal-map-3d](ideal-map-3d.md#curve-chart-fourier-axis-and-projected-guide-g-frame)):
+the guide curve is the boundary's m = 0 curve, and the boundary is
+converted to the chart's normal-plane coordinates in the sense of the
+input's theta, with 32 poloidal modes and the map's toroidal modes. On a
+helical boundary the sections then stay centred, but the frame turns with
+the curve, so the map needs more toroidal modes than in the cylindrical
+chart. The volume, wb, raxis and ctor are evaluated through the chart jet.
+The deck chart takes a fixed boundary and prescribed iota, and
+`MILCA_NESTED_EXPORT` needs the cylindrical chart.
+
+Both charts on the helical ellipse of
+`examples/nested-equilibrium/helical-ellipse.nml` (nfp 5, 0.13 m x 0.16 m
+section on a 5 cm helix, 24 boundary nodes, degree 3, `angle_mpol = 4`):
+
+| Chart | `map_ntor` | raxis (m) | wb (T^2 m^3) | ctor (A) |
+|---|---|---|---|---|
+| cylindrical | 3 | 0.7834800 | 1.2632465e-3 | 30757 |
+| deck | 3 | 0.7834799 | 1.2632559e-3 | 30257 |
+| deck | 6 | 0.7834799 | 1.2632533e-3 | 30761 |
+| deck | 8 | 0.7834799 | 1.2632533e-3 | 30759 |
+
+The test `equilibrium_nested_deck-chart` checks the deck chart at 12 nodes
+against the cylindrical chart within the tolerances of
+`test_nested_equilibrium_app`.
 
 With `stationary = .true.`, the Newton step solves \(H d = -g\), where
 \(H\) is the undamped Hessian and \(g\) is the free energy gradient. The

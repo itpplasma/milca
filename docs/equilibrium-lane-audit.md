@@ -66,7 +66,7 @@ includes a realistic ratio B_φ/B_pol (≥ 10), a low-shear case and degree
 - Measured weaknesses: 70–150 times the time of VMEC++ at equal accuracy in
   3D fixed boundary (4.17 s against 0.028 s at 2,300 coefficients), memory
   like ntor², shell folds on CTH-like and DIII-D decks (the axis-following
-  chart `milca_deck_chart` exists and is not wired in), 3D stalls traced to
+  chart `milca_deck_chart` serves the fixed boundary only), 3D stalls traced to
   globalisation of the shell map.
 
 ## 4. What is specific to a representation

@@ -12,7 +12,7 @@ module milca_ideal_seed_3d
         ideal_map_angle_value
     use milca_ideal_map_leaves, only: ideal_reference_form
     use milca_ideal_field_angle_leaves, only: field_angle_form
-    use milca_equilibrium_chart, only: cylindrical_chart_t
+    use milca_equilibrium_chart, only: ideal_chart_t, cylindrical_chart_t
     use milca_triangle_basis, only: TRIANGLE_MAX_DEGREE
     use milca_grad_shafranov, only: gs_state_t, initialize_gs
     use milca_winslow_seed, only: winslow_seed, WINSLOW_OK, WINSLOW_NOT_SIMPLE
@@ -300,7 +300,7 @@ contains
     end subroutine
 
     subroutine ideal_seed_3d_init(map, seed, mesh, coefficients, nfp, flux, &
-            profile, status, nphi, angle_mpol, angle_ntor, axis, winslow)
+            profile, status, nphi, angle_mpol, angle_ntor, axis, winslow, chart)
         type(ideal_map_t), intent(out) :: map
         type(toroidal_seed_t), intent(out) :: seed
         type(gs_state_t), intent(in) :: mesh
@@ -320,7 +320,10 @@ contains
         ! Interior of every toroidal plane from the Winslow map of its
         ! cross-section (milca_winslow_seed) instead of the harmonic extension.
         logical, intent(in), optional :: winslow
-        type(cylindrical_chart_t) :: chart
+        ! Chart of the coefficients (default: cylindrical, (R, Z)); a curve
+        ! chart takes them in its normal-plane coordinates (milca_deck_chart).
+        class(ideal_chart_t), intent(in), optional :: chart
+        type(cylindrical_chart_t) :: cylinder
         real(dp) :: iota, pressure, integral, previous, energy, minimum_radius
         integer :: a, m, j, ntor, angles
         status = IDEAL_MAP_BAD_INPUT
@@ -347,7 +350,11 @@ contains
         ntor = (size(coefficients, 2) - 1)/2
         angles = max(1, 4*ntor + 1)
         if (present(nphi)) angles = nphi
-        call ideal_map_init(map, mesh, chart, nfp, ntor, status, nphi=angles)
+        if (present(chart)) then
+            call ideal_map_init(map, mesh, chart, nfp, ntor, status, nphi=angles)
+        else
+            call ideal_map_init(map, mesh, cylinder, nfp, ntor, status, nphi=angles)
+        end if
         if (status /= IDEAL_MAP_OK) return
         seed%profile = profile; seed%flux = flux
         ! A fixed physical toroidal coordinate admits both R/Z increments.
@@ -382,11 +389,15 @@ contains
                 end if
             end if
         end if
-        do a = 1, map%nodes
-            do j = 1, map%nphi
-                minimum_radius = min(minimum_radius, dot_product(map%x(1, :, a), map%trig(:, j)))
+        ! q1 is the major radius only in the cylindrical chart
+        select type (c => map%chart)
+        type is (cylindrical_chart_t)
+            do a = 1, map%nodes
+                do j = 1, map%nphi
+                    minimum_radius = min(minimum_radius, dot_product(map%x(1, :, a), map%trig(:, j)))
+                end do
             end do
-        end do
+        end select
         if (.not. minimum_radius>0) then
             status=IDEAL_MAP_BAD_INPUT
             return
