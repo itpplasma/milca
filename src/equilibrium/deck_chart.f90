@@ -76,8 +76,10 @@ contains
         !! in (alpha, phi-hat) to qb(1:4, n, m) (the layout of boundary with
         !! (q1, q2) in place of (R, Z)), m <= mpol_out, |n| <= ntor_out (the
         !! frame turns with the curve, so the chart sections need more toroidal
-        !! modes than the input). status 1 when a point
-        !! of the surface does not cross a normal plane near its own plane.
+        !! modes than the input). The angle runs in the sense of the input's
+        !! theta, so a field line rotates the same way in space in both
+        !! descriptions. status 1 when a point of the surface does not cross a
+        !! normal plane near its own plane.
         integer, intent(in) :: ntor, nfp, mpol_out, ntor_out
         real(dp), intent(in) :: boundary(:, -ntor:, 0:)
         type(curve_chart_t), intent(in) :: chart
@@ -88,12 +90,13 @@ contains
         real(dp) :: ph, th, f, df, x0(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3), &
                     nrm(3), p(3), dp3(3), q(2), w, arg, target, phase
         real(dp), allocatable :: qs(:, :, :), al(:), qq(:, :), resampled(:, :, :), ph0(:)
+        logical, allocatable :: reversed(:)
 
         status = 1
         mpol = ubound(boundary, 3)
         nphi = max(1, 4*ntor_out + 1)
         allocate (qs(2, nth + 1, nphi), al(nth + 1), qq(2, nth + 1), &
-                  resampled(2, nth, nphi), ph0(nphi))
+                  resampled(2, nth, nphi), ph0(nphi), reversed(nphi))
         do j = 1, nphi
             ph = 2*pi*(j - 1)/(nphi*nfp)
             call chart%jet([0.0_dp, 0.0_dp, ph], x0, d1, d2, d3)
@@ -123,7 +126,8 @@ contains
             do i = 2, nth
                 al(i) = al(i) + 2*pi*nint((al(i - 1) - al(i))/(2*pi))
             end do
-            if (al(nth) < al(1)) then
+            reversed(j) = al(nth) < al(1)
+            if (reversed(j)) then
                 ! clockwise in (q1, q2): reverse
                 al(1:nth) = al(nth:1:-1)
                 qs(:, 1:nth, j) = qs(:, nth:1:-1, j)
@@ -141,6 +145,7 @@ contains
             end do
             ph0(j) = al(1)
         end do
+        if (any(reversed .neqv. reversed(1))) return
         allocate (qb(4, -ntor_out:ntor_out, 0:mpol_out), source=0.0_dp)
         do m = 0, mpol_out
             do n = -ntor_out, ntor_out
@@ -159,6 +164,11 @@ contains
                 end do
             end do
         end do
+        if (reversed(1)) then
+            ! theta = -alpha: cos/sin(m alpha - n nfp phi) = cos/-sin(m theta + n nfp phi)
+            qb(:, :, 1:) = qb(:, ntor_out:-ntor_out:-1, 1:)
+            qb([2, 4], :, 1:) = -qb([2, 4], :, 1:)
+        end if
         status = 0
 
     contains

@@ -10,6 +10,17 @@ execute_process(COMMAND "${APP}" --config "${CONFIG}" WORKING_DIRECTORY "${WORK}
 if(NOT status EQUAL 0)
     message(FATAL_ERROR "nested_equilibrium failed: ${output}${errors}")
 endif()
+# REFERENCE: the same equilibrium in another input; its result is the expected one
+if(REFERENCE)
+    file(MAKE_DIRECTORY "${WORK}/reference/output")
+    execute_process(COMMAND "${APP}" --config "${REFERENCE}"
+        WORKING_DIRECTORY "${WORK}/reference"
+        RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+    if(NOT status EQUAL 0)
+        message(FATAL_ERROR "nested_equilibrium (reference) failed: ${output}${errors}")
+    endif()
+    set(EXPECTED "${WORK}/reference/output/nested_equilibrium.nc")
+endif()
 separate_arguments(expected UNIX_COMMAND "${EXPECTED}")
 execute_process(COMMAND "${CHECK}" "${WORK}/output/nested_equilibrium.nc" ${expected}
     RESULT_VARIABLE status OUTPUT_VARIABLE check_output ERROR_VARIABLE errors)

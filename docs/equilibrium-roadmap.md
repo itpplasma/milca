@@ -331,5 +331,5 @@ share goes to P0–P2 and the infrastructure share to P0c.
   the coil ripple of the oracle, free-boundary-nested-map-3d.md, 9.3.)
 - CTH-like decks fold the shell of the cylindrical chart (1.5 cm margin
   against a 4.6 cm helical swing). `milca_deck_chart` builds the
-  axis-following chart from any deck; wiring it into `nested_equilibrium`
-  is not done and is needed for H3.
+  axis-following chart from any deck; `nested_equilibrium` takes it with
+  `chart = 'deck'` in fixed boundary. The free-boundary shell on it is open.

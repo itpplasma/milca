@@ -1540,6 +1540,17 @@ add_test(NAME equilibrium_nested_qi-nfp2-current-free COMMAND ${CMAKE_COMMAND}
 set_tests_properties(equilibrium_nested_qi-nfp2-current-free PROPERTIES
     TIMEOUT 1800 PROCESSORS 8
     ENVIRONMENT "OMP_NUM_THREADS=8;OPENBLAS_NUM_THREADS=1")
+# The helical ellipse in the deck chart against the same deck in the
+# cylindrical chart.
+add_test(NAME equilibrium_nested_deck-chart COMMAND ${CMAKE_COMMAND}
+    -DAPP=$<TARGET_FILE:nested_equilibrium>
+    -DCHECK=$<TARGET_FILE:test_nested_equilibrium_app>
+    -DCONFIG=${CMAKE_SOURCE_DIR}/examples/nested-equilibrium/helical-ellipse-deck-chart.nml
+    -DREFERENCE=${CMAKE_SOURCE_DIR}/examples/nested-equilibrium/helical-ellipse.nml
+    -DWORK=${CMAKE_BINARY_DIR}/nested-equilibrium-deck-chart
+    -P ${CMAKE_SOURCE_DIR}/test/check_nested_equilibrium.cmake)
+set_tests_properties(equilibrium_nested_deck-chart PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4)
 add_executable(pp_fusion_eft_export app/pp_fusion_eft_export.f90)
 add_dependencies(pp_fusion_eft_export milca_build_info)
 target_include_directories(pp_fusion_eft_export PRIVATE ${CMAKE_BINARY_DIR}/result_include)

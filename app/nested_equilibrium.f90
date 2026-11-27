@@ -9,14 +9,17 @@ program nested_equilibrium
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use milca_ideal_seed_3d, only: toroidal_profile_t, toroidal_seed_t, &
-        ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate
+        ideal_seed_3d_init, ideal_seed_disk_mesh, hermite_profile_evaluate, &
+        ideal_seed_3d_angle_density
+    use milca_ideal_map_leaves, only: ideal_point_gradient_jets, &
+        ideal_point_field_gradient_jets
     use milca_ideal_map, only: ideal_map_t, ideal_map_solve, ideal_map_solve_report_t, &
         ideal_map_energy, ideal_map_reduce, ideal_map_prolong, ideal_map_prolong_correction, &
         ideal_map_freeze, ideal_map_sensitivity, IDEAL_MAP_OK
     use milca_map_3d_equilibrium, only: map_3d_coordinates, map_3d_sample
     use milca_map_3d_force, only: map_3d_force, map_3d_force_field
     use milca_flux_map_force, only: flux_map_force_t, flux_map_force_print
-    use milca_equilibrium_state, only: EQ_VALUES, EQ_BR, EQ_BZ, EQ_BPHI, EQ_P
+    use milca_equilibrium_state, only: EQ_VALUES, EQ_BR, EQ_BZ, EQ_BPHI
     use milca_grad_shafranov, only: gs_state_t
     use milca_curved_triangle, only: triangle_locate
     use milca_result_io, only: run_t, result_file_t
@@ -24,7 +27,8 @@ program nested_equilibrium
     use milca_map_3d_loop, only: map_3d_loop_t, map_3d_loop_setup, map_3d_loop_integral
     use fortnum_polynomial, only: lagrange_weights, lagrange_deriv_weights
     use milca_ideal_seed_3d_leaves, only: seed_hermite_profile_jvp
-    use milca_equilibrium_chart, only: cylindrical_chart_t
+    use milca_equilibrium_chart, only: ideal_chart_t, cylindrical_chart_t, curve_chart_t
+    use milca_deck_chart, only: deck_axis_chart, deck_boundary_to_chart
     use milca_ideal_free_boundary, only: step_cap_fraction, fb_prof_seconds, fb_prof_calls, ideal_fb_t, ideal_fb_init, ideal_fb_solve, &
         ideal_fb_report_t, ideal_fb_drive_traces, ideal_fb_set_traces, &
         ideal_fb_gradient, ideal_fb_sensitivity, IDEAL_FB_OK, IDEAL_FB_FOLDED, &
@@ -115,7 +119,15 @@ program nested_equilibrium
     type(mgrid_basis_t) :: coil_basis
     type(filament_basis_t) :: filament
     type(ideal_fb_circuits_t) :: circuits
-    type(cylindrical_chart_t) :: chart
+    type(cylindrical_chart_t) :: cylinder
+    ! Chart of the map: 'cylindrical' (R, Z, phi) or 'deck', the curve chart
+    ! along the boundary's m = 0 curve (milca_deck_chart), whose sections
+    ! stay centred on a helical boundary.
+    character(16) :: chart
+    type(curve_chart_t) :: deck_frame
+    class(ideal_chart_t), allocatable :: map_chart
+    ! poloidal modes of the boundary in the deck chart's geometric angle
+    integer, parameter :: deck_mpol = 32
     real(dp), allocatable :: filament_drive(:, :), filament_load(:, :)
     real(dp) :: fb_centre(2), fb_axes(2), circulation, coil_closure
     real(dp), allocatable :: fb_curve(:), fit_curve(:)
@@ -133,7 +145,7 @@ program nested_equilibrium
         current_type, n_knots, profile_knots, iota_values, iota_slopes, pressure_values, &
         pressure_slopes, current_values, current_slopes, map_ntor, fourier_tolerance, mesh_tolerance, &
         iota_nodes, iota_tolerance, free_boundary, mgrid_file, extcur, mgrid_degree, &
-        coupling_margin, vacuum
+        coupling_margin, vacuum, chart
 
     nfp = 1; mpol = 1; ntor = 0; phiedge = 1
     rbc = 0; rbs = 0; zbc = 0; zbs = 0; iota = 0; pressure = 0
@@ -146,7 +158,7 @@ program nested_equilibrium
     mesh_tolerance = 1e-4_dp
     iota_nodes = -1; iota_tolerance = 1e-4_dp
     free_boundary = .false.; mgrid_file = ''; extcur = 0; mgrid_degree = 5
-    coupling_margin = 0.5_dp; vacuum = 'auto'
+    coupling_margin = 0.5_dp; vacuum = 'auto'; chart = 'cylindrical'
     iota_type = 'power_series'; pressure_type = 'power_series'; current_type = 'power_series'
     n_knots = 0; profile_knots = 0; iota_values = 0; iota_slopes = 0
     pressure_values = 0; pressure_slopes = 0; current_values = 0; current_slopes = 0
@@ -183,6 +195,10 @@ program nested_equilibrium
     split_coils = vacuum == 'split'
     if (free_boundary .and. split_coils .and. (ntor /= 0 .or. map_ntor > 0)) &
         error stop 'nested_equilibrium: vacuum = split needs an axisymmetric deck'
+    if (chart /= 'cylindrical' .and. chart /= 'deck') &
+        error stop 'nested_equilibrium: chart is cylindrical or deck'
+    if (chart == 'deck' .and. (free_boundary .or. prescribe_current)) &
+        error stop 'nested_equilibrium: chart = deck needs a fixed boundary and prescribed iota'
     use_bem = vacuum == 'bem' .or. (vacuum == 'auto' .and. ntor == 0 .and. map_ntor <= 0)
     if (free_boundary .and. use_bem .and. (ntor /= 0 .or. map_ntor > 0)) &
         error stop 'nested_equilibrium: vacuum = bem needs an axisymmetric deck'
@@ -196,6 +212,13 @@ program nested_equilibrium
     boundary_input(2, :, :) = rbs(-ntor:ntor, 0:mpol)
     boundary_input(3, :, :) = zbc(-ntor:ntor, 0:mpol)
     boundary_input(4, :, :) = zbs(-ntor:ntor, 0:mpol)
+    if (chart == 'deck') then
+        call deck_axis_chart(boundary_input, ntor, nfp, deck_frame, status)
+        if (status /= 0) call fail('the chart of the boundary''s m = 0 curve is not admitted')
+        allocate (map_chart, source=deck_frame)
+    else
+        allocate (map_chart, source=cylinder)
+    end if
     profile%iota = iota(0:last(iota))
     ! the solver uses mu0 = 1 pressure units
     profile%pressure = mu0*pressure(0:last(pressure))
@@ -287,6 +310,7 @@ program nested_equilibrium
         .and. (.not. automatic_mesh .or. mesh_error <= mesh_tolerance) &
         .and. (.not. automatic_iota .or. iota_error <= iota_tolerance)
     call result%attribute('converged', merge('true ', 'false', converged))
+    call result%attribute('chart', trim(chart))
     call result%write('volume_p', volume, 'm^3', 'plasma volume')
     call result%write('aminor_p', sqrt(area/pi), 'm', 'sqrt of mean cross-section area / pi')
     call result%write('rmajor_p', volume/(2*pi*area), 'm', 'volume / (2 pi mean area)')
@@ -388,6 +412,10 @@ contains
         integer :: length, u, j, q, l, local, cell
         call get_environment_variable('MILCA_NESTED_EXPORT', dir, length)
         if (length == 0) return
+        if (chart /= 'cylindrical') then
+            print '(a)', 'benchmark: the export samples cylindrical planes, chart = cylindrical only'
+            return
+        end if
         print '(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,f5.1,a,i0,a,i0)', 'benchmark: degree ', degree, &
             '  boundary_nodes ', boundary_nodes, '  map_ntor ', ntor_level, '  cells ', &
             map%cells, '  coefficients ', map%ndof, '  unknowns ', count(.not. map%fixed), &
@@ -848,7 +876,7 @@ contains
             local)
         if (local /= 0) call fail('the free-boundary mesh failed')
         seed%profile = profile
-        call ideal_fb_init(next, mesh, chain, chart, seed, nfp, ntor_level, 0.0_dp, &
+        call ideal_fb_init(next, mesh, chain, cylinder, seed, nfp, ntor_level, 0.0_dp, &
             circulation, local, nphi=max(1, 4*ntor_level + 1))
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
         if (split_coils) then
@@ -884,7 +912,7 @@ contains
         integer :: local
         call fb_nested_plasma_mesh(mesh, fb_centre, fb_axes, nodes, degree, local)
         if (local /= 0) call fail('the plasma mesh failed')
-        call ideal_fb_init_bem(next, mesh, chart, seed, nfp, bem_f_vac, &
+        call ideal_fb_init_bem(next, mesh, cylinder, seed, nfp, bem_f_vac, &
             circulation, coil_flux, degree - 1, local, nphi=1)
         if (local /= IDEAL_FB_OK) call fail('the free-boundary set-up failed')
         if (.not. any(abs(boundary(2:3, :, :)) > 0)) call ideal_fb_fix_vertical(next)
@@ -1286,7 +1314,7 @@ contains
         ! a fold at the volume-integral points of a plane of the energy's
         ! toroidal quadrature
         integer, parameter :: nq = 8
-        real(dp) :: x(nq), w(nq), xi(2), point(3), values(EQ_VALUES)
+        real(dp) :: x(nq), w(nq), xi(2), jac, magnetic, pressure, radius, along
         integer :: e, i, j, k, local
         call gauss_legendre(nq, x, w)
         x = (x + 1)/2
@@ -1296,7 +1324,8 @@ contains
                 do j = 1, nq
                     do i = 1, nq
                         xi = [x(i)*(1 - x(j)), x(j)]
-                        call map_3d_sample(map, seed, e, xi, map%phi(k), point, values, local)
+                        call chart_point(e, xi, map%phi(k), [0.0_dp, 0.0_dp], jac, magnetic, &
+                            pressure, radius, along, local)
                         if (local /= 0) return
                     end do
                 end do
@@ -1474,7 +1503,15 @@ contains
     subroutine set_toroidal_level(modes)
         ! boundary padded with zero coefficients up to the map's modes
         integer, intent(in) :: modes
+        integer :: local
         if (allocated(boundary)) deallocate (boundary)
+        if (chart == 'deck') then
+            ! the frame turns with the curve: the sections need the map's modes
+            call deck_boundary_to_chart(boundary_input, ntor, nfp, deck_frame, deck_mpol, &
+                modes, boundary, local)
+            if (local /= 0) call fail('the boundary does not convert to the deck chart')
+            return
+        end if
         allocate (boundary(4, -modes:modes, 0:mpol), source=0.0_dp)
         boundary(:, -ntor:ntor, :) = boundary_input
     end subroutine
@@ -1770,10 +1807,10 @@ contains
         ! every plane from the Winslow map of its cross-section
         if (angle_mpol >= 0) then
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
-                status, angle_mpol=angle_mpol, winslow=.true.)
+                status, angle_mpol=angle_mpol, winslow=.true., chart=map_chart)
         else
             call ideal_seed_3d_init(map, seed, mesh, boundary, nfp, phiedge, profile, &
-                status, winslow=.true.)
+                status, winslow=.true., chart=map_chart)
         end if
         call get_environment_variable('MILCA_NESTED_BENCHMARK_LAGGED', lagged, length)
         if (status == 0 .and. length > 0) map%lagged_hessian = lagged == '1'
@@ -1822,21 +1859,49 @@ contains
         end do
     end function
 
+    subroutine chart_point(e, xi, phi, tangent, jac, magnetic, pressure, radius, along, status)
+        ! The solved map at master point xi of cell e and angle phi-hat, in any
+        ! chart: jac = dV/d(xi, phi-hat), magnetic = B^2/2 jac, the pressure,
+        ! the major radius and along = B . dX/dxi tangent. The energy density
+        ! at p = 0 is |DX b|^2/(2 mu0 J) and its b-gradient DX^T B/mu0.
+        integer, intent(in) :: e
+        real(dp), intent(in) :: xi(2), phi, tangent(2)
+        real(dp), intent(out) :: jac, magnetic, pressure, radius, along
+        integer, intent(out) :: status
+        real(dp) :: q(3), d(3, 3), ref(2), g(2, 2), chi, cg(2), b3, dcg(2), db3, b(3), &
+                    pos(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3), gv(12), gb(3)
+        status = 1
+        call map_3d_coordinates(map, e, xi, phi, q, d, ref, g)
+        call seed%evaluate(ref, chi, cg, b3, pressure)
+        call ideal_seed_3d_angle_density(map, seed, ref, phi, dcg, db3)
+        cg = matmul(transpose(g), cg + dcg)
+        b = [-cg(2), cg(1), (b3 + db3)*(g(1, 1)*g(2, 2) - g(1, 2)*g(2, 1))]
+        call map%chart%jet(q, pos, d1, d2, d3)
+        call ideal_point_gradient_jets(d1, d2, d3, d, b, 0.0_dp, map%mu0, map%sigma, &
+            magnetic, jac, gv)
+        call ideal_point_field_gradient_jets(d1, d2, d3, d, b, 0.0_dp, map%mu0, map%sigma, gb)
+        radius = hypot(pos(1), pos(2))
+        along = map%mu0*dot_product(gb(1:2), tangent)
+        if (.not. (jac > 0 .and. radius > 0)) return
+        if (.not. all(ieee_is_finite([magnetic, along]))) return
+        status = 0
+    end subroutine
+
     subroutine integrals(volume, area, magnetic, kinetic, status)
         ! Gauss-Legendre on the collapsed reference triangle and the trapezoidal
         ! rule in phi, exact for the periodic Fourier dependence of the map.
         real(dp), intent(out) :: volume, area, magnetic, kinetic
         integer, intent(out) :: status
         integer, parameter :: nq = 8
-        real(dp) :: x(nq), w(nq), xi(2), weight, q(3), d(3, 3), ref(2), g(2, 2)
-        real(dp) :: point(3), values(EQ_VALUES), phi, jac, sums(4)
+        real(dp) :: x(nq), w(nq), xi(2), weight, phi, jac, sums(4), density, pressure, &
+                    radius, along
         integer :: e, i, j, k, nphi, failed, local
         call gauss_legendre(nq, x, w)
         x = (x + 1)/2; w = w/2
         nphi = max(16, 4*map%ntor + 4)
         sums = 0; failed = 0
         !$omp parallel do collapse(2) schedule(static) &
-        !$omp private(e,i,j,k,xi,weight,phi,q,d,ref,g,point,values,jac,local) &
+        !$omp private(e,i,j,k,xi,weight,phi,jac,density,pressure,radius,along,local) &
         !$omp reduction(+:sums,failed)
         do e = 1, map%cells
             do k = 0, nphi - 1
@@ -1845,16 +1910,11 @@ contains
                     do i = 1, nq
                         xi = [x(i)*(1 - x(j)), x(j)]
                         weight = w(i)*w(j)*(1 - x(j))
-                        call map_3d_coordinates(map, e, xi, phi, q, d, ref, g)
-                        ! dV = R |det dq/d(xi, phi)|; the map also displaces phi
-                        jac = abs(d(1, 1)*(d(2, 2)*d(3, 3) - d(2, 3)*d(3, 2)) &
-                            - d(1, 2)*(d(2, 1)*d(3, 3) - d(2, 3)*d(3, 1)) &
-                            + d(1, 3)*(d(2, 1)*d(3, 2) - d(2, 2)*d(3, 1)))
-                        call map_3d_sample(map, seed, e, xi, phi, point, values, local)
+                        call chart_point(e, xi, phi, [0.0_dp, 0.0_dp], jac, density, &
+                            pressure, radius, along, local)
                         failed = failed + local
-                        sums = sums + weight*[q(1)*jac, jac, &
-                            q(1)*jac*sum(values([EQ_BR, EQ_BZ, EQ_BPHI])**2)/2, &
-                            q(1)*jac*values(EQ_P)]
+                        if (local /= 0) cycle
+                        sums = sums + weight*[jac, jac/radius, density, jac*pressure]
                     end do
                 end do
             end do
@@ -1871,10 +1931,10 @@ contains
         ! toroidal current; Gauss-Legendre on every wall edge
         integer, intent(out) :: status
         integer, parameter :: ng = 8
-        real(dp) :: centre(2), radius(2), xi(2), point(3), values(EQ_VALUES)
+        real(dp) :: centre(2), radius(2), xi(2)
         real(dp) :: corner(2, 3)
-        real(dp) :: x(ng), w(ng), q(3), d(3, 3), ref(2), g(2, 2), tangent(2), along(3)
-        real(dp) :: sense
+        real(dp) :: x(ng), w(ng), q(3), d(3, 3), ref(2), g(2, 2), tangent(2), along
+        real(dp) :: sense, jac, density, pressure, major
         integer :: k, e, local, i, a
         centre = (maxval(map%reference, dim=2) + minval(map%reference, dim=2))/2
         radius = (maxval(map%reference(1, :)) - minval(map%reference(1, :)))/2
@@ -1897,12 +1957,10 @@ contains
                     - (ref(2) - centre(2))*dot_product(g(1, :), tangent))
                 do k = 1, ng
                     xi = corner(:, i) + x(k)*tangent
-                    call map_3d_coordinates(map, e, xi, 0.0_dp, q, d, ref, g)
-                    call map_3d_sample(map, seed, e, xi, 0.0_dp, point, values, local)
+                    call chart_point(e, xi, 0.0_dp, tangent, jac, density, pressure, major, &
+                        along, local)
                     if (local /= 0) return
-                    along = matmul(d(:, 1:2), tangent); along(3) = along(3)*q(1)
-                    edge_current = edge_current + sense*w(k)* &
-                        dot_product(values([EQ_BR, EQ_BZ, EQ_BPHI]), along)
+                    edge_current = edge_current + sense*w(k)*along
                 end do
             end do
         end do
@@ -1915,7 +1973,8 @@ contains
         ! averaged over the cylindrical angle
         real(dp), intent(out) :: raxis
         integer, intent(out) :: status
-        real(dp) :: centre(2), xi(2), q(3), d(3, 3), ref(2), g(2, 2), weight
+        real(dp) :: centre(2), xi(2), q(3), d(3, 3), ref(2), g(2, 2), weight, dphi
+        real(dp) :: pos(3), d1(3, 3), d2(3, 3, 3), d3(3, 3, 3, 3), tangent(3)
         integer :: e, k, nphi, local
         centre = (maxval(map%reference, dim=2) + minval(map%reference, dim=2))/2
         status = 1
@@ -1924,11 +1983,15 @@ contains
             if (local /= 0) cycle
             if (minval([xi, 1 - sum(xi)]) < -1e-10_dp) cycle
             nphi = max(16, 4*map%ntor + 4)
-            ! mean over the cylindrical angle, which the map displaces: dphi_cyl = d(3, 3) dphi
+            ! mean over the cylindrical angle, which the map displaces:
+            ! dphi_cyl/dphi-hat = (X1 dX2 - X2 dX1)/R^2 along the axis
             raxis = 0; weight = 0
             do k = 0, nphi - 1
                 call map_3d_coordinates(map, e, xi, 2*pi*k/(nfp*nphi), q, d, ref, g)
-                raxis = raxis + q(1)*d(3, 3); weight = weight + d(3, 3)
+                call map%chart%jet(q, pos, d1, d2, d3)
+                tangent = matmul(d1, d(:, 3))
+                dphi = (pos(1)*tangent(2) - pos(2)*tangent(1))/(pos(1)**2 + pos(2)**2)
+                raxis = raxis + hypot(pos(1), pos(2))*dphi; weight = weight + dphi
             end do
             raxis = raxis/weight
             status = 0

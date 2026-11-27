@@ -4,7 +4,8 @@ program test_nested_equilibrium_app
     ! to 1.5 mm, the magnetic energy to 2e-5, the volume (when given, > 0) to
     ! 1e-4 and the edge iota (when given) to 1e-3. With RAXIS = failure the
     ! result must instead report converged = false and a failure reason, which
-    ! contains the word given as WB (when given).
+    ! contains the word given as WB (when given). With RAXIS a .nc file, the
+    ! expected values are that result's (the same equilibrium solved otherwise).
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use netcdf, only: nf90_open, nf90_close, nf90_inq_varid, nf90_get_var, &
         nf90_get_att, NF90_NOWRITE, NF90_NOERR, NF90_GLOBAL
@@ -19,7 +20,15 @@ program test_nested_equilibrium_app
     expected = -1
     check_iota = command_argument_count() >= 5
     call get_command_argument(2, arg)
-    if (trim(arg) /= 'failure') then
+    if (len_trim(arg) > 3 .and. index(arg, '.nc') == len_trim(arg) - 2) then
+        if (nf90_open(trim(arg), NF90_NOWRITE, ncid) /= NF90_NOERR) error stop 'open reference'
+        if (nf90_get_att(ncid, NF90_GLOBAL, 'converged', converged) /= NF90_NOERR) &
+            error stop 'reference converged attribute'
+        if (trim(converged) /= 'true') error stop 'reference not converged'
+        expected = [scalar('raxis_cc'), scalar('wb'), scalar('volume_p'), scalar('iotaf_edge')]
+        if (nf90_close(ncid) /= NF90_NOERR) error stop 'close reference'
+        check_iota = .true.
+    else if (trim(arg) /= 'failure') then
         do k = 2, min(command_argument_count(), 5)
             call get_command_argument(k, arg); read (arg, *) expected(k - 1)
         end do
