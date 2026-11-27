@@ -890,7 +890,7 @@ reaches order p at p = 2.
   B·n = 0. Regions are chosen explicitly or from a verified topology analysis
   between solves, never inside Newton. Order after E5: label + Taylor region
   on one movable interface, then label + NN2 (staggered, then monolithic),
-  aimed at the W7-X island divertor (E9). Island size is an input in
+  aimed at the island divertor (E9). Island size is an input in
   reconstruction and needs a Taylor, NN2 or resistive closure in prediction.
   NN2 with vanishing pressure gradient does not reduce to the helicity
   constrained Beltrami state by itself (different invariants); the same

@@ -2,10 +2,10 @@
 
 Status: measured policy and implemented Q0 slice, 2026-10-06. The audience is
 MILCA implementers choosing the cheapest defensible statement for a requested
-observable. The [measurement ledger](../benchmarks/error-control/baseline.json)
-and [raw samples](../benchmarks/error-control/baseline.csv) cover existing
-case paths. The [instrumented follow-up](../benchmarks/error-control/measured.json)
-covers 23 paths; [mode records](../benchmarks/error-control/modes.json) cover
+observable. The measurement ledger (`benchmarks/error-control/baseline.json` in `MILCA_DATA_DIR`)
+and raw samples (`benchmarks/error-control/baseline.csv` in `MILCA_DATA_DIR`) cover existing
+case paths. The instrumented follow-up (`benchmarks/error-control/measured.json` in `MILCA_DATA_DIR`)
+covers 23 paths; mode records (`benchmarks/error-control/modes.json` in `MILCA_DATA_DIR`) cover
 the new modes. Planned tiers in the table
 below do not change the current claim of an unimplemented checker.
 
@@ -171,7 +171,7 @@ midpoint efficiency index at most 5.34 over three step sizes. Across all
 seven sampled fractions the index reaches 49.3 near a right endpoint. This
 misses the approximately tenfold efficiency target while still fitting the
 1% radius budget; stricter arithmetic alone cannot remove this residual
-triangle-bound pessimism. [Raw reference samples](../benchmarks/error-control/reference.csv)
+triangle-bound pessimism. Raw reference samples (`benchmarks/error-control/reference.csv` in `MILCA_DATA_DIR`)
 retain all times and modes. These are
 scoped validation numbers, not a universal tenfold trajectory-efficiency
 claim. A costs about 1.5× solve-only, slightly more than D, so D wins here.

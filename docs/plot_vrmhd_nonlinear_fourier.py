@@ -1,7 +1,9 @@
 """Plot nonlinear Fourier convergence for the nondimensional manufactured state."""
 import argparse
 import csv
+import os
 from pathlib import Path
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -10,11 +12,18 @@ from matplotlib.ticker import NullFormatter, ScalarFormatter
 import numpy as np
 
 
+def milca_data(relative):
+    root = os.environ.get("MILCA_DATA_DIR")
+    if not root:
+        sys.exit(f"set MILCA_DATA_DIR to the external MILCA data directory ({relative} is read or written there)")
+    return Path(root) / relative
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    with (Path(__file__).parent / "data/vrmhd-nonlinear-fourier.csv").open() as stream:
+    with milca_data("docs/data/vrmhd-nonlinear-fourier.csv").open() as stream:
         rows = list(csv.DictReader(stream))
     fig, axes = plt.subplots(1, 3, figsize=(14, 5), layout="constrained")
     for ax, symmetry in zip(axes, ["rotation", "translation", "helical"]):

@@ -1,6 +1,6 @@
 # Linear per-n MHD response (L4)
 
-Status: first stages of L4 of the 3D design (`milca_3d_tc24/DESIGN.md`, §2, §8.2).
+Status: first stages of L4 of the 3D design.
 The ideal response is computed in the FEEC form of Albert, Lainer and Biro,
 Comput. Phys. Commun. 277 (2022) 108401, as used by MEPHIT, not in the
 ξ-form of the design: the plasma current is obtained from linear force balance
@@ -39,8 +39,7 @@ no finite field perturbation balances: the cut is not an equilibrium
 plasma–vacuum interface, and DCON/GPEC drop this term as well. The traction
 `ξ_n [[∂_n(p0 + B0²/2μ0)]]` vanishes identically for continuous `B0`. The
 remaining boundary terms are the field-aligned closure sheet and, with
-`edge_moved_current`, the moved current `ξ_n J0` of the displaced boundary
-(DESIGN §2.5). TC24 results depend strongly on this choice.
+`edge_moved_current`, the moved current `ξ_n J0` of the displaced boundary.
 Not modelled: rotation, resistivity, kinetic terms.
 
 ## Discretisation
@@ -220,9 +219,7 @@ volume current are unchanged.
 
 Verification: `mhd_closure_tearing_delta_prime` (above). With nrad 96 and
 grading 1.25 the δ-extrapolated Δ' is within 0.8 % of the ODE (R0/a = 20, 40;
-1.4 % at R0/a = 10), the tanh step within 5e-4. `D_I` of the TC24 cut-0.995
-gfile agrees with DCON's `di0` to 3e-4 at q = 4/3 … 8/3, 1 % at q = 3 and
-0.15 % at q = 10/3; `dq/dpsin` to 0.2 %.
+1.4 % at R0/a = 10), the tanh step within 5e-4.
 
 Edge model. DCON/GPEC take the plasma energy with continuous `B0`, zero
 traction and no `p_edge` term; its natural boundary condition is linearised
@@ -231,11 +228,10 @@ boundary sheet plus the moved current `ξ_n J0` (its perpendicular part is the
 diamagnetic sheet `δp/B0` of pressure balance; the parallel sheet is fixed by
 charge conservation), i.e. `boundary_sheet = .true.`,
 `edge_moved_current = .true.`. This is the exact ideal response of the
-pressure-offset cut equilibrium (`p_edge = 0`, same `p'`, `FF'`); the cut
-gfile itself has `p_edge = 10.5 kPa` with vacuum outside and is not an
-equilibrium at the cut. At zero beta the moved current reduces to the
-boundary sheet, checked by the edge-current-jump oracle. On TC24 the moved
-current changes `singflx` by 4–35x (nrad 96).
+pressure-offset cut equilibrium (`p_edge = 0`, same `p'`, `FF'`); a cut
+gfile with `p_edge > 0` and vacuum outside is not an equilibrium at the cut.
+At zero beta the moved current reduces to the boundary sheet, checked by the
+edge-current-jump oracle.
 
 ## Resistive closure with rotation (L5)
 
@@ -262,8 +258,7 @@ the matching value, `b(0)/b0` (1 in the constant-ψ regime, small in the
 inertial one). No constant-ψ assumption. Toroidal coefficients are the
 cylinder-equivalent ones: `F' = n|q'|⟨B·∇θ⟩G`, `⟨B·∇θ⟩ = 4π²ψ_o/V'`,
 `G = ⟨|∇ψ_N|²⟩^½`, `Δ_ψN = Δ/G`. Not included: curvature (Glasser) terms
-of the layer (TC24 has `D_I ≈ −0.28`, `μ − 1/2 ≈ 0.03`; the large coefficient
-is referred to the layer edge `δ`), the toroidal inertia enhancement (option
+of the layer (the large coefficient is referred to the layer edge `δ`), the toroidal inertia enhancement (option
 `inertia_q2`, ρ → ρ(1 + 2q²)), MARS-F's parallel sound-wave damping and
 compressibility, and rotation in the outer region (`γτ_A ≪ 1`).
 

@@ -5,6 +5,8 @@ These fixed-input CPU measurements support the policy in
 claim strength, width and cost without changing the mathematical inputs.
 The CSVs retain every trial; JSON and the atlas retain medians, ranges,
 machine/compiler, source revision and timing boundaries. Rendering is excluded.
+Except `table.md` and `inputs/`, the files below are kept under the same path in
+an external data directory (`MILCA_DATA_DIR`).
 
 - `baseline.csv` / `baseline.json`: original 21-path sweep.
 - `measured.csv` / `measured.json` / `table.md`: 23 paths, including standalone

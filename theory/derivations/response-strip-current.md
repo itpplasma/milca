@@ -46,4 +46,4 @@ The revised test also evaluates the actual resolved-strip current using its
 edge fluxes and the analytic cylinder normalization above. It retains the
 original 1e-3 target at xd=0.02 and the previous half-width and convergence
 checks. The R-B2 strip in this test is still single-helicity and zero pressure;
-this derivation supplies no finite-pressure toroidal, Glasser or TC24 claim.
+this derivation supplies no finite-pressure toroidal, Glasser or device-case claim.

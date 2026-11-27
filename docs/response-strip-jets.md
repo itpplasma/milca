@@ -78,21 +78,18 @@ annulus, both signs of n, retained pressure forces, inverse/transposed inverse,
 generated jet products, and an independent elliptical-map/pressure oracle.
 The finite rate ladder covers eta/mu0 from 0.2 to 2e-7 and eta=0 at fixed gamma,
 then gamma from `0.7+0.2i` to `0.007+0.002i` with eta=0. These bounded manufactured
-limits do not establish a TC24 ideal-sheet or Glasser limit. The resolution
+limits do not establish a device ideal-sheet or Glasser limit. The resolution
 ladder uses gamma=`2+0.2i` on 9x9, 17x17 and 33x33 grids with a fixed state-error
 and residual target. The finer grid at gamma=`0.7+0.2i` did not meet that target;
 its failed exploration remains in external evidence, not a qualified limit.
 
-Configure `MILCA_STRIP_EQDSK_TEST` to register the imported TC24 jet checks. They
+Configure `MILCA_STRIP_EQDSK_TEST` with a G-EQDSK file outside the repository to
+register the imported jet checks. They
 compare B/map/pressure jets with independent spatial differences and retain the
 actual pressure. Both columns of the implicit map Hessian and pressure Hessian
 are checked. An additional imported-background inverse oracle sets `A=xi=0`,
 `Phi=exp(i*n*phi)` and independently supplies the toroidal `-grad Phi` drive.
-On a 7x25 annulus spanning psin=0.94..0.96, it covers eta=1e-7, 1e-9 and zero
-Ohm m at gamma=`2000+500i`, then gamma=`600+150i` and `200+50i` at eta=0,
-with rho=1e-7 kg/m^3. A bounded restart of 600 is needed; restart 240 failed
-at the first imported rate. This verifies sampling and an isolated inverse,
-not a coupled response solve or the pre-declared TC24 sheet-limit ladders.
+This verifies sampling and an isolated inverse, not a coupled response solve.
 `benchmarks/response-strip/run.sh` records matched-input one/two/four-thread
 trials, setup/solve/warm-apply time, iterations, state error, attributed array
 storage and process peak RSS. Outputs must be written outside source history.

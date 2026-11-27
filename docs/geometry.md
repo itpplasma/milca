@@ -132,7 +132,7 @@ physical cylindrical meshing through regions where flux coordinates fail.
 ## Figure-8 and geometry gates
 
 Figure-8 is a mandatory planned geometry stress test alongside conventional
-tokamaks, W7-X and LHD. No core physics component may require a global
+tokamaks and LHD. No core physics component may require a global
 cylindrical toroidal angle. An analytic curve-following case comes before a
 frozen public Figure-8 equilibrium, followed by the same geometry/small-case/
 production gate ladder as applicable. Do not certify an arbitrary schematic

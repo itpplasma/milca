@@ -82,8 +82,7 @@ is a pressure-driven saddle (none of the standard decks with pressure has a
 negative eigenvalue); finding 2 was an error of the flux map, not of VMEC
 (DESC agrees with VMEC's limit), and the QA axis converges to that limit at
 degree 3, the QH axis once 29 planes are used; the energy error of finding
-3 was the area of the wall fit and is removed. W7-X standard and li383 mesh
-and converge. Open from these: QH against a third code (the grading of the
+3 was the area of the wall fit and is removed. li383 meshes and converges. Open from these: QH against a third code (the grading of the
 meshes towards tips is measured under P0a). Decided 2026-11-22: P0b is dropped; the F2b gate in
 stationary mode (level 1 from the polar start, no axis check) is accepted.
 
@@ -111,9 +110,8 @@ towards tips".
   run; the gates check them.
 - The order 1.8–1.9 of F1: pre-asymptotic. 1.97, 1.98 on 16, 32 cells;
   the factor against the projected exact label levels off at 2.3 to 2.4.
-- Mesh grading towards tips (FortFEM `harmonic_disc_build`, `grading`):
-  the W7-X wall distance at 4 cells falls 3.4 to 4.3 times, the axis gets
-  3 to 4 times worse on 13 planes and is no better on 29. Off by default.
+- Mesh grading towards tips (FortFEM `harmonic_disc_build`, `grading`): off
+  by default.
 
 P0b, projection against guide-field locking: dropped (2026-11-22). The QA
 axis converges to the VMEC/DESC limit with harmonic meshes at degree 3 and

@@ -7,7 +7,8 @@ profile arrays and a 65 by 65 poloidal-flux grid (902 lines). Its title also
 extends into the G-EQDSK integer fields. It contains no q, LCFS or limiter
 records. No private source file was used to complete it.
 
-The current file preserves all 901 original numeric records byte for byte.
+The current file, kept in an external data directory (`MILCA_DATA_DIR`),
+preserves all 901 original numeric records byte for byte.
 Only the title/layout is corrected, followed by a reproducible trailer:
 
 - q on uniform normalized flux s = 0..1: the axis value is
@@ -26,7 +27,7 @@ adapter enabled:
 
 ```sh
 cmake --build --preset cpu --target complete_shield_torus_fixture
-build/complete_shield_torus_fixture test/fixtures/shield_torus_a10.eqdsk completed.eqdsk
+build/complete_shield_torus_fixture "$MILCA_DATA_DIR/test/fixtures/shield_torus_a10.eqdsk" completed.eqdsk
 ```
 
 The completed fixture is interpreted as COCOS 1; the original source version

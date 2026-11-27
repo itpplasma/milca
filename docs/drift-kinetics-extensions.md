@@ -119,20 +119,19 @@ collisionality. Reference codes: NEO-2 (field-line-following drift-kinetic solve
 (resonant transport in action-angle variables, thin orbits), POTATO (collisionless resonant
 transport with finite orbit width), PERFECT (global Eulerian drift kinetics for pedestals,
 Landreman et al. 2014), rabe (bootstrap coefficients at low collisionality), GORILLA and SIMPLE
-(guiding-centre Monte Carlo). Device cases are ASDEX Upgrade discharge 30835 and the ITER
-scenario TC24; their data stay outside the repository.
+(guiding-centre Monte Carlo). Device cases run against data outside the repository.
 
 | Step | Content | Gate |
 |---|---|---|
-| 0 | thin-orbit quasilinear model with the full operator, device profiles | passed: torque profiles within 5% of NEO-2 with 10 Laguerre energy basis functions on both devices. Open: energy convergence of the AUG ion full operator at resonances |
+| 0 | thin-orbit quasilinear model with the full operator, device profiles | run against device data outside the repository. Open: energy convergence of the ion full operator at resonances |
 | 1 | hp prototype: axisymmetric, monoenergetic, (theta, xi) mesh fitted to lambda | spectral convergence down to nu* ~ 1e-6; banana, plateau and Pfirsch-Schlueter limits of D11, D31, D33; axisymmetric bootstrap coefficient against the Sauter fit and NEO-2; faster or leaner than the Legendre solver at the same accuracy |
-| 2 | hp for the thin-orbit quasilinear model with all energies (after a passed step 1) | agrees with the spectral full-operator kernel; 1/nu, sqrt(nu)-nu, superbanana-plateau and rapid-rotation limits; converges the AUG ion resonances where uniform speed elements did not |
+| 2 | hp for the thin-orbit quasilinear model with all energies (after a passed step 1) | agrees with the spectral full-operator kernel; 1/nu, sqrt(nu)-nu, superbanana-plateau and rapid-rotation limits; converges the ion resonances where uniform speed elements did not |
 | 3 | `orbit_width` on the canonical Maxwellian: radial coordinate psi* = p_phi/(Z e) at fixed (H, mu), so that unperturbed orbits stay at one radial node and only collisions and delta B couple radii; orbit classes (trapped, passing, potato) as in POTATO; the Eulerian form in psi (as PERFECT) as an independent check; outer boundary at the last closed surface absorbing outgoing orbits; GMRES with surface factors | orbit width -> 0 reproduces step 0 with the expected scaling; first-order expansion of F_c reproduces the thin-orbit drive; moments map n(psi*) to n(psi); manufactured solution; particle and p_phi conservation; GMRES iterations bounded under psi refinement; POTATO in its thin-orbit limit and at finite orbit width; PERFECT pedestal case |
 | 4 | validity indicators per surface, species and energy: D; island width over resonance spacing; d(resonant frequency)/d p_phi, which sets the island width; orbit width over gradient length | D against NEO-RT and canonical frequencies against POTATO on shared cases |
 | 5 | `nonlinear_orbits` for one isolated resonance, thin orbit | delta B -> 0 reproduces step 0 with torque proportional to delta B^2; attenuation against NEO-RT Theta(D) over D; Theta -> 1 in the quasilinear limit |
 | 6 | `nonlinear_orbits` with `orbit_width` for isolated resonances | each switch off reproduces steps 3 and 5; resonance shifts against POTATO canonical frequencies |
 | 7 | coupled harmonics, overlapping resonances | isolated limits reproduce steps 5 and 6; Monte Carlo with finite orbits and the perturbation in the orbits; cost below Monte Carlo at the same accuracy. Overlap is expected in the pedestal (sheared E_r, large delta B), on the canonical Maxwellian background |
-| 8 | device curves | AUG 30835 and ITER TC24 with each switch alone and combined, against NEO-2, NEO-RT, POTATO and Monte Carlo where they apply, with the indicators of step 4 |
+| 8 | device curves | device cases with each switch alone and combined, against NEO-2, NEO-RT, POTATO and Monte Carlo where they apply, with the indicators of step 4 |
 
 ## Step 3 formulation: orbit width on the orbit-class mesh
 
@@ -205,10 +204,9 @@ Checks of the formulation (in addition to the gate of step 3):
   differs from the local one by a total time derivative. In the thin-orbit kernel that difference
   is the sum of its two sources, the parallel-derivative drift and the perturbed operator on f_10,
   so the finite-width kernel without an f_10 counterpart reproduces the thin kernel with both
-  sources off (checked to 2e-7 on AUG 30835 at s = 0.5 with the mass scaled by 1e-3; both sources
-  on change the thin torque there by 0.2 %, the parallel-derivative source alone by 6 %);
+  sources off;
 - bounce and precession frequencies along psi* against POTATO's frequency scans and their thin
-  limit (energy and E_r scaled down) on the shared AUG equilibria;
+  limit (energy and E_r scaled down) on shared equilibria;
 - the moments of F_c over the orbits give n(psi) from n(psi*) and back.
 
 ## Parity with our existing codes
@@ -220,13 +218,13 @@ NEO-2-QL (tokamak, quasilinear NTV and neoclassical transport):
 
 | Feature | Status |
 |---|---|
-| quasilinear NTV torque, all species, full linearised operator, both quasilinear sources | covered (step 0): within 5 % of NEO-2 on ITER TC24 and AUG 30835 |
-| non-axisymmetric heat flux (`isw_qflux_NA`) | covered: within 2 % on ITER TC24 (4 % worst case) |
+| quasilinear NTV torque, all species, full linearised operator, both quasilinear sources | covered (step 0), run against device data outside the repository |
+| non-axisymmetric heat flux (`isw_qflux_NA`) | covered, run against device data outside the repository |
 | offset rotation | covered (output of the NTV fluxes) |
-| axisymmetric transport matrix with the full operator: bootstrap current, conductivity, Ware pinch, flows | covered: D_31 and D_32 within 1.7 %, flows within 1 %, <j_par B> within 2.8 % (median 0.35 %) on 245 ITER TC24 surfaces; D_33 and D_13 within 3.5 %; AUG 30835 at s = 0.50 within 0.5 % |
-| E_r from the radial force balance (`isw_calc_er = 1`) and the rotation profile | covered: Omega_tE within 1.4 %, V_phi/R within 1.1 % on ITER TC24 |
+| axisymmetric transport matrix with the full operator: bootstrap current, conductivity, Ware pinch, flows | covered, run against device data outside the repository |
+| E_r from the radial force balance (`isw_calc_er = 1`) and the rotation profile | covered, run against device data outside the repository |
 | local parallel flow and current over the surface | covered for the axisymmetric response (exact u_par B = omega G + K B^2 check) |
-| collision models: full operator, test particle, pitch-angle scattering | covered; AUG 30835 profile against NEO-2 lag 10 with both, and lag 14 as basis check |
+| collision models: full operator, test particle, pitch-angle scattering | covered, run against device data outside the repository |
 | misaligned-potential drive with local current (NEO-2 pull request 240, draft) | covered on general 3D surfaces for any (m, n) of a prescribed Phi_1: `surface_transport` with `phi1`, local flow checked by surface continuity to 1e-14 ([spec](drift-kinetics.md#prescribed-in-surface-potential-and-local-parallel-flow-220-221)); SFINCS response comparison open |
 | quasineutral Phi_1 on the surface | open: a bordered unknown per angle in the multispecies solve, after 240 |
 
@@ -235,24 +233,24 @@ NEO-2-PAR (stellarator transport, relativistic operator):
 | Feature | Status |
 |---|---|
 | monoenergetic and energy-coupled transport coefficients of a 3D surface, ripple trapping | in progress: monoenergetic D11, D31, D33 (`mono_coefficients_3d`) and the full-operator transport matrix of a 3D surface at E_r = 0 (`ntv_surface_coefficients`), exact against the axisymmetric solver under quasisymmetry; open: ICNTS, MONKES and NEO-2-PAR comparisons, E_r, see K1 in [drift-kinetics.md](drift-kinetics.md) |
-| bootstrap coefficient of stellarators, against rabe and the Shaing-Callen limit | in progress: monoenergetic D31 against rabe on the Landreman-Paul QH equilibrium within 0.2 % at nu* = 1e-3 to 1e-2 and MONKES on W7-X (K1 in [drift-kinetics.md](drift-kinetics.md)); thermal coefficients from monoenergetic ones with the Sugama-Nishimura correction (`mono_thermal_coefficients`), with its error against the full operator measured on the DIII-D helical core; open: lower nu*, ICNTS published values |
+| bootstrap coefficient of stellarators, against rabe and the Shaing-Callen limit | in progress: monoenergetic D31 against rabe on the Landreman-Paul QH equilibrium within 0.2 % at nu* = 1e-3 to 1e-2 (K1 in [drift-kinetics.md](drift-kinetics.md)); thermal coefficients from monoenergetic ones with the Sugama-Nishimura correction (`mono_thermal_coefficients`), with its error against the full operator measured on the DIII-D helical core; open: lower nu*, ICNTS published values |
 | relativistic Braams-Karney operator and the generalised Spitzer function (current drive) | open |
 
 NEO-RT (thin-orbit resonant transport in action-angle variables):
 
 | Feature | Status |
 |---|---|
-| bounce and precession frequencies, resonances | covered: the orbit module in its thin limit matches NEO-RT's bounce frequency to 1e-4 and magnetic precession to 1e-5 over the trapped pitches on AUG 30835 (s = 0.29, v = 1.5 v_th) |
-| collisionless resonant torque: transit, bounce and superbanana-plateau resonances | open: the kernel reaches its nu -> 0 limit (1 to 2 % between 1e-2 and 1e-3 of the collisionality) on identical input files, but differs from NEO-RT: on AUG 30835 at 1 % of the collisionality the deuteron torque ratio has median 1.02 over 75 surfaces, 80 % of them within 0.84 to 1.31 and extremes of 0.55 and 1.70; part of the scatter may come from unconverged meshes (#363, #362), and on a circular tokamak with one harmonic D_12/D_11 agrees within 4 % for M_t >= 0.02 while the Mach dependence of D_11 differs by up to 30 %. Next: monoenergetic R(v) per resonance against NEO-RT's resonance-line integrand |
+| bounce and precession frequencies, resonances | covered: the orbit module in its thin limit against NEO-RT's bounce and precession frequencies, run against device data outside the repository |
+| collisionless resonant torque: transit, bounce and superbanana-plateau resonances | open: the comparison with NEO-RT runs against device data outside the repository; unconverged meshes (#363, #362) may contribute to its scatter. On a circular tokamak with one harmonic D_12/D_11 agrees within 4 % for M_t >= 0.02 while the Mach dependence of D_11 differs by up to 30 %. Next: monoenergetic R(v) per resonance against NEO-RT's resonance-line integrand |
 | nonlinear attenuation Theta(D) of an isolated resonance | open: needs the resonance decomposition of the kernel (bounce harmonic and pitch of each resonance), then the indicator D per resonance and Theta(D) as NEO-RT applies it, computed from MILCA's own isolated-resonance solve rather than a table; the direct nonlinear solve is beyond parity |
 
 POTATO (collisionless resonant torque with finite orbit width):
 
 | Feature | Status |
 |---|---|
-| exact guiding-centre orbits, canonical frequencies | covered: Boozer orbit module; thin limit within 1 % of POTATO, trapped orbits at physical width within 4 to 9 % on AUG 30835 with a Boozer file whose geometry and field disagree by up to 10 %; a self-consistent Boozer file (libneo EQDSK converter) decides the rest |
+| exact guiding-centre orbits, canonical frequencies | covered: Boozer orbit module, compared with POTATO in the thin limit and at physical width on device data outside the repository; a self-consistent Boozer file (libneo EQDSK converter) is the next check |
 | canonical Maxwellian drive, E_r profile in the orbits | covered: the orbit geometry of the hp solver (finite-width kernel equals the thin kernel to 1e-7 for thin orbits), potential profile Phi(s), perturbation at the orbit point |
-| finite-width resonant torque profile on psi* | in progress: `orbit_width` switch of the device profile, thin limit to 3e-5 at width 1e-3 for both signs of E x B; energies whose orbits leave the file count as lost (`lost_weight`); thermal AUG deuterons at s = 0.5 lose 15 % of the thin torque to the orbit width. At 1/1000 of temperature and rotation the finite-width torque is 1.00 to 1.05 times the thin one on four AUG 30835 surfaces. Against POTATO on 100 surfaces the resonance peaks coincide in radius, but the torque differs by factors of 0.4 to 7, and for s < 0.14 and s > 0.60 more than 5 % of the weight is lost (status in #233). Open: lost-orbit boundary and potato orbits near the axis, converged meshes (#363, #362), the profile against POTATO rung 4 |
+| finite-width resonant torque profile on psi* | in progress: `orbit_width` switch of the device profile; energies whose orbits leave the file count as lost (`lost_weight`). The comparison with POTATO runs against device data outside the repository (status in #233). Open: lost-orbit boundary and potato orbits near the axis, converged meshes (#363, #362), the profile against POTATO rung 4 |
 
 rabe (stellarator bootstrap coefficients): with NEO-2-PAR above.
 
@@ -392,7 +390,7 @@ Foundation, while the current work finishes:
 
 Full NEO-2 parity, each item faster and leaner than NEO-2 at matched accuracy:
 
-4. NTV (NEO-2-QL): energy convergence of the AUG ion full operator at resonances, non-axisymmetric
+4. NTV (NEO-2-QL): energy convergence of the ion full operator at resonances, non-axisymmetric
    heat flux K_2j, offset rotation.
 5. Bootstrap: axisymmetric transport matrix with the full operator (bootstrap current, parallel
    conductivity, Ware pinch), poloidal rotation coefficient, parallel flows, E_r from force balance.
@@ -412,7 +410,7 @@ Extensions needed by NTV, then all effects combined:
 
 10. Full perturbation drive (field-line bending, b.delta B, delta Phi_n), rotating perturbations,
     Phi_1 with sonic rotation and strong-E guiding-centre equations, overlapping resonances.
-11. AUG 30835 and TC24 with every effect alone and combined, ranking which effects matter where
+11. Device cases with every effect alone and combined, ranking which effects matter where
     (step 8).
 
 Then:
@@ -479,14 +477,13 @@ lists on the same block atlas and check each other:
 |---|---|---|
 | E0 | field-line fluid scrape-off layer with sheath boundary | two-point model, Stangeby sheath analytics |
 | E1 | 2D axisymmetric multi-fluid Braginskii with drifts and fluid neutrals | SOLPS-ITER, UEDGE |
-| E2 | 3D fluid on field-aligned or FCI blocks: RMP edges, stellarator island divertors | EMC3-EIRENE, W7-X |
+| E2 | 3D fluid on field-aligned or FCI blocks: RMP edges, stellarator island divertors | EMC3-EIRENE |
 | E3 | deterministic kinetic neutrals (discrete-velocity Boltzmann/BGK), hybrid with fluid neutrals by Knudsen number | EIRENE |
 | E4 | full-f drift kinetics in the edge blocks where fluid closures fail: nonlocal parallel heat flux, kinetic sheath | COGENT, analytic nonlocal heat-flux limits |
 | E5 | turbulence as spectrum term or resolved region | GENE-X, experiment |
 
 Divertor heat loads (convective, conductive, radiative and neutral), target profiles, impurity
-sources and detachment are the products, compared with infrared heat-load measurements on AUG
-and W7-X. Reactions are bookkept in species and reaction tables with a conservation ledger:
+sources and detachment are the products, compared with infrared heat-load measurements. Reactions are bookkept in species and reaction tables with a conservation ledger:
 atomic and molecular rates (ADAS, AMJUEL/HYDHEL), sputtering yields and fusion reaction cross
 sections. GORILLA Monte Carlo serves as one independent benchmark, not as the edge model.
 

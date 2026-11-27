@@ -65,8 +65,8 @@ d/dt [A_z(0,0)-A_z(0,pi)] = -14 eta epsilon,
 where `eta` is electrical resistivity; with unit permeability it is also the
 magnetic diffusivity. The initial-induction check compares this strong-form
 value with the consistent derivative of the assembled differential-algebraic
-system, using a 2% relative error budget. The [native refinement data](
-data/vrmhd-island-induction.csv) use `eta=epsilon=0.01` and eight or sixteen
+system, using a 2% relative error budget. The native refinement data (`docs/data/vrmhd-island-induction.csv` in
+`MILCA_DATA_DIR`) use `eta=epsilon=0.01` and eight or sixteen
 cells in each direction, compiled with GNU Fortran 16.2 and OpenBLAS in Release
 mode. The mixed family's relative errors are 1.01% and 0.067%; the equal
 family's are 7.37% and 2.61%. The [plot source](plot_vrmhd_island_induction.py)
@@ -137,7 +137,7 @@ These trajectories are candidates until spatial and temporal refinement,
 critical-point checks, physical ledgers and the required regime checks admit
 a rate comparison. No Rutherford agreement is claimed by the setup checks.
 
-The [direct-factor comparison](data/vrmhd-island-preconditioner.csv) uses
+The direct-factor comparison (`docs/data/vrmhd-island-preconditioner.csv` in `MILCA_DATA_DIR`) uses
 the mixed family with four periodic and eight radial cells, `eta=0.001`,
 `epsilon=0.005625`, `DT=0.25` and twenty steps. Both factors accept exactly
 the requested time grid. The full cut widths differ by at most `1.3e-14`
@@ -148,7 +148,7 @@ take 84.7–86.9 s with the scalar factor and 58.8–58.9 s with the supernodal
 factor. Both use `OMP_NUM_THREADS=4`; this OpenMP OpenBLAS build also reports
 four threads despite `OPENBLAS_NUM_THREADS=1`. These are whole-run timings
 under that configuration, not an isolated factor-kernel scaling result.
-The [timing data](data/vrmhd-island-preconditioner-time.csv) and
+The timing data (`docs/data/vrmhd-island-preconditioner-time.csv` in `MILCA_DATA_DIR`) and
 [plot source](plot_vrmhd_island_preconditioner.py) retain the comparison.
 The unchanged energy, decay, wave and steady-state gates check independent
 analytical references; these timing trajectories do not admit island rates.
@@ -195,7 +195,7 @@ nonzero wall power must be retained when assessing conservation and its
 spatial limit must be checked before a continuum benchmark claim. All
 reported quantities use the nondimensional units stated above.
 
-The [retained time-step study](data/vrmhd-island-time.csv) uses the mixed
+The retained time-step study (`docs/data/vrmhd-island-time.csv` in `MILCA_DATA_DIR`) uses the mixed
 family with four cells in each direction, `eta=epsilon=0.01` and final
 time 0.5. Reproduce each row with `probe mixed 4 4 0.01 DT STEPS 0.01`,
 where `DT,STEPS` are its time step and step count. These are candidate
@@ -204,6 +204,6 @@ The coarser steps are outside the asymptotic time regime. On the final two
 halvings, the total-energy defect decreases with observed orders 2.11 and
 2.19, while the mechanical-energy defect gives 2.12 and 2.20. The largest
 absolute mass drift is below 7e-14. These measurements use GNU Fortran 16.2
-and OpenBLAS in Release mode. The [instantaneous accounting data](
-data/vrmhd-island-ledgers.csv) and [plot source](plot_vrmhd_island_ledgers.py)
+and OpenBLAS in Release mode. The instantaneous accounting data (`docs/data/vrmhd-island-ledgers.csv` in
+`MILCA_DATA_DIR`) and [plot source](plot_vrmhd_island_ledgers.py)
 retain the independent wall-power comparison.

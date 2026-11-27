@@ -344,7 +344,7 @@ SI `pprime` and `ffprime`
 provided directly or under `source.coefficients`. Supported resolution keys
 are `boundary_nodes`, `max_area`, `radial_points`, `angular_points`, `curved`, `degree`.
 The producer forces one thread and a disk scratch directory. Its sign map is
-the identity under the TC24 case contract's COCOS 3 ledger. The common driver checks the producer against the exact physical E0 and
+the identity under COCOS 3. The common driver checks the producer against the exact physical E0 and
 Cerfon LCFSs, including fields loaded back from its native mesh export.
 
 The exported axis location uses `gs_magnetic_axis`: a quartic least-squares
@@ -619,7 +619,6 @@ profile coordinate if the edge sources vanish; it is not an additional forward
 constraint. Normalized laws solve their own axis flux. Pressure and F come from exact polynomial primitives anchored at the declared edge values.
 Nonpositive F² and negative pressure fail readback. `profile-law.dat` retains
 the executed table and solved normalization; NetCDF embeds its full content.
-The pinned TC24 law uses mode 0, and must never be rescaled to the solved axis.
 
 Source integration uses the physical Jacobian of each mapped element. Cells
 without cuts use paired Duffy rules with orders tied to the element degree.
@@ -668,9 +667,7 @@ smooth spline laws are the intended Newton input.
 both axis polarities and both nonzero F branches. `profiles.dat` adds p, F,
 pprime and FFprime after the original psi/s_tor/q columns. Native batch field
 readback accepts a fifth `profile-law.dat` argument; `--source profile-law.dat`
-reads a count and psi values and returns p/F/pprime/FFprime. The iter_tc24
-producer/EQDSK extension consumes that executed law, including positive-axis
-q signs and edge pressure. Exterior EQDSK continuation is still not a vacuum
+reads a count and psi values and returns p/F/pprime/FFprime. Exterior EQDSK continuation is still not a vacuum
 solution.
 
 ### Nonlinear recovered-flux estimator assumptions
@@ -740,16 +737,7 @@ for singular boundaries or source laws with lower continuity.
 
 `grad_shafranov_p3_spline_knot_convergence` uses a 513-knot C1 quadratic source,
 an independently summed manufactured forcing and curved P3 geometry. Its
-three meshes give psi orders 4.11/4.08 and Bpol orders 3.36/3.29. On the pinned
-TC24 data, n=48/96/192/384 boundary-node comparisons give successive psi orders
-1.94 then 3.62 and Bpol orders 1.20 then 2.49. These results support a
-preasymptotic explanation; the available Bpol sequence has not yet established
-order 3, so its reduced rate remains an open defect candidate.
-Its 128-mode Fourier boundary and sharply varying source need substantially
-more resolution than the constant-source manufactured problem. Timing,
-common-domain field comparisons, quadrature sensitivity and estimator versus
-Richardson evidence are retained by the iter_tc24 experiment, not a rigorous
-continuous error claim.
+three meshes give psi orders 4.11/4.08 and Bpol orders 3.36/3.29.
 
 ## Profile-source residual and derivatives
 
@@ -848,6 +836,5 @@ Exact book equation numbers are not asserted.
   interface Jacobian; no application, mesh refit or inverse problem yet).
   No 3D MHD, kinetic transport or perturbation model.
   Flux charts and GEQDSK conversion are downstream adapters, not GS inputs.
-- Current ITER comparison inputs/results and disagreement classification live
-  in the TC24 repository's `equilibrium/`; received profiles are not exact
-  oracles. Do not use cross-code agreement alone as validation.
+- Device comparison inputs and results live outside the repository; received
+  profiles are not exact oracles. Do not use cross-code agreement alone as validation.

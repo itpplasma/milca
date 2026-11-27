@@ -43,8 +43,7 @@ the input angle, which means that VMEC's `lambda` must vanish there. This is an
 extra tangential constraint, because the fixed-boundary problem constrains only
 `xi.n`. With a non-straight-field-line input angle the error does not converge
 away. For example, the axisymmetric sheared oracle in its chart angle keeps
-2-4 % B errors, and AUG with `|lambda| ~ 1.1 rad` on the LCFS shows a rigid
-interior shift.
+2-4 % B errors.
 
 `ideal_seed_3d_init(..., angle_mpol=M, angle_ntor=N)` keeps the wall pinned and
 relabels the frozen field instead. The reference is relabelled along its

@@ -3,7 +3,7 @@ module milca_makegrid_circuits
     !! (neo_makegrid_coils, https://github.com/itpplasma/libneo). Coil c becomes
     !! a closed coils_3d polygon in circuit(c) = its MAKEGRID group (the EXTCUR
     !! index) with turns(c) = its fourth-column value, which must be constant
-    !! along the coil (the winding count for W7-X style files). The circuit
+    !! along the coil (the winding count of MAKEGRID files). The circuit
     !! field b_k = sum_{circuit(c) = k} turns(c) B_c[1 A] is then the field per
     !! unit EXTCUR. Coils without a group (group 0) get circuit 0, which
     !! coil_circuit_basis_t treats as not connected.

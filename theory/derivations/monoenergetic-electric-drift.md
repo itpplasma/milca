@@ -188,7 +188,7 @@ agree within \(2\times10^{-9}\) relative. MILCA's independent angular and
 pitch refinements from \(15\times9\times32\) to \(41\times23\times80\),
 and SFINCS's combined refinement to \(31\times17\times64\), change the
 coefficients by less than \(10^{-9}\) relative. The
-[comparison record](../../test/data/sfincs_mono_exb_refinement.csv) retains
+comparison record (`test/data/sfincs_mono_exb_refinement.csv` in `MILCA_DATA_DIR`) retains
 both codes' matrices and the independent refinements. SFINCS reports true relative
 residuals below \(5\times10^{-8}\) in these runs. The regression tolerance is one
 percent, fixed before inspecting the comparison.

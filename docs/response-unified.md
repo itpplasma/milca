@@ -3,8 +3,7 @@
 Status: design proposal for review, 2026-10-13; no code change. Extends
 [mhd-linear-response.md](mhd-linear-response.md) (L4, L6; L5 on branch
 `gs-3d-resistive`) under [equilibrium-core.md](equilibrium-core.md) D5-D7,
-with the same principles as [drift-kinetics.md](drift-kinetics.md). Evidence
-from the iter_tc24 response ladder (rungs a-c, L5 TC24 array, 2026-10-13).
+with the same principles as [drift-kinetics.md](drift-kinetics.md).
 
 ## Principles
 
@@ -102,24 +101,23 @@ layer relation [Phi']/Phi_s = Delta_layer(w) on the same edge sheets, with the
 FKR/Fitzpatrick scaled slab layer: constant-psi resistive-inertial
 Dhat = 2 pi Gamma(3/4)/Gamma(1/4) g^(5/4)/eps, numerically otherwise.
 Strengths: cheap, interpretable (Delta', D_I, P = -S/(r_s Delta')), exact
-ideal limit. Measured failure modes (2026-10-13):
+ideal limit. Failure modes measured on device data outside the repository
+(2026-10-13):
 
-1. Fit-ring dependence. TC24 full pressure, q = 3: layer-current spread
-   between ring grading 1.5 and 2.0 of 24-195 %; q = 10/3: 69-78 %, and
-   14-105 % even at zero pressure.
-2. mu != 1/2 with pressure (mu = 0.553 at q = 3, 0.747 at q = 10/3): S(delta)
+1. Fit-ring dependence: the layer current depends on the ring grading, also
+   at zero pressure.
+2. mu != 1/2 with pressure: S(delta)
    is not linear in delta; a delta^(2 eps) or (x_s/delta)^eps term (eps =
    mu - 1/2) is invisible to a two-point extrapolation. GPEC's singflx
    depends on `sing_spot` for the same reason.
 3. Delta extrapolation itself: the large-solution residual |a1/Phi| outside
-   is 17-620, i.e. the fits extract a small coefficient under a large one.
-4. Missing sheets on sideband rationals (q = 3 near the edge with only q = 2
-   listed): an unshielded 1/(u - u_s) pole of the strip current made the
-   q = 2 result depend on the nearest half ring, up to +14 % (fixed on the
+   is large, i.e. the fits extract a small coefficient under a large one.
+4. Missing sheets on unlisted sideband rationals: an unshielded 1/(u - u_s)
+   pole of the strip current made the result depend on the nearest half ring
+   (fixed on the
    sheet closure by `rat_auto`; automatic discovery now also applies to the
    Frobenius and asymptotic resistive closures).
-5. Layers near the cut or near crowded rationals (q = 10/3 at psin 0.990,
-   m +- 1 neighbours unlisted) do not converge at all.
+5. Layers near the cut or near crowded rationals do not converge at all.
 6. The layer model is the cylinder-equivalent slab: no Glasser curvature
    (D_R), no toroidal sideband coupling inside the layer, no inertia
    enhancement beyond a caller factor.
@@ -161,7 +159,7 @@ s magnetic shear (Fitzpatrick 1998; Cole and Fitzpatrick 2006):
 
 | Regime | width scaling | ITER-like value (S ~ 1e8-1e9, w tau_A ~ 1e-3-1e-2) |
 |---|---|---|
-| static resistive (Alfven-resonance) | (n s)^(-1/3) S^(-1/3) | 0.5-1.5 mm (MEPHIT `resistive_layer_width` on TC24, m = 4-11) |
+| static resistive (Alfven-resonance) | (n s)^(-1/3) S^(-1/3) | - |
 | resistive-inertial, rotating | (w tau_A)^(1/4) (n s)^(-1/2) S^(-1/4) | ~ 1e-3 a, i.e. 1-3 mm [estimate] |
 | visco-resistive | P_m^(1/6) (n s)^(-1/3) S^(-1/3) | 1-2 x static [estimate] |
 | ion gyroradius rho_i (5 keV D, 5 T) | - | ~ 3 mm |
@@ -245,7 +243,7 @@ MEPHIT does for its fixed-point iteration), not damped. Many right-hand sides
 
 ## Verification ladder
 
-Rungs as in the iter_tc24 response plan; gates per model lane.
+Gates per model lane.
 
 | Rung | Problem | Oracles | Applies to |
 |---|---|---|---|
@@ -254,8 +252,8 @@ Rungs as in the iter_tc24 response plan; gates per model lane.
 | b-resistive | Delta' (step profile closed form), P = -S/(r_s Delta'), constant-psi Dhat, non-constant-psi and viscous scaled layer | closed forms; FKR (Furth et al. 1963); Fitzpatrick 1998 constants; rdcon Delta' (0.1-1.5 %) | L5, R-B1 |
 | c | large-A circular torus, A = 3-20 | GPEC singflx and MARS-F ideal (J_MARS/J_GPEC 0.99-1.02 at A 4-20, rung c1); MARS-F/ARES resistive at equal eta, ROTE (ARES = MARS to 1e-5) | L6, R-B2 |
 | d | shaped Solov'ev, several rationals, edge current and cut ladder | GPEC, MARS-F, MEPHIT per lane | all |
-| e | TC24 at cuts 0.995/0.997/full | lane-matched, converged quantities only | all |
-| NTV | stage-1 frozen field and its successor fed by L7 | iter_tc24 `ntv/` harness, `decision.py`; NEO-2 via `.bc` | L7 + DK |
+| e | device case, run against data outside the repository | lane-matched, converged quantities only | all |
+| NTV | stage-1 frozen field and its successor fed by L7 | NEO-2 via `.bc` | L7 + DK |
 
 Internal identities: Hess W = L4_n (D5); (B) -> (A) as S -> infinity in the
 constant-psi regime; (B) with strip = whole plasma equals (B) with narrow
@@ -271,8 +269,7 @@ gate.
   552161a covers only the sheet closure); fit diagnostics (spread over
   `layer_ratio`, |a1/Phi|) reported per rational; three-point delta fit with
   the delta^(2 eps) term as the last change to the fit machinery. Gates: all
-  `mhd_*` ctests unchanged; c1_milca parity with GPEC within the c1 gate;
-  TC24 zero-pressure q = 3 spread < 7 %; full pressure reported, not gated.
+  `mhd_*` ctests unchanged; c1_milca parity with GPEC within the c1 gate.
 - R-B1: resolved resistive strip in the periodic-cylinder chart. Gates:
   constant-psi Dhat and the L5 numerical layer (non-constant psi, viscous) to
   1 %; P = -S/(r_s Delta') on the step profile to 1 %; ideal limit to the L6
@@ -281,7 +278,7 @@ gate.
 - R-B2: torus. Gates: large-A limit returns R-B1 within the rung-c O(eps^2)
   trend; MARS-F and ARES resistive at equal eta and ROTE on rung c (same
   extractor `mars_shield.py`, flux observable in one chart); ideal limit to
-  GPEC singflx on rung c; TC24 full pressure q = 3 and q = 10/3 converged in
+  GPEC singflx on rung c; the device case of rung e converged in
   strip resolution and X_s without any fit; two-fluid switch s_2f against
   SLAYER drift-MHD (Park 2022) in the cylinder.
 
@@ -398,7 +395,7 @@ dispersion at nonzero pressure, resistive Alfven damping, translation of a
 curved pressure-balanced equilibrium, pressure gradients against independently
 differenced polynomials, batch linearity, and pressure/force JVP/VJP products.
 These are point-operator checks. No continuous or discrete error certificate
-is available, and no TC24 convergence or Glasser-layer result is claimed.
+is available, and no device-case convergence or Glasser-layer result is claimed.
 
 `milca_response_toroidal_strip` adds a candidate mapped-annulus discretisation
 at fixed nonzero toroidal n, in the outer operator's `A_phi = 0` gauge. Its six
@@ -428,10 +425,10 @@ equilibrium, all represented poloidal modes at n = +/-3, the forced state and
 drive tangent, JVP/VJP pairings with and without trace rows, zero-divergence
 analytic identities, and radial refinement against an independently
 differentiated degree-six electrostatic field. These establish an isolated
-candidate strip, not a TC24 layer-current or Glasser result. Imported TC24
+candidate strip, not a device layer-current or Glasser result. Imported
 map/B/pressure jets and radial Fourier preconditioning now have
 [isolated candidate gates](response-strip-jets.md), including a bounded finite
-eta/gamma ladder. Coupled-interface refinement and TC24 physical qualification
+eta/gamma ladder. Coupled-interface refinement and device-case physical qualification
 remain required.
 
 ### Two-ring traces and cut balance (candidate increment)
@@ -479,15 +476,14 @@ sample equilibrium jets or create boundary conditions for a strip at a cut.
 Three CTests check independent analytic two-ring traces for both signs of n,
 trace JVP/VJP, the full nonlinear Maxwell-stress derivative, a finite-pressure
 moving-boundary pressure oracle, and domain coverage against direct membership.
-The full-cut q=11/3 center at psin=0.999036564 is covered by the merged-edge
-domain oracle. These are candidate operator tests with unavailable enclosures;
-they do not qualify a coupled TC24 response or calibrate GPEC singflx.
+These are candidate operator tests with unavailable enclosures;
+they do not qualify a coupled device response or calibrate GPEC singflx.
 
 The full-pressure R-B2 application still needs enforcement of electric and
 mechanical interface balance and the two-ring magnetic Schur/mortar coupling.
 `gs_response_3d` currently has only sheet and asymptotic closures.
 Its cut-edge pressure jump is also explicitly outside the ideal outer model;
-TC24 pressure-retaining cuts need consistent total-pressure boundary balance.
+Pressure-retaining cuts of a device equilibrium need consistent total-pressure boundary balance.
 The increment-1 test and the new point residual cannot substitute for these
 missing pieces.
 

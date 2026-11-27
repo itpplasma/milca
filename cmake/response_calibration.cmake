@@ -32,11 +32,13 @@ target_link_libraries(test_response_strip_readback PRIVATE milca)
 add_test(NAME response_spot_resolved_single_ring COMMAND test_response_strip_readback)
 set_tests_properties(response_spot_resolved_single_ring PROPERTIES TIMEOUT 300
     ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
-configure_file(test/fixtures/response_calibration.nml.in
-    ${CMAKE_CURRENT_BINARY_DIR}/response_calibration.nml @ONLY)
-add_test(NAME response_calibration_deck_validation
-    COMMAND gs_response_calibration --validate --config
-        ${CMAKE_CURRENT_BINARY_DIR}/response_calibration.nml)
+if(milca_shield_torus_eqdsk)
+    configure_file(test/fixtures/response_calibration.nml.in
+        ${CMAKE_CURRENT_BINARY_DIR}/response_calibration.nml @ONLY)
+    add_test(NAME response_calibration_deck_validation
+        COMMAND gs_response_calibration --validate --config
+            ${CMAKE_CURRENT_BINARY_DIR}/response_calibration.nml)
+endif()
 add_test(NAME response_calibration_deck_rejects_zero_mode
     COMMAND gs_response_calibration --validate --config
         ${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/response_calibration_invalid.nml)

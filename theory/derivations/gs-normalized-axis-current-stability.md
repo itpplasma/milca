@@ -1,8 +1,8 @@
 # Normalized profiles, moving axis and prescribed current
 
 [V] Status: the identities and conditional theorem below are proved. The
-continuous inverse bound, regularity and profile premises for production K6
-remain **open**. This document does not promote its sampled residual to a
+continuous inverse bound, regularity and profile premises for production
+device cases remain **open**. This document does not promote its sampled residual to a
 solution-error bound. The implementation retains certificate status 4.
 
 ## Model, trace and gauge
@@ -93,7 +93,7 @@ unique zero in this ball and ||U*-U0||<=r. A proved embedding constant
 ball is not claimed. These are analytic premises, not values supplied by a
 converged Newton solve.
 
-## Premises still open for K6
+## Premises still open for device cases
 
 [H] A suitable continuous space and elliptic regularity estimate on the actual
 piecewise curved domain must be established. Schauder estimates on a smooth

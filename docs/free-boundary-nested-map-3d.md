@@ -7,8 +7,8 @@ Status: first layer, branch `lane/fb3d-nested-map-20261025`. Module
 residual in `milca_ideal_free_boundary` ([ideal-free-boundary.md](ideal-free-boundary.md)),
 its formulation theory ([free-boundary-theory.md](free-boundary-theory.md)) and the
 R2 coupling surface ([free-boundary-chart-surface.md](free-boundary-chart-surface.md)).
-This note fixes the residual that the forward W7-X case and the coil-current
-inverse share. There is one state and one residual R(x; p), with the same
+This note fixes the residual that the forward stellarator case and the
+coil-current inverse share. There is one state and one residual R(x; p), with the same
 Γ_c exterior, readback and certificates. The coil currents p enter only as
 parameters of R, and the inverse uses the JVP/VJP in p of this R rather than a
 separate solver.
@@ -223,7 +223,7 @@ by 9 mm, about 0.09 a, and then stalls at merit 3.7e-2. This is recorded as an
 observation. That the vertical mode under fixed currents causes the stall is a
 hypothesis that has not been traced.
 
-## 9. Gaps before the W7-X forward case (b) and the inverse (c)
+## 9. Gaps before the forward stellarator case (b) and the inverse (c)
 
 1. General 3D Γ_c traces (done, step b start). `ideal_fb_drive_traces_3d`
    evaluates the same three functionals on Γ_c = H(γ × [0, 2π)) of the plasma
@@ -426,10 +426,9 @@ hypothesis that has not been traced.
    its two dependency-free modules from the pinned `MILCA_LIBNEO_REVISION`
    (CMakeLists.txt) and `makegrid_circuits_read` turns a file into coils_3d
    polygons with circuit = MAKEGRID group and turns = fourth column (per unit
-   EXTCUR). The W7-X sign and EXTCUR convention (A·turn versus A) is still
-   settled by T1 of the scoping note, and W7-X data stay in the private data
-   repository.
-5. Accuracy at W7-X distances. The aliasing error exp(−nphi d/R) and the
+   EXTCUR). The sign and EXTCUR convention (A·turn versus A) of a coil file
+   is still settled by T1 of the scoping note.
+5. Accuracy at stellarator coil distances. The aliasing error exp(−nphi d/R) and the
    Γ_c clearance need checks against VMEC++ at matched accuracy. Field-period
    symmetric coil evaluation would cut the sampling cost by nfp.
 6. Inverse API. This needs observable operators O(x) with ∂O/∂x and an

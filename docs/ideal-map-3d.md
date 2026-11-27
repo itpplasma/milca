@@ -1,7 +1,7 @@
 # Nonlinear 3D ideal equilibrium: frozen-in energy map (N1)
 
-Status: first verified stage of step N1 of the 3D TC24 design (nonlinear lane,
-DESIGN section 7). Fixed boundary, ideal, nested-compatible, gamma = 0.
+Status: first verified stage of step N1 of the 3D design (nonlinear lane).
+Fixed boundary, ideal, nested-compatible, gamma = 0.
 Module `milca_ideal_map` (`src/mhd/ideal_map.f90`); generated leaves
 `src/generated/milca_ideal_map_leaves.f90` from `gen/gen_ideal_map.f90`.
 
@@ -185,7 +185,7 @@ field-line-advance claim, certified figure-8 equilibrium, or completed
 - Planes: N_phi = 3N + 1 by default for cylindrical charts; explicit for curve
   charts, trapezoidal in phi-hat; Gauss order 7 in
   the plane. The integrand is rational, so neither is exact.
-- Relabelling gauge (DESIGN "known difficulties"): each node moves in the
+- Relabelling gauge: each node moves in the
   poloidal plane only along a fixed transversal d_a = grad chi / |grad chi|
   (a VMEC-like fixed-angle gauge, omega in the role of lambda), plus a global
   axis expansion T(chi) sum_j sigma_j P_j(y), T = 1 at the O-point and 0 at the

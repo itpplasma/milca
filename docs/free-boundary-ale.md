@@ -212,7 +212,7 @@ are the island and free-boundary gates of
 | A2 anisotropy | anisotropic diffusion in a prescribed field with islands, χ_∥/χ_⊥ from 10⁶ to 10⁹ | P3 against degree-4 splines, each with and without mesh alignment | spurious perpendicular diffusion (pollution) below 10⁻³ of the exact temperature range at χ_∥/χ_⊥ = 10⁹ |
 | A3 moving mesh | A1 with the mesh moved by (4) in the alternating loop | interface on Γ_p against cut cells | convergence order of the spline degree at Γ_p with the interface, at most 8 Newton steps per mesh update, no refused full step |
 | A4 coupled 2D | nested tokamak with NN2 on the spline mesh and the exterior (3) | `gs_free`, FreeGSNKE | agreement with `gs_free` within the estimated discretisation error, wall time at most FreeGSNKE's at the same accuracy |
-| A5 3D exterior | field of a known current inside a W7-X coil set, with axisymmetric and shaped Γ_c | Biot–Savart, virtual casing (the field outside a surface from B on it) | exterior error converges at the rate of the spline trace space |
+| A5 3D exterior | field of a known current inside a stellarator coil set, with axisymmetric and shaped Γ_c | Biot–Savart, virtual casing (the field outside a surface from B on it) | exterior error converges at the rate of the spline trace space |
 
 E4 and E5 follow A4 and A5. E8 also needs G7 on the island cases of E6.
 
@@ -305,7 +305,7 @@ Gates of the frozen lane:
 | B3 DIII-D coarse | 48 boundary nodes, one level | 65 iterations with the watchdog today | at most 10 Newton steps, same energy |
 | B4 3D nested | Landreman–Paul QA free boundary, coarse | VMEC++ on the same coils and profiles | E4 observables within the error estimate |
 | B2b two vacua | DIII-D (2D) and Landreman–Paul QA (3D), coarse | V1 shell against V2 sheet | same equilibrium within the discretisation error; wall time per variant at matched accuracy |
-| B6 fast sheet | sheet self-energy on the W7-X boundary, 10³ to 10⁵ points | FMM against direct pair sum | energy, gradient and Hessian-vector product agree to 10⁻¹⁰ relative; cost O(N log N); faster than direct above 5·10³ points |
+| B6 fast sheet | sheet self-energy on a stellarator boundary, 10³ to 10⁵ points | FMM against direct pair sum | energy, gradient and Hessian-vector product agree to 10⁻¹⁰ relative; cost O(N log N); faster than direct above 5·10³ points |
 | B5 fixed-topology islands | classical stellarator with 1/2 islands | SIESTA ideal steps, SPEC with prescribed current | E7 observables |
 
 ## 5. Work by repository
