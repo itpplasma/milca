@@ -21,7 +21,96 @@ concurrency:
 jobs:
   check:
     # Required by the main ruleset; skipped (and so passing) on pull requests.
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    container: gcc:16
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      actions: read
+    env:
+      FPM_VERSION: 0.13.0
+      GIT_TERMINAL_PROMPT: 0
+      MPLBACKEND: Agg
+      DEBIAN_FRONTEND: noninteractive
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Base packages
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends cmake ninja-build curl ca-certificates ccache jq python3 > /dev/null
+          # The image installs GCC under /usr/local; tests that run with a
+          # minimal PATH expect a distribution's /usr/bin.
+          for t in gcc g++ gfortran cpp gcc-ar gcc-nm gcc-ranlib gcov; do
+            ln -sf "/usr/local/bin/$t" "/usr/bin/$t"
+          done
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Repository packages
+        if: hashFiles('.github/ci/apt-packages') != ''
+        run: grep -v '^#' .github/ci/apt-packages | xargs apt-get install -y -qq --no-install-recommends > /dev/null
+      - name: Places
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          fo=$(git ls-remote https://github.com/lazy-fortran/fo.git refs/heads/main | cut -f1)
+          test -n "$fo"
+          echo "FO_COMMIT=$fo" >> "$GITHUB_ENV"
+          echo "FO_TOOLS=$RUNNER_TOOL_CACHE/fo-$fo" >> "$GITHUB_ENV"
+          echo "FO_CACHE_DIR=$RUNNER_TEMP/fo-cache" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+      - name: fo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.FO_TOOLS }}
+          key: fo-gcc16-${{ env.FO_COMMIT }}-fpm-${{ env.FPM_VERSION }}
+      - name: Build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.FO_CACHE_DIR }}
+            ${{ env.CCACHE_DIR }}
+            build/dependencies
+          key: build-${{ env.FO_COMMIT }}-${{ hashFiles('fpm.toml', 'CMakeLists.txt') }}-${{ github.sha }}
+          restore-keys: |
+            build-${{ env.FO_COMMIT }}-${{ hashFiles('fpm.toml', 'CMakeLists.txt') }}-
+            build-${{ env.FO_COMMIT }}-
+      - name: fo
+        run: |
+          # fo at main, built once per commit with fpm's release binary of the
+          # pinned checksum.
+          if [ ! -x "$FO_TOOLS/bin/fo" ]; then
+            mkdir -p "$FO_TOOLS/bin"
+            curl -fsSL -o "$FO_TOOLS/bin/fpm" \
+              "https://github.com/fortran-lang/fpm/releases/download/v$FPM_VERSION/fpm-$FPM_VERSION-linux-x86_64-gcc-12"
+            echo "2e50a8649ac4136b9cf6b63c5d1b01adf26c02eedc18f32e16261c0ce655d46d  $FO_TOOLS/bin/fpm" | sha256sum -c -
+            chmod +x "$FO_TOOLS/bin/fpm"
+            git init --quiet "$RUNNER_TEMP/fo-src"
+            git -C "$RUNNER_TEMP/fo-src" fetch --quiet --depth 1 https://github.com/lazy-fortran/fo.git "$FO_COMMIT"
+            git -C "$RUNNER_TEMP/fo-src" checkout --quiet FETCH_HEAD
+            (cd "$RUNNER_TEMP/fo-src" && "$FO_TOOLS/bin/fpm" install --profile release --prefix "$FO_TOOLS")
+          fi
+          echo "$FO_TOOLS/bin" >> "$GITHUB_PATH"
+      - name: Check
+        run: |
+          # Tests of permission errors need a user that file modes bind, so
+          # they do not run as the container's root.
+          useradd -u 1001 -m ci 2> /dev/null || true
+          chown -R ci "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          exec setpriv --reuid=ci --regid=ci --init-groups env HOME=/home/ci \
+            ./.github/ci/check
+  nightly:
+    # The whole suite takes longer than the six hours a hosted job may run,
+    # so it is split by declared test cost over parallel jobs.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     runs-on: ubuntu-latest
     container: gcc:16
     timeout-minutes: 360
@@ -122,13 +211,5 @@ jobs:
           useradd -u 1001 -m ci 2> /dev/null || true
           chown -R ci "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           git config --system --add safe.directory "$GITHUB_WORKSPACE"
-          exec setpriv --reuid=ci --regid=ci --init-groups env HOME=/home/ci sh -euc '
-            if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
-              [ -f .github/ci/check ] && exec ./.github/ci/check
-              fo build
-              exec fo test --since HEAD^
-            fi
-            [ -f .github/ci/nightly ] && exec ./.github/ci/nightly
-            [ -f .github/ci/verify ] && exec ./.github/ci/verify
-            fo build
-            FO_TEST_RERUN=1 exec fo test --all'
+          exec setpriv --reuid=ci --regid=ci --init-groups env HOME=/home/ci \
+            CI_SHARD=${{ matrix.shard }}/8 ./.github/ci/nightly
