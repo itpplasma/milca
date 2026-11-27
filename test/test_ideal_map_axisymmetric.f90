@@ -518,8 +518,8 @@ contains
         ! Quasi-Newton steps on the retained factor between Hessian
         ! assemblies reach the same requested gradient tolerance and the same
         ! exact-flux error (1e-3 relative) as one Hessian per iteration, with
-        ! fewer assemblies; with and without the Krylov step. Position gauge
-        ! (the 3D seed path).
+        ! fewer assemblies, and with the Krylov step fewer factorisations.
+        ! Position gauge (the 3D seed path).
         class(ideal_frozen_t), intent(in) :: field
         type(gs_state_t) :: gs
         type(ideal_map_t) :: map
@@ -554,8 +554,14 @@ contains
         end do
         if (report(1)%quasi_steps /= 0) error stop 'lagged: quasi step without option'
         if (minval(report(2:3)%quasi_steps) == 0) error stop 'lagged: no quasi step'
-        if (any(report(2:3)%hessians >= report(1)%hessians)) &
+        if (report(2)%hessians >= report(1)%hessians) &
             error stop 'lagged: no Hessian assembly saved'
+        ! With the Krylov step the iterates follow the near-null directions
+        ! by roundoff, and the number of assemblies depends on the compiler's
+        ! optimisation (44 at -O0, 61 at -O3, against 52 without either
+        ! option); its saving is in the factorisations.
+        if (report(3)%factorizations >= report(1)%factorizations) &
+            error stop 'lagged: no factorisation saved'
     end subroutine
 
     subroutine continuation_check(field)
