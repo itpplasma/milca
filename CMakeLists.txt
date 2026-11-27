@@ -1432,10 +1432,12 @@ foreach(check reference onsager collisionless banana pfirsch_schlueter estimate
 endforeach()
 # Minutes each: nine speed nodes of fine meshes and the Legendre reference;
 # energy_full and collision_identities with two species.
-foreach(check energy_test_particle energy_two_mesh energy_iterations energy_full
-        collision_identities)
+foreach(check energy_test_particle energy_two_mesh energy_iterations
+        energy_iterations_full energy_full energy_full_l_field collision_identities)
     add_test(NAME dk_hp_${check} COMMAND test_dk_hp ${check})
     milca_test_labels(dk_hp_${check} slow CLASSES continuum TARGETS test_dk_hp)
+    set_tests_properties(dk_hp_${check} PROPERTIES PROCESSORS 4
+        ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
 endforeach()
 add_executable(test_dk_pitch test/test_dk_pitch.f90)
 target_link_libraries(test_dk_pitch PRIVATE milca)
@@ -2284,8 +2286,20 @@ foreach(check energy_lorentz energy_manufactured energy_floor energy_width energ
 endforeach()
 add_executable(test_ntv_device test/test_ntv_device.f90)
 target_link_libraries(test_ntv_device PRIVATE milca_ntv_geometry)
-add_test(NAME ntv_device COMMAND test_ntv_device)
-milca_test_labels(ntv_device fast CLASSES apps TARGETS test_ntv_device)
+# One case per check: run together they took 13 minutes.
+foreach(check lorentz_limit preconditioned_sweep energy_coupled offset_rotation
+        failed_surface force_balance indicators hp_thin_matches_legendre
+        orbit_width_thin orbit_width_lost orbit_width_deposit_thin
+        orbit_width_deposit_narrow)
+    add_test(NAME ntv_device_${check} COMMAND test_ntv_device ${check})
+    milca_test_labels(ntv_device_${check} fast CLASSES apps TARGETS test_ntv_device)
+endforeach()
+foreach(check hp_adaptive orbit_width_deposit_adaptive)
+    add_test(NAME ntv_device_${check} COMMAND test_ntv_device ${check})
+    milca_test_labels(ntv_device_${check} slow CLASSES apps TARGETS test_ntv_device)
+    set_tests_properties(ntv_device_${check} PROPERTIES PROCESSORS 4
+        ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
+endforeach()
 add_test(NAME ntv_device_chart_invariance COMMAND test_ntv_device chart_invariance)
 milca_test_labels(ntv_device_chart_invariance fast CLASSES apps TARGETS test_ntv_device)
 add_test(NAME ntv_device_orbit_width_coupled COMMAND test_ntv_device orbit_width_coupled)

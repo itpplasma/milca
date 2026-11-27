@@ -38,8 +38,10 @@ program test_dk_hp
     case ('energy_test_particle'); ok = energy_test_particle()
     case ('energy_two_mesh'); ok = energy_two_mesh()
     case ('energy_density'); ok = energy_density()
-    case ('energy_iterations'); ok = energy_iterations()
-    case ('energy_full'); ok = energy_full()
+    case ('energy_iterations'); ok = energy_iterations(.true.)
+    case ('energy_iterations_full'); ok = energy_iterations(.false.)
+    case ('energy_full'); ok = energy_full(.true.)
+    case ('energy_full_l_field'); ok = energy_full(.false.)
     case ('collision_identities'); ok = collision_identities()
     case ('probe'); ok = probe()
     case ('ntv_scan'); ok = ntv_scan()
@@ -1235,9 +1237,11 @@ contains
     !> GMRES iterations of the test-particle and full kernels at the
     !> collisionality of the comparison case and 100 times above and below
     !> it, and the iteration limit.
-    logical function energy_iterations() result(ok)
+    logical function energy_iterations(test_particle) result(ok)
+        ! The test-particle model with the iteration cap, or the full one.
         use milca_dk_hp, only: HP_NO_CONVERGENCE
         use milca_dk_collop, only: COLLOP_TEST_PARTICLE, COLLOP_FULL
+        logical, intent(in) :: test_particle
         real(dp), parameter :: factor(3) = [1.0_dp, 1e2_dp, 1e-2_dp]
         type(hp_field_t) :: f
         type(hp_mesh_t) :: mesh(1)
@@ -1247,16 +1251,16 @@ contains
         call stage1_field(f)
         mesh(1) = energy_mesh(f, 2)
         ok = .true.
-        do model = COLLOP_TEST_PARTICLE, COLLOP_FULL
-            do i = 1, 3
-                call energy_run(energy_kappa*factor(i), model, mesh, &
-                    [1, 1, 1, 1, 1, 1, 1, 1, 1], kc, qc, node_r, its, status)
-                print '(a,i0,a,es9.2,a,i0,a,i0,a,es14.6)', 'model ', model, &
-                    ' nu_D/v at x = 1 ', energy_kappa*factor(i), ' status ', status, &
-                    ' iterations ', its, ' K11 ', kc(1, 1, 1)
-                ok = ok .and. status == HP_OK .and. its <= 60
-            end do
+        model = merge(COLLOP_TEST_PARTICLE, COLLOP_FULL, test_particle)
+        do i = 1, 3
+            call energy_run(energy_kappa*factor(i), model, mesh, &
+                [1, 1, 1, 1, 1, 1, 1, 1, 1], kc, qc, node_r, its, status)
+            print '(a,i0,a,es9.2,a,i0,a,i0,a,es14.6)', 'model ', model, &
+                ' nu_D/v at x = 1 ', energy_kappa*factor(i), ' status ', status, &
+                ' iterations ', its, ' K11 ', kc(1, 1, 1)
+            ok = ok .and. status == HP_OK .and. its <= 60
         end do
+        if (.not. test_particle) return
         call energy_run(energy_kappa, COLLOP_TEST_PARTICLE, mesh, [1, 1, 1, 1, 1, 1, 1, 1, 1], kc, qc, &
             node_r, its, status, max_its=2)
         print '(a,i0,a,l2)', 'max_iterations = 2: status ', status, ' pass', &
@@ -1340,9 +1344,12 @@ contains
     !> including the cross-species entries, which vanish without the field
     !> part. On the coarse mesh the field part truncated at l = 3 and 7
     !> agrees within 2e-2, at l = 1 the cross-species entries move by more.
-    logical function energy_full() result(ok)
+    logical function energy_full(fine) result(ok)
+        ! fine: the fine mesh at l_field 7 against the Legendre solver.
+        ! Otherwise the coarse-mesh l_field ladder 1, 3, 7.
         use milca_dk_ntv, only: ntv_surface_t, ntv_energy_coefficients, NTV_OK
         use milca_dk_collop, only: collop_species_t, collop_grid_t, COLLOP_FULL
+        logical, intent(in) :: fine
         real(dp), parameter :: tol = 2e-2_dp
         type(hp_field_t) :: f
         type(hp_mesh_t) :: mesh
@@ -1355,10 +1362,35 @@ contains
         integer :: its, status, a, b, j
 
         call stage1_field(f)
-        mesh = energy_mesh(f, 2)
-        call two_run(COLLOP_FULL, 7, mesh, kf, qf, its, status)
-        print '(a,i0,a,i0)', 'fine mesh, l_field 7: status ', status, ' GMRES iterations ', its
-        if (status /= HP_OK) error stop 'hp energy kernel failed'
+        if (fine) then
+            mesh = energy_mesh(f, 2)
+            call two_run(COLLOP_FULL, 7, mesh, kf, qf, its, status)
+            print '(a,i0,a,i0)', 'fine mesh, l_field 7: status ', status, &
+                ' GMRES iterations ', its
+            if (status /= HP_OK) error stop 'hp energy kernel failed'
+            sf%eps = 0.05_dp; sf%q = 2.2_dp; sf%k = 1/(sf%q*6.2_dp); sf%offset = 0
+            sf%n = 3; sf%m = [6]; sf%c = [(1e-3_dp, 0.0_dp)]
+            call two_species(energy_kappa, 3, 4, sp, lnl, grid)
+            call ntv_energy_coefficients(sf, sp, lnl, grid, COLLOP_FULL, 0.0_dp, 33, 48, &
+                kl, its, status, ql)
+            print '(a,i0,a,i0)', 'Legendre status ', status, ' GMRES iterations ', its
+            if (status /= NTV_OK) error stop 'ntv_energy_coefficients failed'
+            err = 0
+            do j = 1, 2
+                do b = 1, 2
+                    do a = 1, 2
+                        print '(a,3i2,a,2es14.6)', 'K(a,b,j)', a, b, j, &
+                            ' fine l=7, Legendre', kf(a, b, j), kl(a, b, j)
+                        print '(a,3i2,a,2es14.6)', 'q(a,b,j)', a, b, j, &
+                            ' fine l=7, Legendre', qf(a, b, j), ql(a, b, j)
+                        err = max(err, abs(kf(a, b, j) - kl(a, b, j))/abs(kl(a, b, j)), &
+                            abs(qf(a, b, j) - ql(a, b, j))/abs(ql(a, b, j)))
+                    end do
+                end do
+            end do
+            ok = below('largest relative difference to Legendre, fine mesh', err, 2e-4_dp)
+            return
+        end if
         mesh = energy_mesh(f, 1)
         call two_run(COLLOP_FULL, 3, mesh, k3, q3, its, status)
         print '(a,i0,a,i0)', 'l_field 3: status ', status, ' GMRES iterations ', its
@@ -1369,37 +1401,21 @@ contains
         call two_run(COLLOP_FULL, 1, mesh, k1, q1, its, status)
         print '(a,i0,a,i0)', 'l_field 1: status ', status, ' GMRES iterations ', its
         if (status /= HP_OK) error stop 'hp energy kernel failed'
-
-        sf%eps = 0.05_dp; sf%q = 2.2_dp; sf%k = 1/(sf%q*6.2_dp); sf%offset = 0
-        sf%n = 3; sf%m = [6]; sf%c = [(1e-3_dp, 0.0_dp)]
-        call two_species(energy_kappa, 3, 4, sp, lnl, grid)
-        call ntv_energy_coefficients(sf, sp, lnl, grid, COLLOP_FULL, 0.0_dp, 33, 48, kl, its, &
-            status, ql)
-        print '(a,i0,a,i0)', 'Legendre status ', status, ' GMRES iterations ', its
-        if (status /= NTV_OK) error stop 'ntv_energy_coefficients failed'
-
-        ok = .true.
-        err = 0
         cross1 = huge(1.0_dp)
         do j = 1, 2
             do b = 1, 2
                 do a = 1, 2
-                    print '(a,3i2,a,4es14.6)', 'K(a,b,j)', a, b, j, ' fine l=7, l=3, l=7, l=1', &
-                        kf(a, b, j), k3(a, b, j), k7(a, b, j), k1(a, b, j)
-                    print '(a,3i2,a,es14.6)', 'K(a,b,j)', a, b, j, ' Legendre', kl(a, b, j)
-                    print '(a,3i2,a,4es14.6)', 'q(a,b,j)', a, b, j, ' fine l=7, l=3, l=7, l=1', &
-                        qf(a, b, j), q3(a, b, j), q7(a, b, j), q1(a, b, j)
-                    print '(a,3i2,a,es14.6)', 'q(a,b,j)', a, b, j, ' Legendre', ql(a, b, j)
-                    err = max(err, abs(kf(a, b, j) - kl(a, b, j))/abs(kl(a, b, j)), &
-                        abs(qf(a, b, j) - ql(a, b, j))/abs(ql(a, b, j)))
+                    print '(a,3i2,a,3es14.6)', 'K(a,b,j)', a, b, j, ' l=3, l=7, l=1', &
+                        k3(a, b, j), k7(a, b, j), k1(a, b, j)
+                    print '(a,3i2,a,3es14.6)', 'q(a,b,j)', a, b, j, ' l=3, l=7, l=1', &
+                        q3(a, b, j), q7(a, b, j), q1(a, b, j)
                     if (a /= b) cross1 = min(cross1, abs(k1(a, b, j) - k3(a, b, j)) &
                         /abs(k3(a, b, j)), abs(q1(a, b, j) - q3(a, b, j))/abs(q3(a, b, j)))
                 end do
             end do
         end do
-        ok = below('largest relative difference to Legendre, fine mesh', err, 2e-4_dp)
         ok = below('l_field 7 against 3, relative', max(maxval(abs(k7 - k3)/abs(k3)), &
-            maxval(abs(q7 - q3)/abs(q3))), tol) .and. ok
+            maxval(abs(q7 - q3)/abs(q3))), tol)
         print '(a,es10.3,a,es10.3)', 'smallest cross-species change at l_field 1 ', cross1, &
             ' above ', tol
         ok = ok .and. cross1 > tol
