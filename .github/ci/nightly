@@ -3,11 +3,12 @@
 # splits it over parallel jobs and sets CI_SHARD=K/N, and this job runs part K,
 # balanced by the tests' declared TIMEOUT times PROCESSORS. The log ends with
 # the slowest tests, which survive when the server cuts the middle of a long
-# log.
+# log. Tests labelled large-memory exceed the 16 GB of a hosted runner.
 set -eu
 export OPENBLAS_NUM_THREADS=1 MPLBACKEND=Agg FO_TEST_RERUN=1
 fo build
 if [ -n "${CI_SHARD:-}" ]; then
-    exec fo test --all --durations 60 --partition "cost:$CI_SHARD"
+    exec fo test --all -LE large-memory --durations 60 \
+        --partition "cost:$CI_SHARD"
 fi
-exec fo test --all --durations 60
+exec fo test --all -LE large-memory --durations 60

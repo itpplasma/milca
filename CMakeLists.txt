@@ -3406,9 +3406,17 @@ set_tests_properties(nonnested_coupled_landreman_family1_p2
     PROPERTIES TIMEOUT 1800 ENVIRONMENT "OMP_NUM_THREADS=4")
 
 # G0: retain the published P3 high-ratio closed-line oracle and its gates.
+# Its nr = 16 level peaks at 26 GB, above a 16 GB hosted runner, so the
+# nightly run skips the large-memory label and runs the P2 case, 10.5 GB.
 add_test(NAME nonnested_coupled_closed_line_p3
     COMMAND test_nonnested_landreman 3 1e6 3 4)
+add_test(NAME nonnested_coupled_closed_line_p2
+    COMMAND test_nonnested_landreman 2 1e6 3 4)
 set_tests_properties(nonnested_coupled_closed_line_p3 PROPERTIES
+    LABELS "slow;large-memory")
+set_tests_properties(nonnested_coupled_closed_line_p2 PROPERTIES LABELS slow)
+set_tests_properties(nonnested_coupled_closed_line_p3
+    nonnested_coupled_closed_line_p2 PROPERTIES
     TIMEOUT 3600 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1" PROCESSORS 4)
 # NN1 on a phi-dependent (mapped) domain: docs/nn1-mapped-3d.md.
 target_sources(milca_mhd PRIVATE src/mhd/nonnested_mapped.f90
