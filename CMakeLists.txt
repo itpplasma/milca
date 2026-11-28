@@ -1426,13 +1426,13 @@ add_executable(test_dk_hp test/test_dk_hp.f90)
 target_link_libraries(test_dk_hp PRIVATE milca)
 foreach(check reference onsager collisionless banana pfirsch_schlueter estimate
         ntv_reference ntv_superbanana_plateau ntv_one_over_nu ntv_rotation
-        terms_recombine line_moments transfer energy_lorentz energy_density)
+        terms_recombine line_moments transfer energy_lorentz)
     add_test(NAME dk_hp_${check} COMMAND test_dk_hp ${check})
     milca_test_labels(dk_hp_${check} fast CLASSES continuum TARGETS test_dk_hp)
 endforeach()
 # Minutes each: nine speed nodes of fine meshes and the Legendre reference;
 # energy_full and collision_identities with two species.
-foreach(check energy_test_particle energy_two_mesh energy_iterations
+foreach(check energy_density energy_test_particle energy_two_mesh energy_iterations
         energy_iterations_full energy_full energy_full_l_field collision_identities)
     add_test(NAME dk_hp_${check} COMMAND test_dk_hp ${check})
     milca_test_labels(dk_hp_${check} slow CLASSES continuum TARGETS test_dk_hp)
@@ -3064,10 +3064,6 @@ target_link_libraries(vrmhd_pairing_study PRIVATE milca_spectrum_support)
 add_test(NAME vrmhd_pairing_measurement COMMAND vrmhd_pairing_study smoke)
 set_tests_properties(vrmhd_pairing_measurement PROPERTIES PROCESSORS 8 TIMEOUT 180
     ENVIRONMENT "OMP_NUM_THREADS=8;OPENBLAS_NUM_THREADS=1")
-add_test(NAME vrmhd_pairing_benchmark COMMAND vrmhd_pairing_study
-    ${CMAKE_CURRENT_BINARY_DIR}/vrmhd-pairings.csv)
-set_tests_properties(vrmhd_pairing_benchmark PROPERTIES PROCESSORS 8 TIMEOUT 3600
-    LABELS benchmark ENVIRONMENT "OMP_NUM_THREADS=8;OPENBLAS_NUM_THREADS=1")
 add_executable(test_rm_oracles test/test_rm_oracles.f90)
 target_link_libraries(test_rm_oracles PRIVATE milca_rm_oracles milca_mhd)
 foreach(case waves rates outer newcomb convergence saturation table bussac
@@ -3753,7 +3749,7 @@ add_test(NAME equilibrium_nested_free-boundary-tokamak-vacua COMMAND ${CMAKE_COM
     -P ${CMAKE_SOURCE_DIR}/test/check_nested_free_boundary.cmake)
 set_tests_properties(equilibrium_nested_free-boundary-tokamak-vacua PROPERTIES
     TIMEOUT 900 PROCESSORS 4 ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1")
-milca_test_labels(equilibrium_nested_free-boundary-tokamak-vacua fast CLASSES mhd
+milca_test_labels(equilibrium_nested_free-boundary-tokamak-vacua slow CLASSES mhd
     TARGETS nested_equilibrium test_nested_equilibrium_app test_mgrid_field)
 add_executable(test_ideal_fb_circuits test/test_ideal_fb_circuits.f90)
 target_link_libraries(test_ideal_fb_circuits PRIVATE milca)

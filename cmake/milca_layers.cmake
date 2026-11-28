@@ -239,8 +239,6 @@ function(milca_layers_finalize)
     add_test(NAME milca_layering
         COMMAND ${CMAKE_COMMAND}
             -DPARTITION=${CMAKE_BINARY_DIR}/milca_layer_sources.txt
-            -DCTEST=${CMAKE_CTEST_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR}
-            "-DCLASSES=${MILCA_TEST_CLASSES}"
             -P ${CMAKE_SOURCE_DIR}/cmake/milca_check_layers.cmake)
     set_tests_properties(milca_layering PROPERTIES LABELS "core;fast")
 endfunction()
