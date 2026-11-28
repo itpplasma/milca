@@ -1103,10 +1103,9 @@ in the axial-velocity coupling. This is independent of the generalized zero
 classification. The smallest shear direction is also checked against the
 production matrix-free Jacobian.
 
-The full study is registered as `vrmhd_pairing_benchmark`, with the `benchmark`
-and `performance` labels and without `rm2`; the small admission/measurement
-smoke test remains separate. Reproduce the table with `BLA_VENDOR=OpenBLAS`,
-eight OpenMP threads and one OpenBLAS thread:
+The test `vrmhd_pairing_measurement` runs a small case of the study. Reproduce
+the full table with `BLA_VENDOR=OpenBLAS`, eight OpenMP threads and one OpenBLAS
+thread:
 
 ```sh
 cmake --build build --target vrmhd_pairing_study -j 8

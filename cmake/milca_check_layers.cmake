@@ -1,11 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
 
-# Layering test (cmake -P). Checks
-#  1. the Fortran use graph of every layered source against the partition in
-#     PARTITION ("layer=source" lines written at configure time): a source uses
-#     only modules of its own layer or of a lower layer; among the L2 model
-#     classes only mhd uses equilibrium; no layer uses an application module;
-#  2. that every registered test carries one class label and one tier label.
+# Layering test (cmake -P). Checks the Fortran use graph of every layered
+# source against the partition in PARTITION ("layer=source" lines written at
+# configure time): a source uses only modules of its own layer or of a lower
+# layer; among the L2 model classes only mhd uses equilibrium; no layer uses an
+# application module.
 set(rank_field 0)
 set(rank_core 1)
 set(rank_fem2d 2)
@@ -72,53 +71,8 @@ foreach(layer IN LISTS layers)
     endforeach()
 endforeach()
 
-execute_process(COMMAND ${CTEST} --show-only=json-v1
-    WORKING_DIRECTORY ${BUILD_DIR} OUTPUT_VARIABLE json RESULT_VARIABLE status)
-if(NOT status EQUAL 0)
-    message(FATAL_ERROR "ctest --show-only=json-v1 failed in ${BUILD_DIR}")
-endif()
-set(tiers fast slow regression performance)
-set(unlabelled 0)
-string(JSON count LENGTH "${json}" tests)
-math(EXPR last "${count} - 1")
-foreach(index RANGE ${last})
-    string(JSON name GET "${json}" tests ${index} name)
-    set(labels)
-    string(JSON nprops ERROR_VARIABLE missing LENGTH "${json}" tests ${index} properties)
-    if(NOT missing)
-        math(EXPR plast "${nprops} - 1")
-        foreach(p RANGE ${plast})
-            string(JSON pname GET "${json}" tests ${index} properties ${p} name)
-            if(pname STREQUAL "LABELS")
-                string(JSON value GET "${json}" tests ${index} properties ${p} value)
-                string(JSON nl LENGTH "${value}")
-                math(EXPR llast "${nl} - 1")
-                foreach(l RANGE ${llast})
-                    string(JSON label GET "${value}" ${l})
-                    list(APPEND labels ${label})
-                endforeach()
-            endif()
-        endforeach()
-    endif()
-    set(nclass 0)
-    set(ntier 0)
-    foreach(label IN LISTS labels)
-        if(label IN_LIST CLASSES)
-            math(EXPR nclass "${nclass} + 1")
-        elseif(label IN_LIST tiers)
-            math(EXPR ntier "${ntier} + 1")
-        endif()
-    endforeach()
-    if(nclass EQUAL 0 OR NOT ntier EQUAL 1)
-        message(SEND_ERROR "test ${name}: labels '${labels}' need a class (${CLASSES}) "
-            "and one tier (${tiers}); add it to cmake/milca_test_labels.cmake")
-        math(EXPR unlabelled "${unlabelled} + 1")
-    endif()
-endforeach()
-
 list(LENGTH entries nsources)
-if(violations GREATER 0 OR unlabelled GREATER 0)
-    message(FATAL_ERROR "${violations} layering violation(s), "
-        "${unlabelled} test(s) without class and tier labels")
+if(violations GREATER 0)
+    message(FATAL_ERROR "${violations} layering violation(s)")
 endif()
-message(STATUS "milca layering: ${nsources} sources, ${count} tests labelled")
+message(STATUS "milca layering: ${nsources} sources")

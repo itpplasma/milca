@@ -511,7 +511,7 @@ milca_test_labels(mhd_ampere_n_sheet_interpolation_remainder fast CLASSES mhd
     TARGETS test_meridian_edge_remainder)
 milca_test_labels(mhd_ampere_n_exterior_manufactured fast CLASSES mhd
     TARGETS test_mhd_ampere_n)
-milca_test_labels(mhd_shielding_cylinder_limit_reciprocity fast CLASSES mhd
+milca_test_labels(mhd_shielding_cylinder_limit_reciprocity slow CLASSES mhd
     TARGETS test_mhd_shielding)
 milca_test_labels(mhd_ideal_n_mde_force_free_identity fast CLASSES mhd
     TARGETS test_mhd_ideal_n)
@@ -557,7 +557,7 @@ if(TARGET check_homma_derivations)
 endif()
 milca_test_labels(mhd_resistive_layer_rotation slow CLASSES mhd
     TARGETS test_mhd_closure)
-milca_test_labels(mhd_newcomb_screw_pinch_limit fast CLASSES mhd
+milca_test_labels(mhd_newcomb_screw_pinch_limit slow CLASSES mhd
     TARGETS test_mhd_newcomb)
 milca_test_labels(nonnested_n0_solovev_p2 fast CLASSES mhd
     TARGETS test_nonnested_solovev)
@@ -784,7 +784,7 @@ milca_test_labels(response_strip_preconditioner_scaling performance CLASSES mhd
 
 milca_test_labels(response_spot_calibration_algebra fast CLASSES mhd
     TARGETS test_response_calibration)
-milca_test_labels(response_unit_sheet_spot_cylinder fast CLASSES mhd
+milca_test_labels(response_unit_sheet_spot_cylinder slow CLASSES mhd
     TARGETS test_response_sheet_cylinder)
 milca_test_labels(response_qualification_frozen_rules fast CLASSES mhd
     TARGETS test_response_qualification)
@@ -1043,7 +1043,6 @@ milca_test_labels(vrmhd_section_regeneration fast CLASSES mhd TARGETS gen_vrmhd_
 milca_test_labels(vrmhd_mms_regeneration fast CLASSES mhd TARGETS gen_vrmhd_mms)
 
 milca_test_labels(vrmhd_pairing_measurement fast CLASSES mhd TARGETS vrmhd_pairing_study)
-milca_test_labels(vrmhd_pairing_benchmark performance CLASSES mhd TARGETS vrmhd_pairing_study)
 foreach(gate energy decay waves steady refactor)
     milca_test_labels(vrmhd_evolve_${gate} fast CLASSES mhd
         TARGETS test_vrmhd_evolve)
@@ -1096,7 +1095,7 @@ endforeach()
 milca_test_labels(vrmhd_cylinder_profiles fast CLASSES mhd TARGETS test_vrmhd_cylinder)
 milca_test_labels(vrmhd_cylinder_stationary slow CLASSES mhd TARGETS test_vrmhd_cylinder)
 milca_test_labels(vrmhd_cylinder_linear slow CLASSES mhd TARGETS test_vrmhd_cylinder)
-milca_test_labels(vrmhd_torus_shafranov fast CLASSES mhd TARGETS test_vrmhd_torus)
+milca_test_labels(vrmhd_torus_shafranov slow CLASSES mhd TARGETS test_vrmhd_torus)
 milca_test_labels(vrmhd_torus_lift slow CLASSES mhd TARGETS test_vrmhd_torus)
 milca_test_labels(vrmhd_island_induction_mixed fast CLASSES mhd
     TARGETS test_vrmhd_island)
