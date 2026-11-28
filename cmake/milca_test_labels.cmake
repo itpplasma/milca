@@ -932,6 +932,8 @@ milca_test_labels(island_closure_report fast CLASSES mhd TARGETS test_island_clo
 milca_test_labels(island_closure_drive fast CLASSES mhd TARGETS test_island_closure)
 milca_test_labels(nonnested_coupled_closed_line_p3 slow CLASSES mhd
     TARGETS test_nonnested_landreman)
+milca_test_labels(nonnested_coupled_closed_line_p2 slow CLASSES mhd
+    TARGETS test_nonnested_landreman)
 
 milca_test_labels(nonnested_g6_external_comparison_contract fast CLASSES mhd
     TARGETS test_g6_external_comparison)
